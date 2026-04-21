@@ -30,7 +30,7 @@ def main() -> None:
         fh = fs.create(file_path, 0o644)
         written = fs.write(file_path, payload, 0, fh)
         assert written == len(payload), written
-        assert not fs.is_write_buffer_dirty(fh), fs._dirty_write_buffers
+        assert not fs.is_write_buffer_dirty(fh), "write buffer should be clean after auto-flush"
         stat = fs.getattr(file_path)
         assert stat["st_size"] == len(payload), stat
         assert fs.read(file_path, len(payload), 0, fh) == payload

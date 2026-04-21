@@ -57,6 +57,15 @@ def main() -> None:
             raise AssertionError("expected invalid workers_write to fail fast")
 
         try:
+            DBFS(dsn, db_config, runtime_config={"persist_buffer_chunk_blocks": "0"})
+        except ValueError as exc:
+            message = str(exc)
+            if "persist_buffer_chunk_blocks" not in message:
+                raise AssertionError(message)
+        else:
+            raise AssertionError("expected invalid persist_buffer_chunk_blocks to fail fast")
+
+        try:
             DBFS(dsn, db_config, runtime_config={"synchronous_commit": "banana"})
         except ValueError as exc:
             message = str(exc)

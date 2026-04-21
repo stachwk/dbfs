@@ -150,8 +150,9 @@ class StorageSupport:
             return
 
         chunk_size = max(1, int(getattr(self.owner, "persist_buffer_chunk_blocks", self.PERSIST_BUFFER_CHUNK_BLOCKS) or self.PERSIST_BUFFER_CHUNK_BLOCKS))
-        for start in range(0, len(blocks), chunk_size):
-            chunk = blocks[start:start + chunk_size]
+        ordered_blocks = sorted(blocks, key=lambda item: item[1])
+        for start in range(0, len(ordered_blocks), chunk_size):
+            chunk = ordered_blocks[start:start + chunk_size]
             execute_values(
                 cur,
                 """
@@ -317,7 +318,6 @@ class StorageSupport:
         block_size = self.owner.block_size
         total_blocks = (file_size + block_size - 1) // block_size if file_size > 0 else 0
         state["dirty_blocks"].update(range(total_blocks))
-        self.owner._dirty_write_buffers[file_id] = None
 
     def mark_write_range_dirty(self, file_id, start_offset, end_offset):
         if file_id is None or end_offset <= start_offset:
@@ -328,12 +328,6 @@ class StorageSupport:
         first_block = max(0, start_offset // block_size)
         last_block = max(0, (end_offset - 1) // block_size)
         state["dirty_blocks"].update(range(first_block, last_block + 1))
-
-        compat_dirty = self.owner._dirty_write_buffers.get(file_id)
-        if compat_dirty is None and file_id in self.owner._dirty_write_buffers:
-            return
-        compat_dirty = self.owner._dirty_write_buffers.setdefault(file_id, set())
-        compat_dirty.update(range(first_block, last_block + 1))
 
     def dirty_write_buffer_bytes(self, file_id):
         # Liczy tylko logiczne bajty dirty, bez pelnego bufora w RAM
@@ -373,7 +367,6 @@ class StorageSupport:
         if state is not None:
             state["dirty_blocks"].clear()
             state["truncate_pending"] = False
-        self.owner._dirty_write_buffers.pop(file_id, None)
 
     def is_write_buffer_dirty(self, file_id):
         # Sprawdza czy sa dirty bloki
@@ -396,9 +389,10 @@ class StorageSupport:
         total_blocks = (file_size + block_size - 1) // block_size if file_size > 0 else 0
 
         overlay_blocks = state["overlay_blocks"]
+        ordered_dirty_blocks = sorted(dirty_blocks)
         blocks = []
 
-        for block_index in dirty_blocks:
+        for block_index in ordered_dirty_blocks:
             if block_index >= total_blocks:
                 # Blok poza EOF nie powinien byc upsertowany
                 continue
@@ -423,22 +417,23 @@ class StorageSupport:
         for attempt in range(2):
             try:
                 with self.owner.db_connection() as conn, conn.cursor() as cur:
-                    if total_blocks == 0:
-                        cur.execute(
-                            """
-                            DELETE FROM data_blocks
-                            WHERE id_file = %s
-                            """,
-                            (file_id,),
-                        )
-                    else:
-                        cur.execute(
-                            """
-                            DELETE FROM data_blocks
-                            WHERE id_file = %s AND _order >= %s
-                            """,
-                            (file_id, total_blocks),
-                        )
+                    if truncate_pending:
+                        if total_blocks == 0:
+                            cur.execute(
+                                """
+                                DELETE FROM data_blocks
+                                WHERE id_file = %s
+                                """,
+                                (file_id,),
+                            )
+                        else:
+                            cur.execute(
+                                """
+                                DELETE FROM data_blocks
+                                WHERE id_file = %s AND _order >= %s
+                                """,
+                                (file_id, total_blocks),
+                            )
 
                     if blocks:
                         self._persist_block_chunks(cur, blocks)
@@ -471,15 +466,12 @@ class StorageSupport:
         )
 
         # Najbezpieczniejszy wariant: po flush usun stan z RAM
-        self.owner._dirty_write_buffers.pop(file_id, None)
         self.drop_write_state(file_id)
         self.clear_read_cache(file_id)
         self.owner.invalidate_metadata_cache(include_statfs=True)
 
     def cleanup(self):
         # Czyci wszystkie stany tymczasowe
-        self.owner.write_cache.clear()
-        self.owner._dirty_write_buffers.clear()
         if hasattr(self.owner, "_write_states"):
             self.owner._write_states.clear()
         self.clear_read_cache()
@@ -625,7 +617,6 @@ class StorageSupport:
 
         if length < old_size:
             state["truncate_pending"] = True
-            self.owner._dirty_write_buffers[file_id] = None
 
         state["file_size"] = int(length)
 
@@ -648,11 +639,6 @@ class StorageSupport:
             if valid_len < block_size:
                 block[valid_len:] = b"\x00" * (block_size - valid_len)
             state["dirty_blocks"].add(last_block)
-
-            compat_dirty = self.owner._dirty_write_buffers.get(file_id)
-            if not (compat_dirty is None and file_id in self.owner._dirty_write_buffers):
-                compat_dirty = self.owner._dirty_write_buffers.setdefault(file_id, set())
-                compat_dirty.add(last_block)
 
     def _copy_segments(self, off_in, off_out, length, block_size, workers):
         if length <= 0:

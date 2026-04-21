@@ -10,6 +10,7 @@ This file records the current comparison baselines for the main performance-sens
 - When a tuning change matters, the repository should record the before/after numbers here and in `TODO.md`.
 - DBFS assumes transactional PostgreSQL connections with `autocommit` disabled; the practical operating floor is PostgreSQL 9.5+, `read committed`, and `max_connections` above `pool_max_connections + 2`.
 - The next write-path comparison should separate `write` without `fsync`, `write` with `fsync`, and a larger `THROUGHPUT_BLOCK_SIZE` batch so the dominant bottleneck becomes explicit.
+- `persist_buffer_chunk_blocks` is now a separate runtime knob for flush batching; larger batches can reduce SQL round-trips on dirty-write finalization.
 - `synchronous_commit` is now a separate runtime knob; the latest local comparison was mixed across block sizes, so it is exposed for tuning rather than forced as the default.
 - PostgreSQL session normalization to UTC is now initialized once per physical pooled connection; the measured steady-state overhead is effectively the pool acquire/release plus a cheap `rollback()`.
 
@@ -29,13 +30,20 @@ Observed on a mounted DBFS instance:
 
 Observed on the current mounted DBFS instance with `DBFS_PROFILE_IO=1`:
 
-- `write_seconds=0.001677`
-- `persist_seconds=0.004503`
-- `flush_seconds=0.004554`
-- `finalization_seconds=0.009057`
+- `persist_buffer_chunk_blocks=128`
+  - `write_seconds=0.002033`
+  - `persist_seconds=0.004535`
+  - `flush_seconds=0.004594`
+  - `finalization_seconds=0.009129`
+- `persist_buffer_chunk_blocks=512`
+  - `write_seconds=0.001751`
+  - `persist_seconds=0.004242`
+  - `flush_seconds=0.004312`
+  - `finalization_seconds=0.008554`
 
+The larger chunk setting shaved a bit off the finalization path on this run, so `bulk_write` now uses the larger batch size.
 The write side itself is now effectively negligible in this profile; the remaining work is concentrated in `persist_buffer()` and `flush()`.
-The latest small win came from switching block upserts inside `persist_buffer()` to PostgreSQL `execute_values()`, which shaved a bit off the total finalization path without changing write semantics.
+The latest small win came from switching block upserts inside `persist_buffer()` to PostgreSQL `execute_values()` and from making the batch size configurable, which shaved a bit off the total finalization path without changing write semantics.
 
 ## Throughput
 

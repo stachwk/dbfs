@@ -72,8 +72,6 @@ class DBFS(Operations):
         self.pool_max_connections = self.backend.pool_max_connections
         self.connection_pool = self.backend.connection_pool
         self.xattr_acl = XattrAclSupport(self)
-        self.write_cache = {}
-        self._dirty_write_buffers = {}
         self.default_block_size = 4096
         self.block_size = self.load_block_size()
         self.default_max_fs_size_bytes = 10 * 1024**3
@@ -86,6 +84,7 @@ class DBFS(Operations):
         self.workers_read_min_blocks = self.resolve_workers_read_min_blocks()
         self.workers_write = self.resolve_workers_write()
         self.workers_write_min_blocks = self.resolve_workers_write_min_blocks()
+        self.persist_buffer_chunk_blocks = self.resolve_persist_buffer_chunk_blocks()
         self.metadata_cache_ttl_seconds = self.resolve_metadata_cache_ttl_seconds()
         self.statfs_cache_ttl_seconds = self.resolve_statfs_cache_ttl_seconds()
         self.lock_backend = self.resolve_lock_backend()
@@ -336,6 +335,19 @@ class DBFS(Operations):
             raise ValueError("DBFS_WORKERS_WRITE_MIN_BLOCKS must be >= 1")
         return value
 
+    def resolve_persist_buffer_chunk_blocks(self):
+        raw_value = os.environ.get("DBFS_PERSIST_BUFFER_CHUNK_BLOCKS")
+        if raw_value is None or raw_value == "":
+            value = self.runtime_config_getint("persist_buffer_chunk_blocks", 128)
+            return max(1, int(value) if value is not None else 128)
+        try:
+            value = int(raw_value)
+        except Exception:
+            return 128
+        if value < 1:
+            raise ValueError("DBFS_PERSIST_BUFFER_CHUNK_BLOCKS must be >= 1")
+        return value
+
     def resolve_metadata_cache_ttl_seconds(self):
         raw_value = os.environ.get("DBFS_METADATA_CACHE_TTL_SECONDS")
         if raw_value is None or raw_value == "":
@@ -542,11 +554,11 @@ class DBFS(Operations):
             return
         self._destroyed = True
 
-        file_ids_to_flush = set(self._dirty_write_buffers.keys())
+        file_ids_to_flush = set()
 
         if hasattr(self, "_write_states"):
             for file_id, state in self._write_states.items():
-                if state.get("dirty_blocks"):
+                if state.get("dirty_blocks") or state.get("truncate_pending", False):
                     file_ids_to_flush.add(file_id)
 
         for file_id in list(file_ids_to_flush):
@@ -1535,7 +1547,6 @@ class DBFS(Operations):
         if file_id is not None:
             self.clear_write_buffer_dirty(file_id)
             self.storage.drop_write_state(file_id)
-            self.write_cache.pop(file_id, None)
         self.close_file_handle(fh)
         self.clear_timestamp_touch_state(resource_key)
         self.clear_read_sequence_state(fh)

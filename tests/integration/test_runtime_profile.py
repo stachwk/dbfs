@@ -36,6 +36,7 @@ def main() -> None:
         assert fs.workers_read_min_blocks == 8, fs.workers_read_min_blocks
         assert fs.workers_write == 8, fs.workers_write
         assert fs.workers_write_min_blocks == 8, fs.workers_write_min_blocks
+        assert fs.persist_buffer_chunk_blocks == 512, fs.persist_buffer_chunk_blocks
         assert fs.metadata_cache_ttl_seconds == 2, fs.metadata_cache_ttl_seconds
         assert fs.statfs_cache_ttl_seconds == 2, fs.statfs_cache_ttl_seconds
         with fs.backend.connection() as conn, conn.cursor() as cur:

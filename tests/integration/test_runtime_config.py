@@ -40,6 +40,7 @@ def main():
         "workers_read_min_blocks": 8,
         "workers_write": 4,
         "workers_write_min_blocks": 8,
+        "persist_buffer_chunk_blocks": 128,
         "metadata_cache_ttl_seconds": 1,
         "statfs_cache_ttl_seconds": 2,
         "synchronous_commit": "on",
@@ -56,6 +57,7 @@ def main():
     assert fs.workers_read_min_blocks == expected["workers_read_min_blocks"], fs.workers_read_min_blocks
     assert fs.workers_write == expected["workers_write"], fs.workers_write
     assert fs.workers_write_min_blocks == expected["workers_write_min_blocks"], fs.workers_write_min_blocks
+    assert fs.persist_buffer_chunk_blocks == expected["persist_buffer_chunk_blocks"], fs.persist_buffer_chunk_blocks
     assert fs.metadata_cache_ttl_seconds == expected["metadata_cache_ttl_seconds"], fs.metadata_cache_ttl_seconds
     assert fs.statfs_cache_ttl_seconds == expected["statfs_cache_ttl_seconds"], fs.statfs_cache_ttl_seconds
     assert fs.synchronous_commit == expected["synchronous_commit"], fs.synchronous_commit
