@@ -1,4 +1,5 @@
 CREATE SCHEMA IF NOT EXISTS public;
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 
 CREATE TABLE IF NOT EXISTS directories (
     id_directory SERIAL PRIMARY KEY,

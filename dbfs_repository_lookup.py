@@ -81,30 +81,56 @@ class NamespaceRepositoryLookup:
         parent_id = self.get_dir_id(parent_path)
 
         with dbfs.db_connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT kind, entry_id FROM (
-                    SELECT 1 AS precedence, 'hardlink' AS kind, h.id_hardlink AS entry_id
-                    FROM hardlinks h
-                    WHERE h.name = %s AND h.id_directory IS NOT DISTINCT FROM %s
-                    UNION ALL
-                    SELECT 2 AS precedence, 'symlink' AS kind, s.id_symlink AS entry_id
-                    FROM symlinks s
-                    WHERE s.name = %s AND s.id_parent IS NOT DISTINCT FROM %s
-                    UNION ALL
-                    SELECT 3 AS precedence, 'file' AS kind, f.id_file AS entry_id
-                    FROM files f
-                    WHERE f.name = %s AND f.id_directory IS NOT DISTINCT FROM %s
-                    UNION ALL
-                    SELECT 4 AS precedence, 'dir' AS kind, d.id_directory AS entry_id
-                    FROM directories d
-                    WHERE d.name = %s AND d.id_parent IS NOT DISTINCT FROM %s
-                ) entries
-                ORDER BY precedence
-                LIMIT 1
-                """,
-                (name, parent_id, name, parent_id, name, parent_id, name, parent_id),
-            )
+            if parent_id is None:
+                cur.execute(
+                    """
+                    SELECT kind, entry_id FROM (
+                        SELECT 1 AS precedence, 'hardlink' AS kind, h.id_hardlink AS entry_id
+                        FROM hardlinks h
+                        WHERE h.name = %s AND h.id_directory IS NULL
+                        UNION ALL
+                        SELECT 2 AS precedence, 'symlink' AS kind, s.id_symlink AS entry_id
+                        FROM symlinks s
+                        WHERE s.name = %s AND s.id_parent IS NULL
+                        UNION ALL
+                        SELECT 3 AS precedence, 'file' AS kind, f.id_file AS entry_id
+                        FROM files f
+                        WHERE f.name = %s AND f.id_directory IS NULL
+                        UNION ALL
+                        SELECT 4 AS precedence, 'dir' AS kind, d.id_directory AS entry_id
+                        FROM directories d
+                        WHERE d.name = %s AND d.id_parent IS NULL
+                    ) entries
+                    ORDER BY precedence
+                    LIMIT 1
+                    """,
+                    (name, name, name, name),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT kind, entry_id FROM (
+                        SELECT 1 AS precedence, 'hardlink' AS kind, h.id_hardlink AS entry_id
+                        FROM hardlinks h
+                        WHERE h.name = %s AND h.id_directory = %s
+                        UNION ALL
+                        SELECT 2 AS precedence, 'symlink' AS kind, s.id_symlink AS entry_id
+                        FROM symlinks s
+                        WHERE s.name = %s AND s.id_parent = %s
+                        UNION ALL
+                        SELECT 3 AS precedence, 'file' AS kind, f.id_file AS entry_id
+                        FROM files f
+                        WHERE f.name = %s AND f.id_directory = %s
+                        UNION ALL
+                        SELECT 4 AS precedence, 'dir' AS kind, d.id_directory AS entry_id
+                        FROM directories d
+                        WHERE d.name = %s AND d.id_parent = %s
+                    ) entries
+                    ORDER BY precedence
+                    LIMIT 1
+                    """,
+                    (name, parent_id, name, parent_id, name, parent_id, name, parent_id),
+                )
             result = cur.fetchone()
             value = (parent_id, result[0], result[1]) if result else (parent_id, None, None)
             self._entry_cache[path] = value
