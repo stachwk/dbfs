@@ -56,7 +56,7 @@ The GitHub Actions workflow runs a small compile job plus a curated test matrix:
 - Special device node metadata is stored, but direct special-node execution semantics are still not a general-purpose focus.
 - `make test-all` is the main regression target; mount-heavy workflows are covered, but CI is still focused on a curated subset that is stable in automation.
 - Schema upgrades are currently conservative: `init` is idempotent and non-destructive, `upgrade` repairs missing schema state and restores the current version, but the repo does not yet ship a long chain of migration files.
-- DBFS normalizes timestamps through a UTC PostgreSQL session and UTC-aware conversions on the Python side so local timezone differences do not shift metadata. This is enforced per connection/session, not by relying on the database creation defaults.
+- DBFS normalizes timestamps through a UTC PostgreSQL session and UTC-aware conversions on the Python side so local timezone differences do not shift metadata. The UTC session setup is initialized once per physical pooled connection, not on every filesystem operation, and the database creation defaults are not relied on.
 
 License: MIT
 
@@ -75,6 +75,7 @@ PostgreSQL requirements for the current feature set:
 - `max_connections` should be comfortably above `pool_max_connections`; as a practical minimum, keep at least two extra server connections available for admin and concurrent DBFS clients
 - no special lock-manager parameters are required; the default `read committed` transaction isolation is sufficient
 - DBFS expects transactional PostgreSQL connections with `autocommit` disabled
+- DBFS initializes the UTC session state once per pooled physical connection and keeps the steady-state return path to a cheap `rollback()`
 - `sslmode=require` is enough for encrypted connections, and `verify-full` is appropriate if you also want certificate verification
 
 | Requirement | Value |

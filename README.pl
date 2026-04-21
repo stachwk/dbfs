@@ -55,7 +55,7 @@ Workflow GitHub Actions uruchamia krótki job kompilacyjny oraz wybrany matrix t
 - Metadane specjalnych urządzeń są zapisywane, ale pełna semantyka uruchamiania takich node'ów nie jest głównym celem projektu.
 - `make test-all` jest głównym targetem regresji; workflow mounta są pokryte, ale CI skupia się na wybranym zestawie stabilnym w automatyzacji.
 - Upgrade schematu jest na razie zachowawczy: `init` jest idempotentne i nie niszczy istniejących obiektów, `upgrade` naprawia brakujący stan schematu i przywraca bieżącą wersję, ale repo nie ma jeszcze długiego łańcucha plików migracji.
-- DBFS normalizuje timestampy przez sesję PostgreSQL ustawioną na UTC oraz konwersje po stronie Pythona, więc lokalne różnice stref czasowych nie przesuwają metadanych. To jest wymuszane na poziomie sesji połączenia, a nie przez domyślne ustawienia przy tworzeniu bazy.
+- DBFS normalizuje timestampy przez sesję PostgreSQL ustawioną na UTC oraz konwersje po stronie Pythona, więc lokalne różnice stref czasowych nie przesuwają metadanych. Ustawienie UTC jest inicjalizowane raz na fizyczne połączenie z puli, a nie przy każdej operacji filesystemu, i nie opiera się na domyślnych ustawieniach tworzenia bazy.
 
 Licencja: MIT
 
@@ -74,6 +74,7 @@ Wymagania PostgreSQL dla obecnego zestawu funkcji:
 - `max_connections` powinno być wyraźnie większe niż `pool_max_connections`; jako praktyczne minimum zostaw co najmniej dwa dodatkowe połączenia dla administracji i równoległych klientów DBFS
 - nie są potrzebne specjalne parametry lock managera; domyślne `read committed` wystarcza
 - DBFS oczekuje transakcyjnych połączeń PostgreSQL z wyłączonym `autocommit`
+- DBFS inicjalizuje stan sesji UTC raz na fizyczne połączenie z puli i w stanie ustalonym zostaje tylko tani `rollback()`
 - `sslmode=require` wystarcza do szyfrowania połączenia, a `verify-full` jest właściwe, jeśli chcesz też weryfikację certyfikatu
 
 | Wymaganie | Wartość |

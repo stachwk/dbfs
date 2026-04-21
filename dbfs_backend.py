@@ -36,6 +36,7 @@ class PostgresBackend:
         self.dsn = dsn
         self.db_config = db_config
         self.pool_max_connections = self.resolve_pool_max_connections(pool_max_connections)
+        self._timezone_initialized_connection_ids = set()
         if isinstance(self.dsn, Mapping):
             self.connection_pool = psycopg2.pool.ThreadedConnectionPool(1, self.pool_max_connections, **self.dsn)
         else:
@@ -58,8 +59,11 @@ class PostgresBackend:
         conn = self.connection_pool.getconn()
         try:
             conn.autocommit = False
-            with conn.cursor() as cur:
-                cur.execute("SET TIME ZONE 'UTC'")
+            conn_id = id(conn)
+            if conn_id not in self._timezone_initialized_connection_ids:
+                with conn.cursor() as cur:
+                    cur.execute("SET TIME ZONE 'UTC'")
+                self._timezone_initialized_connection_ids.add(conn_id)
             yield conn
         finally:
             try:
@@ -70,6 +74,7 @@ class PostgresBackend:
 
     def close(self):
         self.connection_pool.closeall()
+        self._timezone_initialized_connection_ids.clear()
 
     def get_config_value(self, key, default=None):
         with self.connection() as conn, conn.cursor() as cur:

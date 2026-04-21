@@ -10,6 +10,7 @@ This file records the current comparison baselines for the main performance-sens
 - When a tuning change matters, the repository should record the before/after numbers here and in `TODO.md`.
 - DBFS assumes transactional PostgreSQL connections with `autocommit` disabled; the practical operating floor is PostgreSQL 9.5+, `read committed`, and `max_connections` above `pool_max_connections + 2`.
 - The next write-path comparison should separate `write` without `fsync`, `write` with `fsync`, and a larger `THROUGHPUT_BLOCK_SIZE` batch so the dominant bottleneck becomes explicit.
+- PostgreSQL session normalization to UTC is now initialized once per physical pooled connection; the measured steady-state overhead is effectively the pool acquire/release plus a cheap `rollback()`.
 
 ## Current Baseline Snapshot
 
@@ -51,6 +52,21 @@ Current read:
 - `write` without `fsync` is still the fastest of the three.
 - `write` with `fsync` is the clearest durable-write penalty.
 - a larger `THROUGHPUT_BLOCK_SIZE` did not beat the current `4M` baseline on this run, so the bottleneck is not just block granularity.
+
+### PostgreSQL Session Cost
+
+Measured on a pooled DBFS backend:
+
+- first pooled connection initialization:
+  - `first_ms=0.8013`
+- steady state after warmup:
+  - `steady_mean_ms=0.0029`
+  - `steady_p95_ms=0.0032`
+
+Interpretation:
+
+- the UTC `SET TIME ZONE` cost is paid once per physical connection
+- after warmup, the remaining overhead is negligible compared with filesystem-level I/O
 
 ## Read Cache
 

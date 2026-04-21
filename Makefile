@@ -150,13 +150,19 @@ wait:
 	exit 1
 
 init: venv up
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) mkfs.dbfs.py init --schema-admin-password $(DBFS_SCHEMA_ADMIN_PASSWORD)
+	@set -eu; \
+	status_output="$$(POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) mkfs.dbfs.py status 2>/dev/null || true)"; \
+	if printf '%s\n' "$$status_output" | grep -Fq 'DBFS ready: yes'; then \
+		echo 'DBFS schema already initialized; skipping init.'; \
+	else \
+		POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) mkfs.dbfs.py init --schema-admin-password "$(DBFS_SCHEMA_ADMIN_PASSWORD)"; \
+	fi
 
 reset: venv
 	$(COMPOSE) -f $(COMPOSE_FILE) down -v
 	$(MAKE) up
 	sleep 2
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) mkfs.dbfs.py init --schema-admin-password $(DBFS_SCHEMA_ADMIN_PASSWORD)
+	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) mkfs.dbfs.py init --schema-admin-password "$(DBFS_SCHEMA_ADMIN_PASSWORD)"
 
 install-config:
 	@printf '%s\n' "Installing $(DBFS_CONFIG_SOURCE) -> $(DBFS_CONFIG_DEST)"
