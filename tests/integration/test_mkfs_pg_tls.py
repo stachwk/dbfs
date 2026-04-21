@@ -6,6 +6,7 @@ import importlib.util
 import os
 import sys
 import tempfile
+import secrets
 from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -109,8 +110,10 @@ def main():
             calls.append((str(material_path), common_name, days))
             return cert_path, key_path
 
+        schema_password = os.environ.get("DBFS_SCHEMA_ADMIN_PASSWORD") or secrets.token_urlsafe(24)
+
         def fake_ensure_schema_admin_secret(db_config_arg, password):
-            assert password == "schema-test-password", password
+            assert password == schema_password, password
             return True
 
         def fake_connect(**kwargs):
@@ -134,7 +137,7 @@ def main():
             mkfs.main([
                 "init",
                 "--schema-admin-password",
-                "schema-test-password",
+                schema_password,
                 "--generate-client-tls-pair",
                 "1",
                 "--tls-material-dir",
@@ -145,7 +148,7 @@ def main():
             mkfs.main([
                 "upgrade",
                 "--schema-admin-password",
-                "schema-test-password",
+                schema_password,
                 "--generate-client-tls-pair",
                 "1",
                 "--tls-material-dir",

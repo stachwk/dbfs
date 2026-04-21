@@ -3,6 +3,7 @@
 import os
 import subprocess
 import sys
+import secrets
 import uuid
 from pathlib import Path
 
@@ -14,13 +15,14 @@ from dbfs_fuse import DBFS, load_dsn_from_config
 
 
 def ensure_schema_ready() -> None:
+    schema_password = os.environ.get("DBFS_SCHEMA_ADMIN_PASSWORD") or secrets.token_urlsafe(24)
     result = subprocess.run(
         [
             sys.executable,
             str(Path(ROOT) / "mkfs.dbfs.py"),
             "init",
             "--schema-admin-password",
-            "schema-test-password",
+            schema_password,
         ],
         cwd=ROOT,
         env=os.environ.copy(),
