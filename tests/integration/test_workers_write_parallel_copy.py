@@ -50,6 +50,33 @@ def main() -> None:
     try:
         fs.mkdir(dir_path, 0o755)
 
+        small_src_path = f"{dir_path}/small-src.bin"
+        small_dst_path = f"{dir_path}/small-dst.bin"
+        small_payload = payload[: block_size // 2]
+
+        small_src_fh = fs.create(small_src_path, 0o644)
+        written = fs.write(small_src_path, small_payload, 0, small_src_fh)
+        assert written == len(small_payload), (written, len(small_payload))
+        fs.flush(small_src_path, small_src_fh)
+        fs.release(small_src_path, small_src_fh)
+
+        small_dst_fh = fs.create(small_dst_path, 0o644)
+        copied = fs.copy_file_range(small_src_path, None, 0, small_dst_path, small_dst_fh, 0, len(small_payload), 0)
+        assert copied == len(small_payload), (copied, len(small_payload))
+        fs.flush(small_dst_path, small_dst_fh)
+        fs.release(small_dst_path, small_dst_fh)
+
+        small_read_fh = fs.open(small_dst_path, os.O_RDONLY)
+        data = fs.read(small_dst_path, len(small_payload), 0, small_read_fh)
+        fs.release(small_dst_path, small_read_fh)
+
+        assert data == small_payload, (len(data), len(small_payload))
+        assert calls == [], calls
+        assert thread_ids == set(), thread_ids
+
+        calls.clear()
+        thread_ids.clear()
+
         src_fh = fs.create(src_path, 0o644)
         written = fs.write(src_path, payload, 0, src_fh)
         assert written == len(payload), (written, len(payload))
@@ -85,6 +112,14 @@ def main() -> None:
                 fs.release(dst_path, dst_fh)
             except Exception:
                 pass
+        try:
+            fs.unlink(small_src_path)
+        except Exception:
+            pass
+        try:
+            fs.unlink(small_dst_path)
+        except Exception:
+            pass
         try:
             fs.unlink(src_path)
         except Exception:
