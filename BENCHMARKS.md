@@ -10,7 +10,7 @@ This file records the current comparison baselines for the main performance-sens
 - When a tuning change matters, the repository should record the before/after numbers here and in `TODO.md`.
 - DBFS assumes transactional PostgreSQL connections with `autocommit` disabled; the practical operating floor is PostgreSQL 9.5+, `read committed`, and `max_connections` above `pool_max_connections + 2`.
 - The next write-path comparison should separate `write` without `fsync`, `write` with `fsync`, and a larger `THROUGHPUT_BLOCK_SIZE` batch so the dominant bottleneck becomes explicit.
-- `synchronous_commit` is now a separate runtime knob; the latest local comparison did not show a win for `off` on this Docker-backed setup, so it is exposed for tuning rather than forced as the default.
+- `synchronous_commit` is now a separate runtime knob; the latest local comparison was mixed across block sizes, so it is exposed for tuning rather than forced as the default.
 - PostgreSQL session normalization to UTC is now initialized once per physical pooled connection; the measured steady-state overhead is effectively the pool acquire/release plus a cheap `rollback()`.
 
 ## Current Baseline Snapshot
@@ -70,7 +70,23 @@ Observed on the current flush/release profile:
   - `flush_seconds=0.006817`
   - `finalization_seconds=0.013588`
 
-On this local Docker/PostgreSQL run, `off` did not improve the finalization path, so it is currently treated as an explicit tuning knob rather than a better default.
+On this local Docker/PostgreSQL run, `off` did not consistently improve the finalization path, so it is currently treated as an explicit tuning knob rather than a better default.
+
+#### Throughput Comparison
+
+Observed on the current throughput profile:
+
+- `4M x8`
+  - `DBFS_SYNCHRONOUS_COMMIT=off` -> `33554432 bytes in 10.704s (2.99 MiB/s)`
+  - `DBFS_SYNCHRONOUS_COMMIT=on` -> `33554432 bytes in 12.389s (2.58 MiB/s)`
+- `8M x4`
+  - `DBFS_SYNCHRONOUS_COMMIT=off` -> `33554432 bytes in 12.019s (2.66 MiB/s)`
+  - `DBFS_SYNCHRONOUS_COMMIT=on` -> `33554432 bytes in 12.223s (2.62 MiB/s)`
+- `16M x2`
+  - `DBFS_SYNCHRONOUS_COMMIT=off` -> `33554432 bytes in 11.849s (2.70 MiB/s)`
+  - `DBFS_SYNCHRONOUS_COMMIT=on` -> `33554432 bytes in 11.696s (2.74 MiB/s)`
+
+The effect is workload-sensitive: `off` helped some batch sizes and slightly hurt another, so the knob remains explicit rather than being forced globally.
 
 ### PostgreSQL Session Cost
 
