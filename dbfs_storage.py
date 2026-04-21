@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from itertools import chain
 from concurrent.futures import ThreadPoolExecutor
 
 from psycopg2.extras import execute_values
@@ -148,24 +149,22 @@ class StorageSupport:
         return cached
 
     def _persist_block_chunks(self, cur, blocks):
-        if not blocks:
-            return
-
         chunk_size = max(1, int(getattr(self.owner, "persist_buffer_chunk_blocks", self.PERSIST_BUFFER_CHUNK_BLOCKS) or self.PERSIST_BUFFER_CHUNK_BLOCKS))
-        ordered_blocks = sorted(blocks, key=lambda item: item[1])
-        for start in range(0, len(ordered_blocks), chunk_size):
-            chunk = ordered_blocks[start:start + chunk_size]
-            execute_values(
-                cur,
-                """
-                INSERT INTO data_blocks (id_file, _order, data)
-                VALUES %s
-                ON CONFLICT (id_file, _order)
-                DO UPDATE SET data = EXCLUDED.data
-                """,
-                chunk,
-                page_size=min(128, max(1, len(chunk))),
-            )
+        blocks = iter(blocks)
+        first_block = next(blocks, None)
+        if first_block is None:
+            return
+        execute_values(
+            cur,
+            """
+            INSERT INTO data_blocks (id_file, _order, data)
+            VALUES %s
+            ON CONFLICT (id_file, _order)
+            DO UPDATE SET data = EXCLUDED.data
+            """,
+            chain((first_block,), blocks),
+            page_size=chunk_size,
+        )
 
     def _persist_block_payload(self, payload, used_len, block_size):
         if used_len >= block_size:
@@ -424,27 +423,27 @@ class StorageSupport:
                     if not truncate_only:
                         overlay_blocks = state["overlay_blocks"]
                         ordered_dirty_blocks = sorted(dirty_blocks)
-                        blocks = []
 
-                        for block_index in ordered_dirty_blocks:
-                            if block_index >= total_blocks:
-                                # Blok poza EOF nie powinien byc upsertowany
-                                continue
+                        def block_rows():
+                            nonlocal blocks_written
+                            for block_index in ordered_dirty_blocks:
+                                if block_index >= total_blocks:
+                                    # Blok poza EOF nie powinien byc upsertowany
+                                    continue
 
-                            payload = overlay_blocks.get(block_index)
-                            if payload is None:
-                                continue
+                                payload = overlay_blocks.get(block_index)
+                                if payload is None:
+                                    continue
 
-                            block_start = block_index * block_size
-                            block_end = min(file_size, block_start + block_size)
-                            used_len = max(0, block_end - block_start)
+                                block_start = block_index * block_size
+                                block_end = min(file_size, block_start + block_size)
+                                used_len = max(0, block_end - block_start)
 
-                            data = self._persist_block_payload(payload, used_len, block_size)
-                            blocks.append((file_id, block_index, data))
+                                data = self._persist_block_payload(payload, used_len, block_size)
+                                blocks_written += 1
+                                yield (file_id, block_index, data)
 
-                        if blocks:
-                            self._persist_block_chunks(cur, blocks)
-                            blocks_written = len(blocks)
+                        self._persist_block_chunks(cur, block_rows())
 
                     cur.execute(
                         """

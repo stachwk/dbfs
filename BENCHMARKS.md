@@ -43,14 +43,14 @@ Observed on the current mounted DBFS instance with `DBFS_PROFILE_IO=1`:
   - `flush_seconds=0.004312`
   - `finalization_seconds=0.008554`
 - `release()` cleanup after `persist_buffer()`
-  - `write_seconds=0.000978`
-  - `persist_seconds=0.005354`
-  - `flush_seconds=0.005417`
-  - `finalization_seconds=0.010771`
+  - `write_seconds=0.000913`
+  - `persist_seconds=0.005033`
+  - `flush_seconds=0.005079`
+  - `finalization_seconds=0.010112`
 - truncate-only flush/release on a large file
-  - `persist_seconds=0.002864`
-  - `flush_seconds=0.002901`
-  - `finalization_seconds=0.005765`
+  - `persist_seconds=0.002630`
+  - `flush_seconds=0.002660`
+  - `finalization_seconds=0.005291`
 
 The larger chunk setting shaved a bit off the finalization path on this run, so `bulk_write` now uses the larger batch size.
 The write side itself is now effectively negligible in this profile; the remaining work is concentrated in `persist_buffer()` and `flush()`.
