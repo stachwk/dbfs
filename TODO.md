@@ -228,6 +228,7 @@ Status: active design direction, but the main decisions below are already taken.
 - DBFS expects transactional PostgreSQL connections with `autocommit` disabled; `read committed` is sufficient for the current lock and metadata flows.
 - Detect single-node vs read-only replica mode early and let the runtime pick an appropriate lock strategy for each case; `postgres_lease` stays the default production backend for writable primary mounts.
 - Keep `workers_read` and `workers_write` constrained to the cases where they really help: disjoint read gaps and segmented copy operations, not small contiguous fetches.
+- The most likely long-term direction for DBFS is still userspace FUSE + PostgreSQL backend + a native Rust storage/hot-path engine, with Python kept as the orchestration layer until the native core is ready.
 
 ## Notes
 
