@@ -566,9 +566,28 @@ class StorageSupport:
         overlay_blocks[block_index] = block
         return block
 
+    def ensure_overlay_block_for_write(self, file_id, block_index, file_size_before_write=None):
+        # Dla nowych zakresow poza EOF nie laduje bloku z PostgreSQL
+        state = self.ensure_write_state(file_id)
+        overlay_blocks = state["overlay_blocks"]
+
+        block = overlay_blocks.get(block_index)
+        if block is not None:
+            return block
+
+        block_start_abs = block_index * self.owner.block_size
+        if file_size_before_write is not None and block_start_abs >= int(file_size_before_write):
+            block = bytearray(self.owner.block_size)
+        else:
+            block = bytearray(self.load_block(file_id, block_index))
+
+        overlay_blocks[block_index] = block
+        return block
+
     def write_into_state(self, file_id, buf, offset):
         # Zapisuje dane do overlay blokow bez ladowania calego pliku
         state = self.ensure_write_state(file_id)
+        file_size_before_write = int(state["file_size"])
         write_length = len(buf)
         end_offset = offset + write_length
         block_size = self.owner.block_size
@@ -578,10 +597,9 @@ class StorageSupport:
 
         src_pos = 0
         for block_index in range(first_block, last_block + 1):
-            block = self.ensure_overlay_block(file_id, block_index)
-
             block_start_abs = block_index * block_size
             block_end_abs = block_start_abs + block_size
+            block = self.ensure_overlay_block_for_write(file_id, block_index, file_size_before_write)
 
             write_start_abs = max(offset, block_start_abs)
             write_end_abs = min(end_offset, block_end_abs)
@@ -636,7 +654,7 @@ class StorageSupport:
         # Jesli skracamy do srodka bloku, wyzeruj ogon tego bloku
         if length > 0 and (length % block_size) != 0:
             last_block = length // block_size
-            block = self.ensure_overlay_block(file_id, last_block)
+            block = self.ensure_overlay_block_for_write(file_id, last_block, state["file_size"])
             valid_len = length - (last_block * block_size)
             if valid_len < block_size:
                 block[valid_len:] = b"\x00" * (block_size - valid_len)

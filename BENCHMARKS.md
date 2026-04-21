@@ -104,23 +104,24 @@ Observed on the current `bulk_write` profile after restoring a stronger read-sid
 
 - large sequential copy
   - `bytes=67108864`
-  - `elapsed_s=29.543940`
-  - `throughput_mib_s=2.17`
+  - `elapsed_s=5.115157`
+  - `throughput_mib_s=12.51`
 - large multi-block file write
   - `bytes=67108864`
-  - `elapsed_s=32.200903`
-  - `throughput_mib_s=1.99`
-  - `write_seconds=27.864997`
-  - `persist_seconds=4.046285`
-  - `flush_seconds=4.219687`
-  - `finalization_seconds=8.265972`
+  - `elapsed_s=4.320222`
+  - `throughput_mib_s=14.81`
+  - `write_seconds=0.100199`
+  - `persist_seconds=4.077022`
+  - `flush_seconds=4.158470`
+  - `finalization_seconds=8.235492`
 - flush/release profile
-  - `write_seconds=0.003869`
-  - `persist_seconds=0.007043`
-  - `flush_seconds=0.007144`
-  - `finalization_seconds=0.014187`
+  - `write_seconds=0.001076`
+  - `persist_seconds=0.006235`
+  - `flush_seconds=0.006303`
+  - `finalization_seconds=0.012537`
 
-The tuned `bulk_write` profile is now clearly profile-specific: it is still the right place to try for copy-heavy ingest, but on this host it does not outperform the balanced default for every write-heavy benchmark.
+The write-path optimization that avoids loading brand-new blocks from PostgreSQL before writing them made the `bulk_write` profile much stronger on copy-heavy ingest and large multi-block writes.
+The profile is still workload-specific, but it now clearly favors the intended ingest/copy path while keeping finalization cost bounded.
 
 ### PostgreSQL Session Cost
 
