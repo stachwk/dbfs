@@ -10,6 +10,7 @@
 - `dbfs_fuse.py` is now substantially thinner: namespace mutations and lookup helpers delegate through `dbfs_repository.py`, and the `getattr()` / `readdir()` query layer also lives outside the main FUSE module.
 - Metadata cache state is now split by payload type (attribute cache vs directory-entry cache), which removes the old mixed-payload ambiguity and keeps `getattr()` / `readdir()` behavior easier to reason about.
 - PostgreSQL-backed advisory locking is the supported production path for both `flock` and `fcntl` range locks; the remaining work is operational hardening and edge-case cleanup, not maintaining a parallel in-memory backend.
+- The long-term architecture direction is now explicit: Python stays as the orchestrator and policy layer, while Rust is the likely hot-path engine for block assembly, overlay writes, copy segmentation, and persist preparation when those paths move out of Python.
 
 ## Completed Foundation
 
@@ -35,6 +36,7 @@
 - keep the schema status export (`mkfs.dbfs.py status`) aligned with the migration manifest and the current schema version
 - extend schema migrations to explicit multi-step migration files when the schema changes again
 - keep the documented runtime profiles aligned with practical workloads
+- keep the Python-orchestrator / Rust-hot-path split visible in README and in the architecture notes as the project evolves
 - split `dbfs_repository.py` further when it becomes the next heavy module, ideally into lookup/query and mutation-oriented layers
 - keep the current explicit wrapper/delegation model in `dbfs_fuse.py` and avoid reintroducing runtime method rebinding
 

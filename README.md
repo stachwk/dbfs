@@ -538,3 +538,11 @@ Mount-time visibility options:
 - Do not use `dbfs-relaxed` for multi-user or production-like mounts that need Linux-like permission semantics.
 - Do not treat `synchronous_commit=off` as a default durability setting; use it only when the workload accepts the trade-off and the benchmark says it is worthwhile.
 - Do not expect the `pg_locking` profile to improve write throughput by itself; it is about coordination semantics, not data-path speed.
+
+## Target Architecture
+
+DBFS is intentionally staying as a Python-orchestrated FUSE frontend for now:
+
+- Python owns bootstrap, mkfs, config/profile loading, FUSE callbacks, admin logic, schema migrations, integration tests, and policy layers such as ACL/permissions/journal/runtime validation.
+- Rust is the likely long-term hot-path engine for block assembly, overlay writes, copy segmentation, and persist-preparation work if and when the project moves that code out of Python.
+- The goal is a thinner `dbfs_fuse.py`, more delegation into dedicated modules, and a future native storage core only where benchmarks justify it.
