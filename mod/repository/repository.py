@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from .lookup import NamespaceRepositoryLookup
+from .attrs_listing import NamespaceRepositoryAttrsListing
 from .create import NamespaceRepositoryCreateMutations
 from .delete import NamespaceRepositoryDeleteMutations
 
 
 class NamespaceRepository(
     NamespaceRepositoryLookup,
+    NamespaceRepositoryAttrsListing,
     NamespaceRepositoryCreateMutations,
     NamespaceRepositoryDeleteMutations,
 ):
