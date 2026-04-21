@@ -1,8 +1,15 @@
-# DBFS Decisions & Notes
+# DBFS Decisions, Follow-ups & Archive
 
-This document records completed work, closed decisions, and regression notes for DBFS. It is no longer an active implementation backlog.
+This document records the small set of open follow-ups plus completed work, closed decisions, and regression notes for DBFS. It is not an active implementation backlog.
 
-## Completed Work
+## Current Follow-ups
+
+- Detect single-node vs read-only replica mode early and let runtime choose the appropriate lock strategy before mount.
+- Keep `workers_read` and `workers_write` constrained to the cases where they really help: disjoint read gaps and segmented copy operations, not small contiguous fetches.
+- Keep the long-term direction visible: userspace FUSE + PostgreSQL backend + a native Rust storage/hot-path engine, with Python staying as the orchestration layer until the native core is ready.
+- When schema changes actually hit a limit or compatibility failure, add a concrete migration file plus a regression test instead of widening the schema bootstrap path ad hoc.
+
+## Archived Work
 
 ### Recent Architecture Cleanup
 
