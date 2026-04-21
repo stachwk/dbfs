@@ -66,6 +66,15 @@ def main() -> None:
             raise AssertionError("expected invalid persist_buffer_chunk_blocks to fail fast")
 
         try:
+            DBFS(dsn, db_config, runtime_config={"copy_skip_unchanged_blocks": "maybe"})
+        except ValueError as exc:
+            message = str(exc)
+            if "copy_skip_unchanged_blocks" not in message:
+                raise AssertionError(message)
+        else:
+            raise AssertionError("expected invalid copy_skip_unchanged_blocks to fail fast")
+
+        try:
             DBFS(dsn, db_config, runtime_config={"synchronous_commit": "banana"})
         except ValueError as exc:
             message = str(exc)

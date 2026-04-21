@@ -85,6 +85,8 @@ class DBFS(Operations):
         self.workers_write = self.resolve_workers_write()
         self.workers_write_min_blocks = self.resolve_workers_write_min_blocks()
         self.persist_buffer_chunk_blocks = self.resolve_persist_buffer_chunk_blocks()
+        self.copy_skip_unchanged_blocks = self.resolve_copy_skip_unchanged_blocks()
+        self.copy_skip_unchanged_blocks_min_blocks = self.resolve_copy_skip_unchanged_blocks_min_blocks()
         self.metadata_cache_ttl_seconds = self.resolve_metadata_cache_ttl_seconds()
         self.statfs_cache_ttl_seconds = self.resolve_statfs_cache_ttl_seconds()
         self.lock_backend = self.resolve_lock_backend()
@@ -346,6 +348,25 @@ class DBFS(Operations):
             return 128
         if value < 1:
             raise ValueError("DBFS_PERSIST_BUFFER_CHUNK_BLOCKS must be >= 1")
+        return value
+
+    def resolve_copy_skip_unchanged_blocks(self):
+        raw_value = os.environ.get("DBFS_COPY_SKIP_UNCHANGED_BLOCKS")
+        if raw_value is None or raw_value == "":
+            return bool(self.runtime_config_getbool("copy_skip_unchanged_blocks", False))
+        return self.parse_bool_value(raw_value, "DBFS_COPY_SKIP_UNCHANGED_BLOCKS")
+
+    def resolve_copy_skip_unchanged_blocks_min_blocks(self):
+        raw_value = os.environ.get("DBFS_COPY_SKIP_UNCHANGED_BLOCKS_MIN_BLOCKS")
+        if raw_value is None or raw_value == "":
+            value = self.runtime_config_getint("copy_skip_unchanged_blocks_min_blocks", 16)
+            return max(1, int(value) if value is not None else 16)
+        try:
+            value = int(raw_value)
+        except Exception:
+            return 16
+        if value < 1:
+            raise ValueError("DBFS_COPY_SKIP_UNCHANGED_BLOCKS_MIN_BLOCKS must be >= 1")
         return value
 
     def resolve_metadata_cache_ttl_seconds(self):
@@ -611,6 +632,16 @@ class DBFS(Operations):
             return default
         return value not in {"0", "false", "False", "no", "off"}
 
+    def parse_bool_value(self, value, name):
+        if isinstance(value, bool):
+            return value
+        normalized = str(value).strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+        raise ValueError(f"{name} must be a boolean value")
+
     def runtime_config_get(self, key, default=None):
         config = self.runtime_config
         if isinstance(config, dict):
@@ -646,6 +677,28 @@ class DBFS(Operations):
             return int(value)
         except Exception:
             return default
+
+    def runtime_config_getbool(self, key, default=None):
+        config = self.runtime_config
+        if isinstance(config, dict):
+            value = config.get(key, default)
+        elif hasattr(config, "get"):
+            try:
+                value = config.get(key, fallback=default)
+            except Exception:
+                return default
+        else:
+            value = default
+        if value is None or value == "":
+            return default
+        if isinstance(value, bool):
+            return value
+        normalized = str(value).strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+        return default
 
     def apply_mount_options(self, mount_kwargs, args):
         self.atime_policy = getattr(args, "atime_policy", "default") or "default"

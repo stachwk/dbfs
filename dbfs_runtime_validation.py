@@ -27,6 +27,10 @@ RUNTIME_ENUM_SPECS = {
     },
 }
 
+RUNTIME_BOOL_SPECS = {
+    "copy_skip_unchanged_blocks": False,
+}
+
 
 def _coerce_typed_value(name, raw_value, caster, minimum, default):
     if raw_value is None or raw_value == "":
@@ -38,6 +42,19 @@ def _coerce_typed_value(name, raw_value, caster, minimum, default):
     if value < minimum:
         raise ValueError(f"{name} must be >= {minimum}")
     return value
+
+
+def _coerce_bool_value(name, raw_value, default):
+    if raw_value is None or raw_value == "":
+        return default
+    if isinstance(raw_value, bool):
+        return raw_value
+    value = str(raw_value).strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean value")
 
 
 def validate_runtime_config(runtime_config):
@@ -54,4 +71,6 @@ def validate_runtime_config(runtime_config):
             allowed = ", ".join(sorted(spec["allowed"]))
             raise ValueError(f"{name} must be one of: {allowed}")
         validated[name] = value
+    for name, default in RUNTIME_BOOL_SPECS.items():
+        validated[name] = _coerce_bool_value(name, validated.get(name), default)
     return validated

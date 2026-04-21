@@ -35,6 +35,7 @@ def main() -> None:
     src_fh = None
     dst_fh = None
     original_reader = fs.storage._read_segment_for_copy
+    original_write_into_state = fs.storage.write_into_state
     calls = []
     thread_ids = set()
     calls_guard = threading.Lock()
@@ -48,6 +49,12 @@ def main() -> None:
 
     fs.storage._read_segment_for_copy = wrapped_reader
     try:
+        write_into_state_calls = []
+
+        def wrapped_write_into_state(file_id, buf, offset):
+            write_into_state_calls.append((file_id, offset, len(buf)))
+            return original_write_into_state(file_id, buf, offset)
+
         fs.mkdir(dir_path, 0o755)
 
         small_src_path = f"{dir_path}/small-src.bin"
@@ -99,9 +106,30 @@ def main() -> None:
         assert len(calls) >= 2, calls
         assert len(thread_ids) >= 2, thread_ids
 
+        fs.copy_skip_unchanged_blocks = True
+        fs.copy_skip_unchanged_blocks_min_blocks = 1
+        fs.storage.write_into_state = wrapped_write_into_state
+
+        calls.clear()
+        thread_ids.clear()
+        write_into_state_calls.clear()
+
+        repeat_dst_fh = fs.open(dst_path, os.O_WRONLY)
+        try:
+            copied = fs.copy_file_range(src_path, None, 0, dst_path, repeat_dst_fh, 0, len(payload), 0)
+            assert copied == len(payload), (copied, len(payload))
+            assert not fs.is_write_buffer_dirty(repeat_dst_fh), "unchanged blocks should not dirty destination"
+            fs.flush(dst_path, repeat_dst_fh)
+        finally:
+            fs.release(dst_path, repeat_dst_fh)
+
+        assert write_into_state_calls == [], write_into_state_calls
+        assert calls, "source reads should still happen for repeat copy"
+
         print("OK workers-write parallel copy")
     finally:
         fs.storage._read_segment_for_copy = original_reader
+        fs.storage.write_into_state = original_write_into_state
         if src_fh is not None:
             try:
                 fs.release(src_path, src_fh)

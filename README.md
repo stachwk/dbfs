@@ -282,6 +282,8 @@ It may also include a `[dbfs]` section with:
 - `workers_write`
 - `workers_write_min_blocks`
 - `persist_buffer_chunk_blocks`
+- `copy_skip_unchanged_blocks`
+- `copy_skip_unchanged_blocks_min_blocks`
 - `metadata_cache_ttl_seconds`
 - `statfs_cache_ttl_seconds`
 - `synchronous_commit`
@@ -458,7 +460,7 @@ The current comparison baselines for throughput, large copy, large multi-block f
 
 If you need `allow_other`, run the mount with `DBFS_ALLOW_OTHER=1`, but only if your `/etc/fuse.conf` permits it.
 `/etc/dbfs/dbfs_config.ini` can also include a `[dbfs]` section with `pool_max_connections = N` to control how many PostgreSQL connections the filesystem pool may open. The same section can also set storage and read-tuning defaults such as `write_flush_threshold_bytes`, `read_cache_blocks`, `read_ahead_blocks`, `sequential_read_ahead_blocks`, `small_file_read_threshold_blocks`, `metadata_cache_ttl_seconds`, and `statfs_cache_ttl_seconds`. If that file does not exist, DBFS falls back to `dbfs_config.ini` in the project root.
-The same section may also set threaded read/write knobs such as `workers_read`, `workers_read_min_blocks`, `workers_write`, and `workers_write_min_blocks`, plus `persist_buffer_chunk_blocks` for larger or smaller `execute_values()` batches during flush. `workers_read` is only used when a read misses split into multiple disjoint block ranges, and `workers_write` is only used for copy operations that can be split into multiple source segments. It can also set `synchronous_commit` to control PostgreSQL session durability per connection; valid values are `on`, `off`, `local`, `remote_write`, and `remote_apply`.
+The same section may also set threaded read/write knobs such as `workers_read`, `workers_read_min_blocks`, `workers_write`, and `workers_write_min_blocks`, plus `persist_buffer_chunk_blocks` for larger or smaller `execute_values()` batches during flush. `workers_read` is only used when a read misses split into multiple disjoint block ranges, and `workers_write` is only used for copy operations that can be split into multiple source segments. For rsync-like or repeated copy workloads, `copy_skip_unchanged_blocks` can compare destination blocks and skip unchanged ranges during `copy_file_range()`; keep it off by default unless you are copying into files that often already contain the same data. It can also set `synchronous_commit` to control PostgreSQL session durability per connection; valid values are `on`, `off`, `local`, `remote_write`, and `remote_apply`.
 If you want a production-style preset, set `DBFS_PROFILE=bulk_write`, `DBFS_PROFILE=metadata_heavy`, or `DBFS_PROFILE=pg_locking` before mount. The selected profile overrides the base `[dbfs]` values from `dbfs_config.ini`.
 SELinux xattr support is controlled with `--selinux auto|on|off` or `DBFS_SELINUX=auto|on|off`.
 The default is `off`. Use `on` to force it or `auto` if you want host-driven detection.

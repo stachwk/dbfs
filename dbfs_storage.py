@@ -688,6 +688,55 @@ class StorageSupport:
 
         return segments
 
+    def _read_copy_destination_chunk(self, dst_file_id, dst_offset, length):
+        current = self.read_file_slice(dst_file_id, dst_offset, length)
+        if len(current) < length:
+            current += b"\x00" * (length - len(current))
+        return current
+
+    def _write_copy_payload_if_changed(self, dst_file_id, dst_offset, payload):
+        block_size = self.owner.block_size
+        state = self.get_write_state(dst_file_id)
+        current_size = int(state["file_size"]) if state is not None else self.get_file_size(dst_file_id)
+        target_end = dst_offset + len(payload)
+
+        if state is None and target_end > current_size:
+            state = self.ensure_write_state(dst_file_id)
+            current_size = int(state["file_size"])
+        if state is not None and target_end > state["file_size"]:
+            state["file_size"] = target_end
+
+        if dst_offset >= current_size:
+            self.write_into_state(dst_file_id, payload, dst_offset)
+            return len(payload)
+
+        bytes_written = 0
+        run_start = None
+        run_payload = bytearray()
+
+        for rel_offset in range(0, len(payload), block_size):
+            chunk = payload[rel_offset:rel_offset + block_size]
+            dst_chunk_offset = dst_offset + rel_offset
+            current = self._read_copy_destination_chunk(dst_file_id, dst_chunk_offset, len(chunk))
+
+            if current == chunk:
+                if run_start is not None:
+                    self.write_into_state(dst_file_id, bytes(run_payload), run_start)
+                    bytes_written += len(run_payload)
+                    run_start = None
+                    run_payload = bytearray()
+                continue
+
+            if run_start is None:
+                run_start = dst_chunk_offset
+            run_payload.extend(chunk)
+
+        if run_start is not None and run_payload:
+            self.write_into_state(dst_file_id, bytes(run_payload), run_start)
+            bytes_written += len(run_payload)
+
+        return bytes_written
+
     def _read_segment_for_copy(self, src_file_id, src_offset, length):
         return self.read_file_slice(src_file_id, src_offset, length)
 
@@ -700,13 +749,18 @@ class StorageSupport:
         block_size = self.owner.block_size
         workers_write = max(1, int(getattr(self.owner, "workers_write", 1) or 1))
         workers_write_min_blocks = max(1, int(getattr(self.owner, "workers_write_min_blocks", 8) or 8))
+        skip_unchanged_blocks = bool(getattr(self.owner, "copy_skip_unchanged_blocks", False))
+        skip_unchanged_blocks_min_blocks = max(1, int(getattr(self.owner, "copy_skip_unchanged_blocks_min_blocks", 16) or 16))
         total_blocks = max(1, (length + block_size - 1) // block_size)
 
         if workers_write <= 1 or total_blocks < workers_write_min_blocks:
             chunk = self.read_file_slice(src_file_id, off_in, length)
             if not chunk:
                 return 0
-            self.write_into_state(dst_file_id, chunk, off_out)
+            if skip_unchanged_blocks and total_blocks >= skip_unchanged_blocks_min_blocks:
+                self._write_copy_payload_if_changed(dst_file_id, off_out, chunk)
+            else:
+                self.write_into_state(dst_file_id, chunk, off_out)
             return len(chunk)
 
         segments = self._copy_segments(off_in, off_out, length, block_size, workers_write)
@@ -723,7 +777,10 @@ class StorageSupport:
         for (_, dst_offset, _), payload in zip(segments, payloads):
             if not payload:
                 continue
-            self.write_into_state(dst_file_id, payload, dst_offset)
+            if skip_unchanged_blocks and total_blocks >= skip_unchanged_blocks_min_blocks:
+                self._write_copy_payload_if_changed(dst_file_id, dst_offset, payload)
+            else:
+                self.write_into_state(dst_file_id, payload, dst_offset)
             copied += len(payload)
 
         return copied
