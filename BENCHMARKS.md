@@ -38,6 +38,20 @@ The write side itself is now effectively negligible in this profile; the remaini
 
 The write path has also been measured on a large sequential write where chunked persistence prevented PostgreSQL client buffer exhaustion.
 
+Recent comparison on the current runtime profile:
+
+- `THROUGHPUT_BLOCK_SIZE=4M THROUGHPUT_COUNT=8`
+  - `33554432 bytes in 12.910s (2.48 MiB/s)`
+- `THROUGHPUT_BLOCK_SIZE=4M THROUGHPUT_COUNT=8 THROUGHPUT_SYNC=1`
+  - `33554432 bytes in 15.187s (2.11 MiB/s)`
+- `THROUGHPUT_BLOCK_SIZE=8M THROUGHPUT_COUNT=4`
+  - `33554432 bytes in 14.467s (2.21 MiB/s)`
+
+Current read:
+- `write` without `fsync` is still the fastest of the three.
+- `write` with `fsync` is the clearest durable-write penalty.
+- a larger `THROUGHPUT_BLOCK_SIZE` did not beat the current `4M` baseline on this run, so the bottleneck is not just block granularity.
+
 ## Read Cache
 
 Sequential read-cache comparison:
