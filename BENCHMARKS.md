@@ -42,10 +42,15 @@ Observed on the current mounted DBFS instance with `DBFS_PROFILE_IO=1`:
   - `persist_seconds=0.004242`
   - `flush_seconds=0.004312`
   - `finalization_seconds=0.008554`
+- `release()` cleanup after `persist_buffer()`
+  - `write_seconds=0.000976`
+  - `persist_seconds=0.005631`
+  - `flush_seconds=0.005692`
+  - `finalization_seconds=0.011323`
 
 The larger chunk setting shaved a bit off the finalization path on this run, so `bulk_write` now uses the larger batch size.
 The write side itself is now effectively negligible in this profile; the remaining work is concentrated in `persist_buffer()` and `flush()`.
-The latest small win came from switching block upserts inside `persist_buffer()` to PostgreSQL `execute_values()` and from making the batch size configurable, which shaved a bit off the total finalization path without changing write semantics.
+The latest small win came from switching block upserts inside `persist_buffer()` to PostgreSQL `execute_values()`, making the batch size configurable, and removing redundant write-state cleanup from `release()` after `persist_buffer()` had already done the work.
 
 ## Throughput
 

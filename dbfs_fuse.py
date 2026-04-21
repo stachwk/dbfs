@@ -1543,10 +1543,6 @@ class DBFS(Operations):
         started = time.perf_counter() if (file_id is not None and self.is_write_buffer_dirty(file_id)) else None
         if started is not None:
             self.persist_buffer(file_id)
-
-        if file_id is not None:
-            self.clear_write_buffer_dirty(file_id)
-            self.storage.drop_write_state(file_id)
         self.close_file_handle(fh)
         self.clear_timestamp_touch_state(resource_key)
         self.clear_read_sequence_state(fh)
