@@ -50,8 +50,13 @@ def main():
     try:
         fs.mkdir(dir_path, 0o755)
         fh = fs.create(file_path, 0o644)
-        written = fs.write(file_path, payload, 0, fh)
-        assert written == len(payload), (written, len(payload))
+        fs.fallocate(file_path, 0, 0, block_size * 16, fh)
+        first_span = payload[: block_size * 4]
+        second_span = payload[block_size * 8 : block_size * 12]
+        written = fs.write(file_path, first_span, 0, fh)
+        assert written == len(first_span), (written, len(first_span))
+        written = fs.write(file_path, second_span, block_size * 8, fh)
+        assert written == len(second_span), (written, len(second_span))
         fs.flush(file_path, fh)
         fs.release(file_path, fh)
         fh = None
@@ -60,9 +65,15 @@ def main():
         file_id = fs.get_file_id(file_path)
         assert file_id is not None
         fs.storage.clear_read_cache(file_id)
+        zero_block = b"\x00" * block_size
+        for block_index in range(4, 8):
+            fs.storage._store_cached_block(file_id, block_index, zero_block)
+        for block_index in range(12, 16):
+            fs.storage._store_cached_block(file_id, block_index, zero_block)
 
         data = fs.read(file_path, len(payload), 0, fh)
-        assert data == payload, (len(data), len(payload))
+        expected = first_span + (b"\x00" * (block_size * 4)) + second_span + (b"\x00" * (block_size * 4))
+        assert data == expected, (len(data), len(expected))
         assert len(calls) >= 2, calls
         assert len(thread_ids) >= 2, thread_ids
 

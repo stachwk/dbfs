@@ -70,19 +70,21 @@ class StorageSupport:
             while len(self.owner._read_block_cache) > self.read_cache_limit_blocks():
                 self.owner._read_block_cache.popitem(last=False)
 
-    def _missing_block_slices(self, missing, workers):
+    def _missing_block_ranges(self, missing):
         if not missing:
             return []
 
-        worker_count = max(1, min(int(workers), len(missing)))
-        chunk_size = max(1, (len(missing) + worker_count - 1) // worker_count)
-
-        slices = []
-        for start in range(0, len(missing), chunk_size):
-            chunk = missing[start:start + chunk_size]
-            if chunk:
-                slices.append((chunk[0], chunk[-1]))
-        return slices
+        ranges = []
+        range_start = missing[0]
+        range_end = missing[0]
+        for block_index in missing[1:]:
+            if block_index == range_end + 1:
+                range_end = block_index
+                continue
+            ranges.append((range_start, range_end))
+            range_start = range_end = block_index
+        ranges.append((range_start, range_end))
+        return ranges
 
     def _fetch_block_range_chunk(self, file_id, first_block, last_block):
         result = {}
@@ -125,16 +127,16 @@ class StorageSupport:
         if missing:
             workers_read = max(1, int(getattr(self.owner, "workers_read", 1) or 1))
             workers_read_min_blocks = max(1, int(getattr(self.owner, "workers_read_min_blocks", 8) or 8))
+            contiguous_ranges = self._missing_block_ranges(missing)
 
-            if workers_read <= 1 or len(missing) < workers_read_min_blocks:
+            if workers_read <= 1 or len(missing) < workers_read_min_blocks or len(contiguous_ranges) <= 1:
                 fetched_maps = [self._fetch_block_range_chunk(file_id, missing[0], missing[-1])]
             else:
-                ranges = self._missing_block_slices(missing, workers_read)
-                max_workers = max(1, min(workers_read, len(ranges)))
+                max_workers = max(1, min(workers_read, len(contiguous_ranges)))
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     futures = [
                         executor.submit(self._fetch_block_range_chunk, file_id, range_first, range_last)
-                        for range_first, range_last in ranges
+                        for range_first, range_last in contiguous_ranges
                     ]
                     fetched_maps = [future.result() for future in futures]
 
