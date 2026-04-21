@@ -54,6 +54,14 @@ dbfs_test_cleanup() {
 }
 
 dbfs_test_init_schema() {
+  local status_output
+  status_output="$(
+    POSTGRES_DB="${POSTGRES_DB}" POSTGRES_USER="${POSTGRES_USER}" POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
+      "${VENV_PYTHON}" "${ROOT}/mkfs.dbfs.py" status 2>/dev/null || true
+  )"
+  if grep -Fq "DBFS ready: yes" <<<"${status_output}"; then
+    return 0
+  fi
   POSTGRES_DB="${POSTGRES_DB}" POSTGRES_USER="${POSTGRES_USER}" POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" "${VENV_PYTHON}" "${ROOT}/mkfs.dbfs.py" init --schema-admin-password "${DBFS_SCHEMA_ADMIN_PASSWORD}"
 }
 
