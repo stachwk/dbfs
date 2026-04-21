@@ -30,7 +30,7 @@ DBFS_SYNC ?= 0
 DBFS_DIRSYNC ?= 0
 MOUNT_HELPER_DEST ?= /usr/local/sbin/mount.dbfs
 
-.PHONY: help venv deps up down restart logs wait init reset smoke mount mount-user demo unmount db-shell install-config install-config-user install-mount-helper config-show test-integration test-xattr test-df test-locking test-pg-lock-manager test-permissions test-journal test-destroy test-dirhooks test-hardlink test-fallocate test-copy-file-range test-ioctl test-mknod test-bufio test-lseek test-poll test-access-groups test-inode-model test-ownership-inheritance test-rename-root-conflict test-bmap test-statfs-use-ino test-mount-workflow test-mount-root-permissions test-files test-directories test-metadata test-symlink test-pool-connections test-mount-suite test-atime-noatime test-atime-relatime test-atime-benchmark test-timestamp-touch-once test-read-ahead-sequence test-read-cache-benchmark test-workers-read-parallel test-runtime-config test-runtime-validation test-metadata-cache test-mkfs-pg-tls test-runtime-profile test-schema-upgrade test-schema-status test-postgresql-requirements test-throughput test-throughput-sync test-tree-scale test-flush-release-profile test-persist-buffer-chunking test-write-flush-threshold test-utimens-noop test-write-noop test-multi-open-unique-handles test-version test-block-read test-connection-recovery test-all test-all-full clean
+.PHONY: help venv deps up down restart logs wait init reset smoke mount mount-user demo unmount db-shell install-config install-config-user install-mount-helper config-show test-integration test-xattr test-df test-locking test-pg-lock-manager test-permissions test-journal test-destroy test-dirhooks test-hardlink test-fallocate test-copy-file-range test-ioctl test-mknod test-bufio test-lseek test-poll test-access-groups test-inode-model test-ownership-inheritance test-rename-root-conflict test-bmap test-statfs-use-ino test-mount-workflow test-mount-root-permissions test-files test-directories test-metadata test-symlink test-pool-connections test-mount-suite test-atime-noatime test-atime-relatime test-atime-benchmark test-timestamp-touch-once test-read-ahead-sequence test-read-cache-benchmark test-workers-read-parallel test-runtime-config test-runtime-validation test-metadata-cache test-mkfs-pg-tls test-runtime-profile test-schema-upgrade test-schema-status test-postgresql-requirements test-throughput test-throughput-sync test-large-copy-benchmark test-large-file-multiblock-benchmark test-remount-durability-benchmark test-tree-scale test-flush-release-profile test-persist-buffer-chunking test-write-flush-threshold test-utimens-noop test-write-noop test-multi-open-unique-handles test-version test-block-read test-connection-recovery test-all test-all-full clean
 
 help:
 	@printf '%s\n' \
@@ -105,6 +105,9 @@ help:
 		'  make test-symlink - mount + ln -s + readlink + rename symlink + orphaned symlink ls on the symlink path' \
 		'  make test-throughput - benchmark DBFS writes with dd if=/dev/zero' \
 		'  make test-throughput-sync - benchmark DBFS writes with conv=fsync' \
+		'  make test-large-copy-benchmark - benchmark large copy_file_range transfers' \
+		'  make test-large-file-multiblock-benchmark - benchmark large multi-block file writes' \
+		'  make test-remount-durability-benchmark - benchmark data survival across remounts' \
 		'  make test-tree-scale - benchmark getattr/readdir on a larger tree' \
 		'  make test-flush-release-profile - verify clean flush/release and dirty flush regression handling' \
 		'  make test-all-full - full integration suite + atime + throughput' \
@@ -383,6 +386,15 @@ test-throughput: venv up
 
 test-throughput-sync: venv up
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) DBFS_SELINUX=$(DBFS_SELINUX) DBFS_ACL=$(DBFS_ACL) DBFS_DEFAULT_PERMISSIONS=$(DBFS_DEFAULT_PERMISSIONS) DBFS_ATIME_POLICY=$(DBFS_ATIME_POLICY) DBFS_LAZYTIME=$(DBFS_LAZYTIME) DBFS_SYNC=$(DBFS_SYNC) DBFS_DIRSYNC=$(DBFS_DIRSYNC) VENV_PYTHON=$(VENV_PYTHON) THROUGHPUT_BLOCK_SIZE=$(THROUGHPUT_BLOCK_SIZE) THROUGHPUT_COUNT=$(THROUGHPUT_COUNT) THROUGHPUT_SYNC=1 bash tests/integration/test_throughput.sh
+
+test-large-copy-benchmark: init
+	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_large_copy_benchmark.py
+
+test-large-file-multiblock-benchmark: init
+	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_large_file_multiblock_benchmark.py
+
+test-remount-durability-benchmark: init
+	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_remount_durability_benchmark.py
 
 test-tree-scale: venv up
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) DBFS_SELINUX=$(DBFS_SELINUX) DBFS_ACL=$(DBFS_ACL) DBFS_DEFAULT_PERMISSIONS=$(DBFS_DEFAULT_PERMISSIONS) DBFS_ATIME_POLICY=$(DBFS_ATIME_POLICY) DBFS_LAZYTIME=$(DBFS_LAZYTIME) DBFS_SYNC=$(DBFS_SYNC) DBFS_DIRSYNC=$(DBFS_DIRSYNC) VENV_PYTHON=$(VENV_PYTHON) TREE_SCALE_DIRS=$(TREE_SCALE_DIRS) TREE_SCALE_FILES=$(TREE_SCALE_FILES) bash tests/integration/test_tree_scale.sh

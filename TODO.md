@@ -61,6 +61,7 @@ This document records completed work, closed decisions, and regression notes for
 - [x] Use the current benchmark baseline in [`BENCHMARKS.md`](BENCHMARKS.md) to decide whether the next performance work should focus on fewer SQL round-trips for small writes or on additional batching around flush/release. Decision: the current baseline is good enough; stop further tuning here unless a regression appears or a new benchmark target is introduced.
 - [x] Confirm the large-write chunking fix on a real 1 GiB sequential write. The `dd if=/dev/zero of=test bs=1M count=1024` scenario completed successfully on `/mnt/dbfs`, and the file was visible afterward at the expected size.
 - [x] Record the interpretation of the 1 GiB `dd` timing correctly: the data path itself finished in about `12 s`, while the remaining wall time was spent draining `flush()` / `release()` / `persist_buffer()` work. Future throughput work should measure `write` and finalization separately instead of treating `dd` wall time as pure copy speed.
+- [x] Keep the benchmark suite expanded with explicit coverage for large `copy_file_range()` transfers, large multi-block file writes, and remount durability so write-path tuning stays comparable across releases.
 - [x] Compare DBFS atime behavior on a short wall-time benchmark. The current measured values live in [`BENCHMARKS.md`](BENCHMARKS.md).
 
 ### Finalized Performance Wins

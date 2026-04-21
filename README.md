@@ -441,6 +441,9 @@ What the tests cover:
 - `make test-mount-suite` is the main Python launcher-backed mount smoke suite; it covers files, directories, metadata, access modes, symlinks, `ioctl/FIONREAD`, file `read`-driven `atime`, feature-off runtime checks for ACL/SELinux, SELinux-on coverage when enabled, `df`, and replica read-only behavior in one run.
 - `make test-throughput` runs a small `dd if=/dev/zero` benchmark on a mounted DBFS instance and prints elapsed time plus MiB/s.
 - `make test-throughput-sync` is the ready-made fsync variant.
+- `make test-large-copy-benchmark` measures a large `copy_file_range()` transfer through the backend and prints elapsed time plus MiB/s.
+- `make test-large-file-multiblock-benchmark` measures a large multi-block file write and prints write/persist/flush split times.
+- `make test-remount-durability-benchmark` checks that data survives a stop/remount/reopen cycle and prints the round-trip time.
 - `make test-tree-scale` benchmarks `getattr` and `readdir` on a larger seeded tree and reports `ls`/`find` timings.
 - `make test-flush-release-profile` checks that clean `flush()` / `release()` calls stay cheap and that a dirty flush persists exactly once.
 - `make test-write-flush-threshold` checks that a low write-flush threshold can push dirty data before close and that the buffer is no longer left dirty after the write.
@@ -449,7 +452,7 @@ What the tests cover:
 `make test-all` includes the xattr/SELinux/trusted/ACL check and the consolidated mount suite.
 Replica mounts can be forced with `--role replica`. Default `--role auto` detects replicas via `pg_is_in_recovery()` and mounts them read-only.
 
-The current comparison baselines for throughput, read cache, and atime behavior live in [BENCHMARKS.md](BENCHMARKS.md).
+The current comparison baselines for throughput, large copy, large multi-block files, remount durability, read cache, and atime behavior live in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Runtime Options
 

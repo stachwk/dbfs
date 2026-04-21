@@ -440,6 +440,9 @@ Co sprawdzają testy:
 - `make test-mount-suite` to główny Pythonowy mount smoke suite; obejmuje pliki, katalogi, metadane, access modes, symlinki, `ioctl/FIONREAD`, `read`-driven `atime` dla plików, runtime-off dla ACL/SELinux, SELinux-on gdy jest włączony, `df` i tryb read-only dla repliki.
 - `make test-throughput` uruchamia prosty benchmark `dd if=/dev/zero` na zamontowanym DBFS i wypisuje czas oraz MiB/s.
 - `make test-throughput-sync` to wariant z `conv=fsync`.
+- `make test-large-copy-benchmark` mierzy duży transfer `copy_file_range()` przez backend i wypisuje czas oraz MiB/s.
+- `make test-large-file-multiblock-benchmark` mierzy duży zapis wieloblokowego pliku i wypisuje czasy write/persist/flush.
+- `make test-remount-durability-benchmark` sprawdza, że dane przeżywają cykl stop/remount/reopen i wypisuje czas round-trip.
 - `make test-tree-scale` benchmarkuje `getattr` i `readdir` na większym, zasilonym drzewie i pokazuje czasy `ls`/`find`.
 - `make test-flush-release-profile` sprawdza, że czyste `flush()` / `release()` są tanie, a dirty flush persystuje dane dokładnie raz.
 - `make test-write-flush-threshold` sprawdza, że niski próg auto-flush potrafi wypchnąć dirty dane przed zamknięciem i że bufor nie zostaje dirty po zapisie.
@@ -448,7 +451,7 @@ Co sprawdzają testy:
 `make test-all` zawiera check xattr/SELinux/trusted/ACL oraz złożony mount smoke suite.
 Mount repliki można wymusić przez `--role replica`. Domyślne `--role auto` wykrywa replikę przez `pg_is_in_recovery()` i montuje filesystem jako read-only.
 
-Aktualne baseline'y porównawcze dla throughput, read cache i zachowania `atime` są zapisane w [BENCHMARKS.md](BENCHMARKS.md).
+Aktualne baseline'y porównawcze dla throughput, dużego copy, dużych wieloblokowych plików, durability po remount, read cache i zachowania `atime` są zapisane w [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Opcje runtime
 

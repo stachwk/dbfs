@@ -7,6 +7,7 @@ This file records the current comparison baselines for the main performance-sens
 - The benchmark suite is now tied to documented runtime profiles and CI-visible regression targets.
 - Throughput, finalization, read-cache, and atime numbers are treated as baselines, not fixed promises.
 - `make test-throughput` and `make test-flush-release-profile` are the current write-path and finalization entry points.
+- Additional write-oriented baselines now cover large `copy_file_range()` transfers, large multi-block file writes, and remount durability checks.
 - When a tuning change matters, the repository should record the before/after numbers here and in `TODO.md`.
 - DBFS assumes transactional PostgreSQL connections with `autocommit` disabled; the practical operating floor is PostgreSQL 9.5+, `read committed`, and `max_connections` above `pool_max_connections + 2`.
 - The next write-path comparison should separate `write` without `fsync`, `write` with `fsync`, and a larger `THROUGHPUT_BLOCK_SIZE` batch so the dominant bottleneck becomes explicit.
@@ -134,3 +135,36 @@ Short wall-time benchmark on file reads and directory listings:
   - `nodiratime=29949 ms`
 
 The benchmark is useful as a smoke baseline, not as a strong microbenchmark for exact atime savings.
+
+## Large Copy
+
+Large `copy_file_range()` benchmark on the current runtime profile:
+
+- `bytes=67108864`
+  - `elapsed_s=8.577647`
+  - `throughput_mib_s=7.46`
+
+This is the current baseline for large backend copy operations.
+
+## Large Multi-Block Files
+
+Large multi-block file write benchmark on the current runtime profile:
+
+- `bytes=67108864`
+  - `elapsed_s=7.958002`
+  - `throughput_mib_s=8.04`
+  - `write_seconds=5.878233`
+  - `persist_seconds=1.997721`
+  - `flush_seconds=2.040917`
+  - `finalization_seconds=4.038638`
+
+This baseline tracks a large file write split across many blocks so the write/persist split stays visible.
+
+## Remount Durability
+
+Remount durability smoke benchmark on the current runtime profile:
+
+- `bytes=24576`
+  - `elapsed_s=1.056243`
+
+This is a durability baseline, not a throughput target. The goal is to keep the remount/reopen path explicit and data-safe.
