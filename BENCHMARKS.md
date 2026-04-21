@@ -109,6 +109,8 @@ The effect is workload-sensitive: `off` helped some batch sizes and slightly hur
 
 `copy_skip_unchanged_blocks` should follow the same rule: keep it off for ordinary ingest and one-shot copies, and only enable it for rsync-like workloads or repeated copy-heavy syncs where destination blocks are often already identical. The extra destination reads can easily outweigh the saved writes if the file contents are usually changing anyway.
 
+Worker parallelism is still block-oriented, so `block_size` changes when a workload crosses the thresholds for `workers_read` or `workers_write`. It does not translate directly into "N bytes per thread"; it only changes how many blocks a given transfer is split into before the worker thresholds are applied.
+
 ### Bulk Write Profile Comparison
 
 Observed on the current `bulk_write` profile after restoring a stronger read-side:
