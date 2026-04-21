@@ -98,6 +98,30 @@ Observed on the current throughput profile:
 
 The effect is workload-sensitive: `off` helped some batch sizes and slightly hurt another, so the knob remains explicit rather than being forced globally.
 
+### Bulk Write Profile Comparison
+
+Observed on the current `bulk_write` profile after restoring a stronger read-side:
+
+- large sequential copy
+  - `bytes=67108864`
+  - `elapsed_s=29.543940`
+  - `throughput_mib_s=2.17`
+- large multi-block file write
+  - `bytes=67108864`
+  - `elapsed_s=32.200903`
+  - `throughput_mib_s=1.99`
+  - `write_seconds=27.864997`
+  - `persist_seconds=4.046285`
+  - `flush_seconds=4.219687`
+  - `finalization_seconds=8.265972`
+- flush/release profile
+  - `write_seconds=0.003869`
+  - `persist_seconds=0.007043`
+  - `flush_seconds=0.007144`
+  - `finalization_seconds=0.014187`
+
+The tuned `bulk_write` profile is now clearly profile-specific: it is still the right place to try for copy-heavy ingest, but on this host it does not outperform the balanced default for every write-heavy benchmark.
+
 ### PostgreSQL Session Cost
 
 Measured on a pooled DBFS backend:
