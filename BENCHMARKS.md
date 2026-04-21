@@ -29,11 +29,12 @@ Observed on a mounted DBFS instance:
 Observed on the current mounted DBFS instance with `DBFS_PROFILE_IO=1`:
 
 - `write_seconds=0.001677`
-- `persist_seconds=0.004565`
-- `flush_seconds=0.004616`
-- `finalization_seconds=0.009181`
+- `persist_seconds=0.004503`
+- `flush_seconds=0.004554`
+- `finalization_seconds=0.009057`
 
 The write side itself is now effectively negligible in this profile; the remaining work is concentrated in `persist_buffer()` and `flush()`.
+The latest small win came from switching block upserts inside `persist_buffer()` to PostgreSQL `execute_values()`, which shaved a bit off the total finalization path without changing write semantics.
 
 ## Throughput
 

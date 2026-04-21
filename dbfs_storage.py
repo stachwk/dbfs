@@ -3,6 +3,8 @@ from __future__ import annotations
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+from psycopg2.extras import execute_values
+
 
 class StorageSupport:
     PERSIST_BUFFER_CHUNK_BLOCKS = 128
@@ -150,14 +152,16 @@ class StorageSupport:
         chunk_size = max(1, int(getattr(self.owner, "persist_buffer_chunk_blocks", self.PERSIST_BUFFER_CHUNK_BLOCKS) or self.PERSIST_BUFFER_CHUNK_BLOCKS))
         for start in range(0, len(blocks), chunk_size):
             chunk = blocks[start:start + chunk_size]
-            cur.executemany(
+            execute_values(
+                cur,
                 """
                 INSERT INTO data_blocks (id_file, _order, data)
-                VALUES (%s, %s, %s)
+                VALUES %s
                 ON CONFLICT (id_file, _order)
                 DO UPDATE SET data = EXCLUDED.data
                 """,
                 chunk,
+                page_size=min(128, max(1, len(chunk))),
             )
 
     def _assemble_blocks(self, file_id, first_block, last_block):
