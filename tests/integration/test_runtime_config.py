@@ -17,7 +17,10 @@ def main():
     dsn, db_config = load_dsn_from_config(ROOT)
     runtime_config = load_dbfs_runtime_config(ROOT)
     previous_lock_backend = os.environ.get("DBFS_LOCK_BACKEND")
+    previous_sync_commit = os.environ.get("DBFS_SYNCHRONOUS_COMMIT")
+    os.environ.pop("DBFS_SYNCHRONOUS_COMMIT", None)
     os.environ["DBFS_LOCK_BACKEND"] = "memory"
+    fs = None
     try:
         fs = DBFS(dsn, db_config, runtime_config=runtime_config)
     finally:
@@ -39,6 +42,7 @@ def main():
         "workers_write_min_blocks": 8,
         "metadata_cache_ttl_seconds": 1,
         "statfs_cache_ttl_seconds": 2,
+        "synchronous_commit": "on",
         "lock_backend": "postgres_lease",
     }
 
@@ -54,8 +58,31 @@ def main():
     assert fs.workers_write_min_blocks == expected["workers_write_min_blocks"], fs.workers_write_min_blocks
     assert fs.metadata_cache_ttl_seconds == expected["metadata_cache_ttl_seconds"], fs.metadata_cache_ttl_seconds
     assert fs.statfs_cache_ttl_seconds == expected["statfs_cache_ttl_seconds"], fs.statfs_cache_ttl_seconds
+    assert fs.synchronous_commit == expected["synchronous_commit"], fs.synchronous_commit
     assert fs.lock_backend == expected["lock_backend"], fs.lock_backend
     assert fs.locking._pg_lock_manager is not None, fs.locking._pg_lock_manager
+
+    with fs.backend.connection() as conn, conn.cursor() as cur:
+        cur.execute("SHOW synchronous_commit")
+        assert cur.fetchone()[0] == "on", fs.synchronous_commit
+
+    os.environ["DBFS_SYNCHRONOUS_COMMIT"] = "off"
+    fs_override = None
+    try:
+        fs_override = DBFS(dsn, db_config, runtime_config=runtime_config)
+        assert fs_override.synchronous_commit == "off", fs_override.synchronous_commit
+        with fs_override.backend.connection() as conn, conn.cursor() as cur:
+            cur.execute("SHOW synchronous_commit")
+            assert cur.fetchone()[0] == "off", fs_override.synchronous_commit
+    finally:
+        if fs_override is not None:
+            fs_override.close()
+        if previous_sync_commit is None:
+            os.environ.pop("DBFS_SYNCHRONOUS_COMMIT", None)
+        else:
+            os.environ["DBFS_SYNCHRONOUS_COMMIT"] = previous_sync_commit
+
+    fs.close()
 
     print("OK runtime-config")
 

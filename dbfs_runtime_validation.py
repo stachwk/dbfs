@@ -19,6 +19,13 @@ RUNTIME_NUMERIC_SPECS = {
     "lock_poll_interval_seconds": (float, 1e-09, 0.1),
 }
 
+RUNTIME_ENUM_SPECS = {
+    "synchronous_commit": {
+        "allowed": {"on", "off", "local", "remote_write", "remote_apply"},
+        "default": "on",
+    },
+}
+
 
 def _coerce_typed_value(name, raw_value, caster, minimum, default):
     if raw_value is None or raw_value == "":
@@ -36,4 +43,14 @@ def validate_runtime_config(runtime_config):
     validated = dict(runtime_config or {})
     for name, (caster, minimum, default) in RUNTIME_NUMERIC_SPECS.items():
         validated[name] = _coerce_typed_value(name, validated.get(name), caster, minimum, default)
+    for name, spec in RUNTIME_ENUM_SPECS.items():
+        raw_value = validated.get(name)
+        if raw_value is None or raw_value == "":
+            validated[name] = spec["default"]
+            continue
+        value = str(raw_value).strip().lower()
+        if value not in spec["allowed"]:
+            allowed = ", ".join(sorted(spec["allowed"]))
+            raise ValueError(f"{name} must be one of: {allowed}")
+        validated[name] = value
     return validated

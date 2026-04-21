@@ -101,6 +101,7 @@ password = cichosza
 
 [dbfs]
 pool_max_connections = 10
+synchronous_commit = on
 write_flush_threshold_bytes = 67108864
 read_cache_blocks = 1024
 read_ahead_blocks = 4
@@ -250,6 +251,7 @@ DBFS jest sterowany przez flagi CLI, zmienne środowiskowe oraz wartości z plik
 | `DBFS_ENTRY_TIMEOUT_SECONDS` | Zmienna środowiskowa | `0` | Steruje TTL cache wpisów katalogu w FUSE. |
 | `DBFS_ATTR_TIMEOUT_SECONDS` | Zmienna środowiskowa | `0` | Steruje TTL cache atrybutów w FUSE. |
 | `DBFS_NEGATIVE_TIMEOUT_SECONDS` | Zmienna środowiskowa | `0` | Steruje TTL cache negatywnych wpisów w FUSE. |
+| `DBFS_SYNCHRONOUS_COMMIT` | Zmienna środowiskowa | `on` | Steruje `synchronous_commit` PostgreSQL dla każdego połączenia. |
 | `DBFS_PG_SSLMODE`, `DBFS_PG_SSLROOTCERT`, `DBFS_PG_SSLCERT`, `DBFS_PG_SSLKEY` | Zmienna środowiskowa | nieustawione | Nadpisuje parametry TLS połączenia do PostgreSQL. |
 
 ### Plik konfiguracyjny
@@ -279,6 +281,7 @@ Może też zawierać sekcję `[dbfs]` z:
 - `workers_write_min_blocks`
 - `metadata_cache_ttl_seconds`
 - `statfs_cache_ttl_seconds`
+- `synchronous_commit`
 
 ### Narzędzie do tworzenia schematu
 
@@ -449,14 +452,14 @@ Aktualne baseline'y porównawcze dla throughput, read cache i zachowania `atime`
 
 Jeśli potrzebujesz `allow_other`, uruchom mount z `DBFS_ALLOW_OTHER=1`, ale tylko wtedy, gdy `/etc/fuse.conf` na to pozwala.
 W `/etc/dbfs/dbfs_config.ini` można też dodać sekcję `[dbfs]` z `pool_max_connections = N`, żeby ograniczyć liczbę połączeń PostgreSQL, które może otworzyć pula DBFS. Ta sama sekcja może także ustawiać domyślne parametry storage/read, takie jak `write_flush_threshold_bytes`, `read_cache_blocks`, `read_ahead_blocks`, `sequential_read_ahead_blocks`, `small_file_read_threshold_blocks`, `metadata_cache_ttl_seconds` i `statfs_cache_ttl_seconds`. Jeśli tego pliku nie ma, DBFS użyje `dbfs_config.ini` z katalogu projektu.
-Ta sama sekcja może też ustawiać parametry wielowątkowości dla większych odczytów i kopiowania, takie jak `workers_read`, `workers_read_min_blocks`, `workers_write` i `workers_write_min_blocks`, które decydują, kiedy DBFS rozbija duże odczyty bloków na kilka workerów. Aktualne domyślne wartości są ustawione bardziej agresywnie, żeby lepiej wykorzystać równoległe pobieranie bloków przy dużych odczytach i kopiowaniu.
-Jeśli chcesz gotowy preset produkcyjny, ustaw `DBFS_PROFILE=bulk_write`, `DBFS_PROFILE=metadata_heavy` albo `DBFS_PROFILE=pg_locking` przed mountem. Wybrany profil nadpisuje bazowe wartości z `[dbfs]` w `dbfs_config.ini`.
+Ta sama sekcja może też ustawiać parametry wielowątkowości dla większych odczytów i kopiowania, takie jak `workers_read`, `workers_read_min_blocks`, `workers_write` i `workers_write_min_blocks`, które decydują, kiedy DBFS rozbija duże odczyty bloków na kilka workerów. Może też ustawiać `synchronous_commit`, żeby sterować trwałością sesji PostgreSQL dla każdego połączenia; dozwolone wartości to `on`, `off`, `local`, `remote_write` i `remote_apply`. Aktualne domyślne wartości są ustawione bardziej agresywnie, żeby lepiej wykorzystać równoległe pobieranie bloków przy dużych odczytach i kopiowaniu.
+Jeśli chcesz gotowy preset produkcyjny, ustaw `DBFS_PROFILE=bulk_write`, `DBFS_PROFILE=metadata_heavy` albo `DBFS_PROFILE=pg_locking` przed mountem. Wybrany profil nadpisuje bazowe wartości z `[dbfs]` w `dbfs_config.ini`. Dla deploymentów nastawionych na throughput możesz ustawić `synchronous_commit = off` w bazowej konfiguracji albo w własnym profilu.
 
 Wsparcie xattr dla SELinux jest sterowane przez `--selinux auto|on|off` albo `DBFS_SELINUX=auto|on|off`.
 Domyślnie jest `off`. `on` wymusza aktywację, a `auto` używa wykrywania po stronie hosta.
 Wsparcie POSIX ACL jest sterowane przez `--acl on|off` albo `DBFS_ACL=on|off`.
 Domyślnie jest `off`.
-Przy starcie DBFS loguje efektywny profil runtime, wersję schematu, ustawienia TLS PostgreSQL, tuning storage, opcje mounta i backend locków, więc można łatwo sprawdzić, jakie wartości faktycznie zostały zastosowane.
+Przy starcie DBFS loguje efektywny profil runtime, wersję schematu, ustawienia TLS PostgreSQL, trwałość sesji PostgreSQL (`synchronous_commit`), tuning storage, opcje mounta i backend locków, więc można łatwo sprawdzić, jakie wartości faktycznie zostały zastosowane.
 `DBFS_WRITE_FLUSH_THRESHOLD_BYTES` steruje tym, ile dirty danych może się zebrać, zanim DBFS auto-persystuje duży bufor podczas `write()`, `truncate()`, `fallocate()` albo `copy_file_range()`. Domyślna wartość to `67108864` bajtów.
 `metadata_cache_ttl_seconds` steruje krótkim cache TTL dla odczytów metadanych `getattr()` i `readdir()`. Domyślna wartość to `1` sekunda.
 `statfs_cache_ttl_seconds` steruje krótkim cache TTL dla `statfs()`. Domyślna wartość to `2` sekundy.

@@ -127,6 +127,7 @@ def main(argv: list[str] | None = None) -> None:
         dsn.get("sslcert", "") if isinstance(dsn, dict) else "",
         dsn.get("sslkey", "") if isinstance(dsn, dict) else "",
     )
+    logging.info("DBFS PostgreSQL synchronous_commit=%s", fs.synchronous_commit)
     logging.info(
         "DBFS storage tuning: write_flush_threshold=%s bytes read_cache_blocks=%s read_ahead_blocks=%s sequential_read_ahead_blocks=%s small_file_threshold_blocks=%s workers_read=%s workers_read_min_blocks=%s workers_write=%s workers_write_min_blocks=%s metadata_cache_ttl=%ss statfs_cache_ttl=%ss",
         fs.write_flush_threshold_bytes,

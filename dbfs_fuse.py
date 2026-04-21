@@ -61,8 +61,14 @@ class DBFS(Operations):
         self.dsn = dsn
         self.db_config = db_config
         self.runtime_config = validate_runtime_config(runtime_config or {})
-        self.backend = PostgresBackend(self.dsn, self.db_config, pool_max_connections=pool_max_connections)
         self.instance_id = uuid.uuid4().hex
+        self.synchronous_commit = self.resolve_synchronous_commit()
+        self.backend = PostgresBackend(
+            self.dsn,
+            self.db_config,
+            pool_max_connections=pool_max_connections,
+            synchronous_commit=self.synchronous_commit,
+        )
         self.pool_max_connections = self.backend.pool_max_connections
         self.connection_pool = self.backend.connection_pool
         self.xattr_acl = XattrAclSupport(self)
@@ -376,6 +382,19 @@ class DBFS(Operations):
         if configured_value and str(configured_value).strip().lower() != "postgres_lease":
             logging.warning("lock_backend=%s is ignored; postgres_lease is the only supported backend", configured_value)
         return "postgres_lease"
+
+    def resolve_synchronous_commit(self):
+        raw_value = os.environ.get("DBFS_SYNCHRONOUS_COMMIT")
+        if raw_value is None or raw_value == "":
+            value = self.runtime_config_get("synchronous_commit", "on")
+        else:
+            value = raw_value
+        value = "on" if value in {None, ""} else str(value).strip().lower()
+        allowed = {"on", "off", "local", "remote_write", "remote_apply"}
+        if value not in allowed:
+            allowed_values = ", ".join(sorted(allowed))
+            raise ValueError(f"synchronous_commit must be one of: {allowed_values}")
+        return value
 
     def resolve_lock_lease_ttl_seconds(self):
         raw_value = os.environ.get("DBFS_LOCK_LEASE_TTL_SECONDS")

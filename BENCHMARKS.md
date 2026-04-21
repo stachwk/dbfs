@@ -10,6 +10,7 @@ This file records the current comparison baselines for the main performance-sens
 - When a tuning change matters, the repository should record the before/after numbers here and in `TODO.md`.
 - DBFS assumes transactional PostgreSQL connections with `autocommit` disabled; the practical operating floor is PostgreSQL 9.5+, `read committed`, and `max_connections` above `pool_max_connections + 2`.
 - The next write-path comparison should separate `write` without `fsync`, `write` with `fsync`, and a larger `THROUGHPUT_BLOCK_SIZE` batch so the dominant bottleneck becomes explicit.
+- `synchronous_commit` is now a separate runtime knob; the latest local comparison did not show a win for `off` on this Docker-backed setup, so it is exposed for tuning rather than forced as the default.
 - PostgreSQL session normalization to UTC is now initialized once per physical pooled connection; the measured steady-state overhead is effectively the pool acquire/release plus a cheap `rollback()`.
 
 ## Current Baseline Snapshot
@@ -53,6 +54,23 @@ Current read:
 - `write` without `fsync` is still the fastest of the three.
 - `write` with `fsync` is the clearest durable-write penalty.
 - a larger `THROUGHPUT_BLOCK_SIZE` did not beat the current `4M` baseline on this run, so the bottleneck is not just block granularity.
+
+### Synchronous Commit
+
+Observed on the current flush/release profile:
+
+- `DBFS_SYNCHRONOUS_COMMIT=on`
+  - `write_seconds=0.001639`
+  - `persist_seconds=0.004723`
+  - `flush_seconds=0.004774`
+  - `finalization_seconds=0.009497`
+- `DBFS_SYNCHRONOUS_COMMIT=off`
+  - `write_seconds=0.001668`
+  - `persist_seconds=0.006771`
+  - `flush_seconds=0.006817`
+  - `finalization_seconds=0.013588`
+
+On this local Docker/PostgreSQL run, `off` did not improve the finalization path, so it is currently treated as an explicit tuning knob rather than a better default.
 
 ### PostgreSQL Session Cost
 

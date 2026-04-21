@@ -34,6 +34,7 @@ class MountConfig:
     lazytime: bool = False
     sync: bool = False
     dirsync: bool = False
+    synchronous_commit: str = "on"
     selinux_context: str = ""
     selinux_fscontext: str = ""
     selinux_defcontext: str = ""
@@ -56,6 +57,7 @@ class DBFSMount:
         self.lazytime = _bool_env(os.environ.get("DBFS_LAZYTIME", "0"))
         self.sync = _bool_env(os.environ.get("DBFS_SYNC", "0"))
         self.dirsync = _bool_env(os.environ.get("DBFS_DIRSYNC", "0"))
+        self.synchronous_commit = os.environ.get("DBFS_SYNCHRONOUS_COMMIT", "on")
         self.selinux_context = os.environ.get("DBFS_SELINUX_CONTEXT", "")
         self.selinux_fscontext = os.environ.get("DBFS_SELINUX_FSCONTEXT", "")
         self.selinux_defcontext = os.environ.get("DBFS_SELINUX_DEFCONTEXT", "")
@@ -128,6 +130,7 @@ class DBFSMount:
             lazytime=self.lazytime,
             sync=self.sync,
             dirsync=self.dirsync,
+            synchronous_commit=self.synchronous_commit,
             selinux_context=self.selinux_context,
             selinux_fscontext=self.selinux_fscontext,
             selinux_defcontext=self.selinux_defcontext,
@@ -142,6 +145,7 @@ class DBFSMount:
             env["DBFS_SELINUX_DEFCONTEXT"] = self.selinux_defcontext
         if self.selinux_rootcontext:
             env["DBFS_SELINUX_ROOTCONTEXT"] = self.selinux_rootcontext
+        env["DBFS_SYNCHRONOUS_COMMIT"] = self.synchronous_commit
 
         log_handle = open(log_file, "w", encoding="utf-8")
         self.process = subprocess.Popen(

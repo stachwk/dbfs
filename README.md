@@ -102,6 +102,7 @@ password = cichosza
 
 [dbfs]
 pool_max_connections = 10
+synchronous_commit = on
 write_flush_threshold_bytes = 67108864
 read_cache_blocks = 1024
 read_ahead_blocks = 4
@@ -251,6 +252,7 @@ DBFS is controlled by a mix of CLI flags, environment variables, and config file
 | `DBFS_ENTRY_TIMEOUT_SECONDS` | Environment | `0` | Controls FUSE directory-entry cache TTL. |
 | `DBFS_ATTR_TIMEOUT_SECONDS` | Environment | `0` | Controls FUSE attribute cache TTL. |
 | `DBFS_NEGATIVE_TIMEOUT_SECONDS` | Environment | `0` | Controls FUSE negative-entry cache TTL. |
+| `DBFS_SYNCHRONOUS_COMMIT` | Environment | `on` | Controls PostgreSQL `synchronous_commit` per connection. |
 | `DBFS_PG_SSLMODE`, `DBFS_PG_SSLROOTCERT`, `DBFS_PG_SSLCERT`, `DBFS_PG_SSLKEY` | Environment | unset | Overrides PostgreSQL TLS connection parameters. |
 
 ### Configuration File
@@ -280,6 +282,7 @@ It may also include a `[dbfs]` section with:
 - `workers_write_min_blocks`
 - `metadata_cache_ttl_seconds`
 - `statfs_cache_ttl_seconds`
+- `synchronous_commit`
 
 ### Schema Tool
 
@@ -450,13 +453,13 @@ The current comparison baselines for throughput, read cache, and atime behavior 
 
 If you need `allow_other`, run the mount with `DBFS_ALLOW_OTHER=1`, but only if your `/etc/fuse.conf` permits it.
 `/etc/dbfs/dbfs_config.ini` can also include a `[dbfs]` section with `pool_max_connections = N` to control how many PostgreSQL connections the filesystem pool may open. The same section can also set storage and read-tuning defaults such as `write_flush_threshold_bytes`, `read_cache_blocks`, `read_ahead_blocks`, `sequential_read_ahead_blocks`, `small_file_read_threshold_blocks`, `metadata_cache_ttl_seconds`, and `statfs_cache_ttl_seconds`. If that file does not exist, DBFS falls back to `dbfs_config.ini` in the project root.
-The same section may also set threaded read/write knobs such as `workers_read`, `workers_read_min_blocks`, `workers_write`, and `workers_write_min_blocks`, which control when DBFS splits large block fetches across multiple worker threads. The current defaults are tuned for more aggressive parallel block fetches on larger reads and copy operations.
-If you want a production-style preset, set `DBFS_PROFILE=bulk_write`, `DBFS_PROFILE=metadata_heavy`, or `DBFS_PROFILE=pg_locking` before mount. The selected profile overrides the base `[dbfs]` values from `dbfs_config.ini`.
+The same section may also set threaded read/write knobs such as `workers_read`, `workers_read_min_blocks`, `workers_write`, and `workers_write_min_blocks`, which control when DBFS splits large block fetches across multiple worker threads. It can also set `synchronous_commit` to control PostgreSQL session durability per connection; valid values are `on`, `off`, `local`, `remote_write`, and `remote_apply`. The current defaults are tuned for more aggressive parallel block fetches on larger reads and copy operations.
+If you want a production-style preset, set `DBFS_PROFILE=bulk_write`, `DBFS_PROFILE=metadata_heavy`, or `DBFS_PROFILE=pg_locking` before mount. The selected profile overrides the base `[dbfs]` values from `dbfs_config.ini`. For throughput-sensitive deployments you can set `synchronous_commit = off` in the base config or in a custom profile.
 SELinux xattr support is controlled with `--selinux auto|on|off` or `DBFS_SELINUX=auto|on|off`.
 The default is `off`. Use `on` to force it or `auto` if you want host-driven detection.
 POSIX ACL support is controlled with `--acl on|off` or `DBFS_ACL=on|off`.
 The default is `off`.
-At mount start DBFS logs the effective runtime profile, schema version, PostgreSQL TLS settings, storage tuning, mount options, and lock backend so you can verify the active configuration without guessing which defaults were applied.
+At mount start DBFS logs the effective runtime profile, schema version, PostgreSQL TLS settings, PostgreSQL session durability (`synchronous_commit`), storage tuning, mount options, and lock backend so you can verify the active configuration without guessing which defaults were applied.
 `DBFS_WRITE_FLUSH_THRESHOLD_BYTES` controls how much dirty data may accumulate before DBFS auto-persists a large write buffer during `write()`, `truncate()`, `fallocate()`, or `copy_file_range()`. The default is `67108864` bytes.
 `metadata_cache_ttl_seconds` controls the short TTL cache for `getattr()` and `readdir()` metadata lookups. The default is `1` second.
 `statfs_cache_ttl_seconds` controls the short TTL cache for `statfs()`. The default is `2` seconds.

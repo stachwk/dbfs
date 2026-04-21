@@ -32,11 +32,12 @@ def load_dbfs_runtime_config(file_path):
 
 
 class PostgresBackend:
-    def __init__(self, dsn, db_config, pool_max_connections=10):
+    def __init__(self, dsn, db_config, pool_max_connections=10, synchronous_commit="on"):
         self.dsn = dsn
         self.db_config = db_config
         self.pool_max_connections = self.resolve_pool_max_connections(pool_max_connections)
-        self._timezone_initialized_connection_ids = set()
+        self.synchronous_commit = self.resolve_synchronous_commit(synchronous_commit)
+        self._session_initialized_connection_ids = set()
         if isinstance(self.dsn, Mapping):
             self.connection_pool = psycopg2.pool.ThreadedConnectionPool(1, self.pool_max_connections, **self.dsn)
         else:
@@ -54,18 +55,42 @@ class PostgresBackend:
             return 1
         return pool_max_connections
 
+    def resolve_synchronous_commit(self, synchronous_commit):
+        value = "on" if synchronous_commit in {None, ""} else str(synchronous_commit).strip().lower()
+        allowed = {"on", "off", "local", "remote_write", "remote_apply"}
+        if value not in allowed:
+            allowed_values = ", ".join(sorted(allowed))
+            raise ValueError(f"synchronous_commit must be one of: {allowed_values}")
+        return value
+
+    def _physical_connection_id(self, conn):
+        raw_conn = getattr(conn, "_dbfs_raw_connection", conn)
+        return id(raw_conn), raw_conn
+
+    def _initialize_session_settings(self, conn):
+        conn_id, _ = self._physical_connection_id(conn)
+        if conn_id in self._session_initialized_connection_ids:
+            return
+        original_autocommit = conn.autocommit
+        try:
+            if not original_autocommit:
+                conn.autocommit = True
+            with conn.cursor() as cur:
+                cur.execute("SET TIME ZONE 'UTC'")
+                cur.execute(f"SET synchronous_commit TO '{self.synchronous_commit}'")
+        finally:
+            if conn.autocommit != original_autocommit:
+                conn.autocommit = original_autocommit
+        self._session_initialized_connection_ids.add(conn_id)
+
     @contextmanager
     def connection(self):
         conn = self.connection_pool.getconn()
-        raw_conn = getattr(conn, "_dbfs_raw_connection", conn)
+        _, raw_conn = self._physical_connection_id(conn)
         discarded = False
         try:
             conn.autocommit = False
-            conn_id = id(conn)
-            if conn_id not in self._timezone_initialized_connection_ids:
-                with conn.cursor() as cur:
-                    cur.execute("SET TIME ZONE 'UTC'")
-                self._timezone_initialized_connection_ids.add(conn_id)
+            self._initialize_session_settings(conn)
             yield conn
         except Exception as exc:
             if self.is_transient_connection_error(exc):
@@ -82,7 +107,7 @@ class PostgresBackend:
 
     def close(self):
         self.connection_pool.closeall()
-        self._timezone_initialized_connection_ids.clear()
+        self._session_initialized_connection_ids.clear()
 
     def is_transient_connection_error(self, exc):
         return isinstance(exc, (psycopg2.OperationalError, psycopg2.InterfaceError))
@@ -91,7 +116,7 @@ class PostgresBackend:
         if conn is None:
             return
         raw_conn = getattr(conn, "_dbfs_raw_connection", conn)
-        self._timezone_initialized_connection_ids.discard(id(raw_conn))
+        self._session_initialized_connection_ids.discard(id(raw_conn))
         try:
             self.connection_pool.putconn(raw_conn, close=True)
         except Exception:
