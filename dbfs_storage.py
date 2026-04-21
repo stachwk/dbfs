@@ -394,26 +394,8 @@ class StorageSupport:
         file_size = int(state["file_size"])
         block_size = self.owner.block_size
         total_blocks = (file_size + block_size - 1) // block_size if file_size > 0 else 0
-
-        overlay_blocks = state["overlay_blocks"]
-        ordered_dirty_blocks = sorted(dirty_blocks)
-        blocks = []
-
-        for block_index in ordered_dirty_blocks:
-            if block_index >= total_blocks:
-                # Blok poza EOF nie powinien byc upsertowany
-                continue
-
-            payload = overlay_blocks.get(block_index)
-            if payload is None:
-                continue
-
-            block_start = block_index * block_size
-            block_end = min(file_size, block_start + block_size)
-            used_len = max(0, block_end - block_start)
-
-            data = self._persist_block_payload(payload, used_len, block_size)
-            blocks.append((file_id, block_index, data))
+        truncate_only = bool(truncate_pending and not dirty_blocks)
+        blocks_written = 0
 
         started = time.perf_counter()
 
@@ -439,8 +421,30 @@ class StorageSupport:
                                 (file_id, total_blocks),
                             )
 
-                    if blocks:
-                        self._persist_block_chunks(cur, blocks)
+                    if not truncate_only:
+                        overlay_blocks = state["overlay_blocks"]
+                        ordered_dirty_blocks = sorted(dirty_blocks)
+                        blocks = []
+
+                        for block_index in ordered_dirty_blocks:
+                            if block_index >= total_blocks:
+                                # Blok poza EOF nie powinien byc upsertowany
+                                continue
+
+                            payload = overlay_blocks.get(block_index)
+                            if payload is None:
+                                continue
+
+                            block_start = block_index * block_size
+                            block_end = min(file_size, block_start + block_size)
+                            used_len = max(0, block_end - block_start)
+
+                            data = self._persist_block_payload(payload, used_len, block_size)
+                            blocks.append((file_id, block_index, data))
+
+                        if blocks:
+                            self._persist_block_chunks(cur, blocks)
+                            blocks_written = len(blocks)
 
                     cur.execute(
                         """
@@ -466,7 +470,7 @@ class StorageSupport:
             "persist_buffer",
             elapsed,
             bytes_count=file_size,
-            blocks=len(blocks),
+            blocks=blocks_written,
         )
 
         # Najbezpieczniejszy wariant: po flush usun stan z RAM

@@ -47,10 +47,15 @@ Observed on the current mounted DBFS instance with `DBFS_PROFILE_IO=1`:
   - `persist_seconds=0.005354`
   - `flush_seconds=0.005417`
   - `finalization_seconds=0.010771`
+- truncate-only flush/release on a large file
+  - `persist_seconds=0.002864`
+  - `flush_seconds=0.002901`
+  - `finalization_seconds=0.005765`
 
 The larger chunk setting shaved a bit off the finalization path on this run, so `bulk_write` now uses the larger batch size.
 The write side itself is now effectively negligible in this profile; the remaining work is concentrated in `persist_buffer()` and `flush()`.
 The latest small win came from switching block upserts inside `persist_buffer()` to PostgreSQL `execute_values()`, making the batch size configurable, and avoiding an extra copy when building block payloads for flush.
+Truncate-only finalization now short-circuits block packing when no dirty blocks remain, which keeps the large-file truncate path from paying extra Python-side work before the necessary tail delete.
 
 ## Throughput
 
