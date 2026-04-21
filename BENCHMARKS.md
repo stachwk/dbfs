@@ -9,6 +9,7 @@ This file records the current comparison baselines for the main performance-sens
 - `make test-throughput` and `make test-flush-release-profile` are the current write-path and finalization entry points.
 - When a tuning change matters, the repository should record the before/after numbers here and in `TODO.md`.
 - DBFS assumes transactional PostgreSQL connections with `autocommit` disabled; the practical operating floor is PostgreSQL 9.5+, `read committed`, and `max_connections` above `pool_max_connections + 2`.
+- The next write-path comparison should separate `write` without `fsync`, `write` with `fsync`, and a larger `THROUGHPUT_BLOCK_SIZE` batch so the dominant bottleneck becomes explicit.
 
 ## Current Baseline Snapshot
 
