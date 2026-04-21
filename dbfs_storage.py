@@ -167,6 +167,11 @@ class StorageSupport:
                 page_size=min(128, max(1, len(chunk))),
             )
 
+    def _persist_block_payload(self, payload, used_len, block_size):
+        if used_len >= block_size:
+            return memoryview(payload)[:block_size]
+        return bytes(payload[:used_len]) + (b"\x00" * (block_size - used_len))
+
     def _assemble_blocks(self, file_id, first_block, last_block):
         block_size = self.owner.block_size
         block_map = self._fetch_block_range(file_id, first_block, last_block)
@@ -407,10 +412,7 @@ class StorageSupport:
             block_end = min(file_size, block_start + block_size)
             used_len = max(0, block_end - block_start)
 
-            data = bytes(payload[:used_len])
-            if used_len < block_size:
-                data = data + (b"\x00" * (block_size - used_len))
-
+            data = self._persist_block_payload(payload, used_len, block_size)
             blocks.append((file_id, block_index, data))
 
         started = time.perf_counter()
