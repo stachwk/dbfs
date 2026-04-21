@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DBFS_PY="${ROOT}/dbfs_bootstrap.py"
+
+ROLE="${DBFS_ROLE:-auto}"
+SELINUX="${DBFS_SELINUX:-off}"
+ACL="${DBFS_ACL:-off}"
+ATIME_POLICY="${DBFS_ATIME_POLICY:-default}"
+DEFAULT_PERMISSIONS="${DBFS_DEFAULT_PERMISSIONS:-1}"
+LOG_LEVEL="${DBFS_LOG_LEVEL:-}"
+DEBUG="${DBFS_DEBUG:-0}"
+CONFIG_FILE="${DBFS_CONFIG:-}"
+POSITIONAL=()
+
+usage() {
+  cat <<'EOF'
+Usage:
+  mount.dbfs [source] <mountpoint> [mount-options]
+
+DBFS-specific options can be passed via -o, for example:
+  mount.dbfs /mnt/dbfs -o role=auto,selinux=off,acl=off,default_permissions
+
+If you want to override the config file, use:
+  DBFS_CONFIG=/path/to/dbfs_config.ini mount.dbfs /mnt/dbfs
+EOF
+}
+
+translate_option() {
+  local opt="$1"
+  case "${opt}" in
+    role=*)
+      ROLE="${opt#role=}"
+      ;;
+    selinux=*)
+      SELINUX="${opt#selinux=}"
+      ;;
+    acl=*)
+      ACL="${opt#acl=}"
+      ;;
+    atime-policy=*)
+      ATIME_POLICY="${opt#atime-policy=}"
+      ;;
+    default_permissions|default-permissions)
+      DEFAULT_PERMISSIONS=1
+      ;;
+    no_default_permissions|no-default-permissions)
+      DEFAULT_PERMISSIONS=0
+      ;;
+    debug)
+      DEBUG=1
+      ;;
+    log-level=*)
+      LOG_LEVEL="${opt#log-level=}"
+      ;;
+    config=*)
+      CONFIG_FILE="${opt#config=}"
+      ;;
+    dbfs_config=*)
+      CONFIG_FILE="${opt#dbfs_config=}"
+      ;;
+    ro)
+      ROLE="replica"
+      ;;
+    rw)
+      if [[ "${ROLE}" == "replica" ]]; then
+        ROLE="primary"
+      else
+        ROLE="auto"
+      fi
+      ;;
+    *)
+      ;;
+  esac
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -o)
+      shift
+      if [[ $# -eq 0 ]]; then
+        echo "mount.dbfs: missing argument after -o" >&2
+        exit 2
+      fi
+      IFS=',' read -r -a OPTS <<< "$1"
+      for opt in "${OPTS[@]}"; do
+        [[ -n "$opt" ]] && translate_option "$opt"
+      done
+      ;;
+    --)
+      shift
+      POSITIONAL+=("$@")
+      break
+      ;;
+    -*)
+      ;;
+    *)
+      POSITIONAL+=("$1")
+      ;;
+  esac
+  shift
+done
+
+if [[ ${#POSITIONAL[@]} -lt 1 ]]; then
+  usage >&2
+  exit 2
+fi
+
+MOUNTPOINT="${POSITIONAL[-1]}"
+
+export DBFS_ROLE="${ROLE}"
+export DBFS_SELINUX="${SELINUX}"
+export DBFS_ACL="${ACL}"
+export DBFS_ATIME_POLICY="${ATIME_POLICY}"
+export DBFS_DEFAULT_PERMISSIONS="${DEFAULT_PERMISSIONS}"
+if [[ -n "${LOG_LEVEL}" ]]; then
+  export DBFS_LOG_LEVEL="${LOG_LEVEL}"
+fi
+if [[ -n "${CONFIG_FILE}" ]]; then
+  export DBFS_CONFIG="${CONFIG_FILE}"
+fi
+if [[ "${DEBUG}" != "0" ]]; then
+  export DBFS_DEBUG="1"
+fi
+
+exec "${ROOT}/.venv/bin/python" "${DBFS_PY}" -f "${MOUNTPOINT}"

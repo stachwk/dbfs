@@ -1,0 +1,9 @@
+*.py[cod]
+__pycache__/
+.vscode/
+.dbfs/
+AGENTS.md
+tests/integration/__pycache__/
+.codex
+*.patch
+*.orgin

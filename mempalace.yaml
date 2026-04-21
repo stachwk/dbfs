@@ -1,0 +1,10 @@
+wing: dbfs
+rooms:
+- name: testing
+  description: Files from tests/
+  keywords:
+  - testing
+  - tests
+- name: general
+  description: Files that don't fit other rooms
+  keywords: []
