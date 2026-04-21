@@ -34,6 +34,7 @@ Workflow GitHub Actions uruchamia krótki job kompilacyjny oraz wybrany matrix t
 | Job | Co robi |
 | --- | --- |
 | `compile` | Byte-compiluje moduły core oraz obecne entry pointy testowe. |
+| `workflow runtime` | Wymusza Node 24 dla akcji JavaScript przed domyślną zmianą GitHuba. |
 | `test-runtime-config` | Sprawdza parsowanie runtime config i wynikowe wartości strojenia. |
 | `test-runtime-validation` | Sprawdza, że błędne wartości runtime fail-fast odrzucają start. |
 | `test-runtime-profile` | Sprawdza nazwane profile runtime. |

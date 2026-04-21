@@ -35,6 +35,7 @@ The GitHub Actions workflow runs a small compile job plus a curated test matrix:
 | Job | What it does |
 | --- | --- |
 | `compile` | Byte-compiles the core modules and the current integration-test entry points. |
+| `workflow runtime` | Forces JavaScript actions onto Node 24 ahead of the GitHub default switch. |
 | `test-runtime-config` | Verifies runtime config parsing and resolved tuning values. |
 | `test-runtime-validation` | Verifies invalid runtime tuning values fail fast. |
 | `test-runtime-profile` | Verifies named runtime profiles. |
