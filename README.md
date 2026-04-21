@@ -450,6 +450,7 @@ SELinux xattr support is controlled with `--selinux auto|on|off` or `DBFS_SELINU
 The default is `off`. Use `on` to force it or `auto` if you want host-driven detection.
 POSIX ACL support is controlled with `--acl on|off` or `DBFS_ACL=on|off`.
 The default is `off`.
+At mount start DBFS logs the effective runtime profile, schema version, PostgreSQL TLS settings, storage tuning, mount options, and lock backend so you can verify the active configuration without guessing which defaults were applied.
 `DBFS_WRITE_FLUSH_THRESHOLD_BYTES` controls how much dirty data may accumulate before DBFS auto-persists a large write buffer during `write()`, `truncate()`, `fallocate()`, or `copy_file_range()`. The default is `67108864` bytes.
 `metadata_cache_ttl_seconds` controls the short TTL cache for `getattr()` and `readdir()` metadata lookups. The default is `1` second.
 `statfs_cache_ttl_seconds` controls the short TTL cache for `statfs()`. The default is `2` seconds.

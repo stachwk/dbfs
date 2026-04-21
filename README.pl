@@ -450,6 +450,7 @@ Wsparcie xattr dla SELinux jest sterowane przez `--selinux auto|on|off` albo `DB
 Domyślnie jest `off`. `on` wymusza aktywację, a `auto` używa wykrywania po stronie hosta.
 Wsparcie POSIX ACL jest sterowane przez `--acl on|off` albo `DBFS_ACL=on|off`.
 Domyślnie jest `off`.
+Przy starcie DBFS loguje efektywny profil runtime, wersję schematu, ustawienia TLS PostgreSQL, tuning storage, opcje mounta i backend locków, więc można łatwo sprawdzić, jakie wartości faktycznie zostały zastosowane.
 `DBFS_WRITE_FLUSH_THRESHOLD_BYTES` steruje tym, ile dirty danych może się zebrać, zanim DBFS auto-persystuje duży bufor podczas `write()`, `truncate()`, `fallocate()` albo `copy_file_range()`. Domyślna wartość to `67108864` bajtów.
 `metadata_cache_ttl_seconds` steruje krótkim cache TTL dla odczytów metadanych `getattr()` i `readdir()`. Domyślna wartość to `1` sekunda.
 `statfs_cache_ttl_seconds` steruje krótkim cache TTL dla `statfs()`. Domyślna wartość to `2` sekundy.
