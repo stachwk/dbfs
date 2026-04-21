@@ -22,26 +22,71 @@ def main() -> None:
     os.environ.pop("DBFS_SYNCHRONOUS_COMMIT", None)
     fs = None
     try:
-        os.environ["DBFS_PROFILE"] = "bulk_write"
-        runtime_config = load_dbfs_runtime_config(config_path)
-        fs = DBFS(dsn, db_config, runtime_config=runtime_config)
-        assert fs.runtime_config_get("profile") == "bulk_write", fs.runtime_config
-        assert fs.synchronous_commit == "on", fs.synchronous_commit
-        assert fs.write_flush_threshold_bytes == 256 * 1024 * 1024, fs.write_flush_threshold_bytes
-        assert fs.read_cache_max_blocks == 512, fs.read_cache_max_blocks
-        assert fs.read_ahead_blocks == 2, fs.read_ahead_blocks
-        assert fs.sequential_read_ahead_blocks == 4, fs.sequential_read_ahead_blocks
-        assert fs.small_file_read_threshold_blocks == 4, fs.small_file_read_threshold_blocks
-        assert fs.workers_read == 4, fs.workers_read
-        assert fs.workers_read_min_blocks == 8, fs.workers_read_min_blocks
-        assert fs.workers_write == 8, fs.workers_write
-        assert fs.workers_write_min_blocks == 8, fs.workers_write_min_blocks
-        assert fs.persist_buffer_chunk_blocks == 512, fs.persist_buffer_chunk_blocks
-        assert fs.metadata_cache_ttl_seconds == 2, fs.metadata_cache_ttl_seconds
-        assert fs.statfs_cache_ttl_seconds == 2, fs.statfs_cache_ttl_seconds
-        with fs.backend.connection() as conn, conn.cursor() as cur:
-            cur.execute("SHOW synchronous_commit")
-            assert cur.fetchone()[0] == "on", fs.synchronous_commit
+        profile_expectations = [
+            (
+                "bulk_write",
+                {
+                    "write_flush_threshold_bytes": 256 * 1024 * 1024,
+                    "read_cache_max_blocks": 512,
+                    "read_ahead_blocks": 2,
+                    "sequential_read_ahead_blocks": 4,
+                    "small_file_read_threshold_blocks": 4,
+                    "workers_read": 2,
+                    "workers_read_min_blocks": 16,
+                    "workers_write": 8,
+                    "workers_write_min_blocks": 16,
+                    "persist_buffer_chunk_blocks": 512,
+                    "metadata_cache_ttl_seconds": 1,
+                    "statfs_cache_ttl_seconds": 1,
+                    "lock_poll_interval_seconds": 0.1,
+                },
+            ),
+            (
+                "metadata_heavy",
+                {
+                    "write_flush_threshold_bytes": 64 * 1024 * 1024,
+                    "read_cache_max_blocks": 2048,
+                    "read_ahead_blocks": 4,
+                    "sequential_read_ahead_blocks": 8,
+                    "small_file_read_threshold_blocks": 16,
+                    "workers_read": 2,
+                    "workers_read_min_blocks": 16,
+                    "workers_write": 2,
+                    "workers_write_min_blocks": 16,
+                    "persist_buffer_chunk_blocks": 64,
+                    "metadata_cache_ttl_seconds": 10,
+                    "statfs_cache_ttl_seconds": 10,
+                    "lock_poll_interval_seconds": 0.1,
+                },
+            ),
+            (
+                "pg_locking",
+                {
+                    "workers_read": 1,
+                    "workers_read_min_blocks": 16,
+                    "workers_write": 1,
+                    "workers_write_min_blocks": 16,
+                    "persist_buffer_chunk_blocks": 64,
+                    "metadata_cache_ttl_seconds": 1,
+                    "statfs_cache_ttl_seconds": 1,
+                    "lock_poll_interval_seconds": 0.05,
+                },
+            ),
+        ]
+
+        for profile_name, expectations in profile_expectations:
+            os.environ["DBFS_PROFILE"] = profile_name
+            runtime_config = load_dbfs_runtime_config(config_path)
+            fs = DBFS(dsn, db_config, runtime_config=runtime_config)
+            assert fs.runtime_config_get("profile") == profile_name, fs.runtime_config
+            assert fs.synchronous_commit == "on", fs.synchronous_commit
+            for attr_name, expected_value in expectations.items():
+                assert getattr(fs, attr_name) == expected_value, (profile_name, attr_name, getattr(fs, attr_name))
+            with fs.backend.connection() as conn, conn.cursor() as cur:
+                cur.execute("SHOW synchronous_commit")
+                assert cur.fetchone()[0] == "on", fs.synchronous_commit
+            fs.close()
+            fs = None
         print("OK runtime-profile")
     finally:
         if fs is not None:
