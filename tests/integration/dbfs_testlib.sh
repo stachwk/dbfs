@@ -7,6 +7,7 @@ dbfs_test_setup() {
   POSTGRES_DB="${POSTGRES_DB:-dbfsdbname}"
   POSTGRES_USER="${POSTGRES_USER:-dbfsuser}"
   POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-cichosza}"
+  DBFS_SCHEMA_ADMIN_PASSWORD="${DBFS_SCHEMA_ADMIN_PASSWORD:-dbfs-schema-admin-password}"
   DBFS_SELINUX="${DBFS_SELINUX:-off}"
   DBFS_ACL="${DBFS_ACL:-off}"
   DBFS_DEFAULT_PERMISSIONS="${DBFS_DEFAULT_PERMISSIONS:-1}"
@@ -51,7 +52,7 @@ dbfs_test_cleanup() {
 }
 
 dbfs_test_init_schema() {
-  POSTGRES_DB="${POSTGRES_DB}" POSTGRES_USER="${POSTGRES_USER}" POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" "${VENV_PYTHON}" "${ROOT}/mkfs.dbfs.py" init
+  POSTGRES_DB="${POSTGRES_DB}" POSTGRES_USER="${POSTGRES_USER}" POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" "${VENV_PYTHON}" "${ROOT}/mkfs.dbfs.py" init --schema-admin-password "${DBFS_SCHEMA_ADMIN_PASSWORD}"
 }
 
 dbfs_test_build_args() {

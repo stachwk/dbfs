@@ -422,6 +422,7 @@ Co sprawdzają testy:
 - `make test-rename-root-conflict` sprawdza replace semantics dla plików i katalogów oraz edge-case'y dla `rename` na root.
 - `make test-bmap` sprawdza logical block mapping dla regularnych plików i hardlinków. To nie jest fizyczny map bloków, tylko najbardziej stabilne mapowanie dostępne w filesystemie opartym o PostgreSQL.
 - `make test-statfs-use-ino` sprawdza, przez mały shell smoke, że inode widoczne na mountcie zgadzają się z backendem, a `statvfs()` zwraca te same wartości filesystemowe co backendowy helper `statfs()`.
+- `make test-mount-root-permissions` sprawdza świeży mount root oraz zachowanie chmod/chown/write dla katalogu na nowo zamontowanym filesystemie.
 - `make test-atime-noatime` sprawdza zachowanie `atime` DBFS w trybie `noatime` i potwierdza, że odczyt nie podnosi `atime`.
 - `make test-atime-relatime` sprawdza zachowanie `atime` DBFS w trybie `relatime` i potwierdza, że stary `atime` aktualizuje się po odczycie.
 - `make test-atime-benchmark` wypisuje krótki baseline wall-time dla zachowania `atime` DBFS na odczytach plików i listowaniu katalogów, żeby porównać uruchomienia `default`, `noatime` i `nodiratime` bez długiej pętli smoke.
