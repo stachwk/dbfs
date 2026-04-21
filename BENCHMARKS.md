@@ -27,10 +27,10 @@ Observed on a mounted DBFS instance:
 
 Observed on the current mounted DBFS instance with `DBFS_PROFILE_IO=1`:
 
-- `write_seconds=0.000035`
-- `persist_seconds=0.005019`
-- `flush_seconds=0.005066`
-- `finalization_seconds=0.010085`
+- `write_seconds=0.001677`
+- `persist_seconds=0.004565`
+- `flush_seconds=0.004616`
+- `finalization_seconds=0.009181`
 
 The write side itself is now effectively negligible in this profile; the remaining work is concentrated in `persist_buffer()` and `flush()`.
 
