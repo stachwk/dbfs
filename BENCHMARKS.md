@@ -22,11 +22,11 @@ This file records the current comparison baselines for the main performance-sens
 
 Observed on a mounted DBFS instance:
 
-- `4 KiB` burst writes: roughly `0.47 MB/s`
-- `1 MiB` write: roughly `1.77 MB/s`
-- `4 MiB` write: roughly `2.0 MB/s`
-- `8 MiB` write: roughly `2.4 MB/s`
-- `16 MiB` write: roughly `2.7 MB/s`
+- `4 KiB` burst writes: roughly `0.03 MiB/s`
+- `1 MiB` write: roughly `4.53 MiB/s`
+- `4 MiB` write: roughly `9.87 MiB/s`
+- `8 MiB` write: roughly `9.06 MiB/s`
+- `16 MiB` write: roughly `7.83 MiB/s`
 
 ### Finalization Profile
 
@@ -64,11 +64,11 @@ The write path has also been measured on a large sequential write where chunked 
 Recent comparison on the current runtime profile:
 
 - `THROUGHPUT_BLOCK_SIZE=4M THROUGHPUT_COUNT=8`
-  - `33554432 bytes in 12.910s (2.48 MiB/s)`
+  - `33554432 bytes in 6.217s (5.15 MiB/s)`
 - `THROUGHPUT_BLOCK_SIZE=4M THROUGHPUT_COUNT=8 THROUGHPUT_SYNC=1`
-  - `33554432 bytes in 15.187s (2.11 MiB/s)`
+  - `33554432 bytes in 6.476s (4.94 MiB/s)`
 - `THROUGHPUT_BLOCK_SIZE=8M THROUGHPUT_COUNT=4`
-  - `33554432 bytes in 14.467s (2.21 MiB/s)`
+  - `33554432 bytes in 6.388s (5.01 MiB/s)`
 
 Current read:
 - `write` without `fsync` is still the fastest of the three.
@@ -80,31 +80,30 @@ Current read:
 Observed on the current flush/release profile:
 
 - `DBFS_SYNCHRONOUS_COMMIT=on`
-  - `write_seconds=0.001639`
-  - `persist_seconds=0.004723`
-  - `flush_seconds=0.004774`
-  - `finalization_seconds=0.009497`
+  - `write_seconds=0.000605`
+  - `persist_seconds=0.007334`
+  - `flush_seconds=0.007374`
+  - `finalization_seconds=0.014708`
 - `DBFS_SYNCHRONOUS_COMMIT=off`
-  - `write_seconds=0.001668`
-  - `persist_seconds=0.006771`
-  - `flush_seconds=0.006817`
-  - `finalization_seconds=0.013588`
+  - `write_seconds=0.000870`
+  - `persist_seconds=0.005471`
+  - `flush_seconds=0.005533`
+  - `finalization_seconds=0.011004`
 
-On this local Docker/PostgreSQL run, `off` did not consistently improve the finalization path, so it is currently treated as an explicit tuning knob rather than a better default.
+On this local Docker/PostgreSQL run, `off` improved the flush/release path, while the overall throughput comparisons below still remain workload-sensitive, so it is kept as an explicit tuning knob rather than a forced default.
 
 #### Throughput Comparison
 
 Observed on the current throughput profile:
 
 - `4M x8`
-  - `DBFS_SYNCHRONOUS_COMMIT=off` -> `33554432 bytes in 10.704s (2.99 MiB/s)`
-  - `DBFS_SYNCHRONOUS_COMMIT=on` -> `33554432 bytes in 12.389s (2.58 MiB/s)`
+  - `DBFS_SYNCHRONOUS_COMMIT=off` -> `33554432 bytes in 6.217s (5.15 MiB/s)`
+  - `DBFS_SYNCHRONOUS_COMMIT=on` -> `33554432 bytes in 6.287s (5.09 MiB/s)`
 - `8M x4`
-  - `DBFS_SYNCHRONOUS_COMMIT=off` -> `33554432 bytes in 12.019s (2.66 MiB/s)`
-  - `DBFS_SYNCHRONOUS_COMMIT=on` -> `33554432 bytes in 12.223s (2.62 MiB/s)`
+  - `DBFS_SYNCHRONOUS_COMMIT=off` -> `33554432 bytes in 6.388s (5.01 MiB/s)`
 - `16M x2`
-  - `DBFS_SYNCHRONOUS_COMMIT=off` -> `33554432 bytes in 11.849s (2.70 MiB/s)`
-  - `DBFS_SYNCHRONOUS_COMMIT=on` -> `33554432 bytes in 11.696s (2.74 MiB/s)`
+  - `DBFS_SYNCHRONOUS_COMMIT=off` -> `33554432 bytes in 6.414s (4.99 MiB/s)`
+  - `DBFS_SYNCHRONOUS_COMMIT=on` -> `33554432 bytes in 6.484s (4.94 MiB/s)`
 
 The effect is workload-sensitive: `off` helped some batch sizes and slightly hurt another, so the knob remains explicit rather than being forced globally.
 
@@ -114,16 +113,16 @@ Observed on the current `bulk_write` profile after restoring a stronger read-sid
 
 - large sequential copy
   - `bytes=67108864`
-  - `elapsed_s=5.115157`
-  - `throughput_mib_s=12.51`
+  - `elapsed_s=2.491982`
+  - `throughput_mib_s=25.68`
 - large multi-block file write
   - `bytes=67108864`
-  - `elapsed_s=4.320222`
-  - `throughput_mib_s=14.81`
-  - `write_seconds=0.100199`
-  - `persist_seconds=4.077022`
-  - `flush_seconds=4.158470`
-  - `finalization_seconds=8.235492`
+  - `elapsed_s=2.229123`
+  - `throughput_mib_s=28.71`
+  - `write_seconds=0.072068`
+  - `persist_seconds=2.110270`
+  - `flush_seconds=2.112674`
+  - `finalization_seconds=4.222943`
 - flush/release profile
   - `write_seconds=0.001076`
   - `persist_seconds=0.006235`
@@ -138,22 +137,22 @@ The profile is still workload-specific, but it now clearly favors the intended i
 Measured on a pooled DBFS backend:
 
 - first pooled connection initialization:
-  - `first_ms=0.8013`
+  - `first_ms=1.0561`
 - steady state after warmup:
-  - `steady_mean_ms=0.0029`
-  - `steady_p95_ms=0.0032`
+  - `steady_mean_ms=0.2841`
+  - `steady_p95_ms=0.4627`
 
 Interpretation:
 
 - the UTC `SET TIME ZONE` cost is paid once per physical connection
-- after warmup, the remaining overhead is negligible compared with filesystem-level I/O
+- after warmup, the remaining overhead is sub-millisecond per acquire and still small compared with filesystem-level I/O
 
 ## Read Cache
 
 Sequential read-cache comparison:
 
 - `DBFS_READ_CACHE_BLOCKS=256` -> `elapsed_ms=14379`
-- `DBFS_READ_CACHE_BLOCKS=1024` -> `elapsed_ms=7563`
+- `DBFS_READ_CACHE_BLOCKS=1024` -> `elapsed_ms=3244`
 
 The larger cache is the current default and the tests keep the regression covered.
 
@@ -164,13 +163,13 @@ Comparison on the same `20 x 20` seeded tree:
 - default profile
   - `dirs=20`
   - `files_per_dir=20`
-  - `ls_ms=1184.08`
-  - `find_ms=21506.29`
+  - `ls_ms=621.00`
+  - `find_ms=9478.38`
 - `metadata_heavy`
   - `dirs=20`
   - `files_per_dir=20`
-  - `ls_ms=857.01`
-  - `find_ms=20448.25`
+  - `ls_ms=401.25`
+  - `find_ms=8581.42`
 
 `metadata_heavy` is noticeably better for `ls` on this tree and slightly better for `find`, which matches its goal: reduce metadata churn on tree-walking workloads without pushing the write side.
 
@@ -179,13 +178,13 @@ Comparison on the same `20 x 20` seeded tree:
 Short wall-time benchmark on file reads and directory listings:
 
 - file reads:
-  - `default=429 ms`
-  - `noatime=414 ms`
-  - `nodiratime=543 ms`
+  - `default=1742 ms`
+  - `noatime=453 ms`
+  - `nodiratime=1744 ms`
 - directory listings:
-  - `default=29489 ms`
-  - `noatime=30130 ms`
-  - `nodiratime=29949 ms`
+  - `default=70412 ms`
+  - `noatime=66684 ms`
+  - `nodiratime=65972 ms`
 
 The benchmark is useful as a smoke baseline, not as a strong microbenchmark for exact atime savings.
 
@@ -194,8 +193,8 @@ The benchmark is useful as a smoke baseline, not as a strong microbenchmark for 
 Large `copy_file_range()` benchmark on the current runtime profile:
 
 - `bytes=67108864`
-  - `elapsed_s=8.577647`
-  - `throughput_mib_s=7.46`
+  - `elapsed_s=2.491982`
+  - `throughput_mib_s=25.68`
 
 This is the current baseline for large backend copy operations.
 
@@ -204,12 +203,12 @@ This is the current baseline for large backend copy operations.
 Large multi-block file write benchmark on the current runtime profile:
 
 - `bytes=67108864`
-  - `elapsed_s=7.958002`
-  - `throughput_mib_s=8.04`
-  - `write_seconds=5.878233`
-  - `persist_seconds=1.997721`
-  - `flush_seconds=2.040917`
-  - `finalization_seconds=4.038638`
+  - `elapsed_s=2.229123`
+  - `throughput_mib_s=28.71`
+  - `write_seconds=0.072068`
+  - `persist_seconds=2.110270`
+  - `flush_seconds=2.112674`
+  - `finalization_seconds=4.222943`
 
 This baseline tracks a large file write split across many blocks so the write/persist split stays visible.
 
@@ -218,6 +217,6 @@ This baseline tracks a large file write split across many blocks so the write/pe
 Remount durability smoke benchmark on the current runtime profile:
 
 - `bytes=24576`
-  - `elapsed_s=1.056243`
+  - `elapsed_s=1.087950`
 
 This is a durability baseline, not a throughput target. The goal is to keep the remount/reopen path explicit and data-safe.
