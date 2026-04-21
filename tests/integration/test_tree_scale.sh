@@ -5,20 +5,99 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${ROOT}/tests/integration/dbfs_testlib.sh"
 dbfs_test_setup "${ROOT}"
 dbfs_test_make_mountpoint /tmp/dbfs-tree-scale
-trap dbfs_test_cleanup EXIT
+tree_scale_root_name="scale_${$}"
+
+dbfs_tree_scale_cleanup_db() {
+  "${VENV_PYTHON}" - "${POSTGRES_DB}" "${POSTGRES_USER}" "${POSTGRES_PASSWORD}" "${tree_scale_root_name}" <<'PY'
+import os
+import sys
+
+import psycopg2
+
+db_name, db_user, db_password, root_name = sys.argv[1:]
+conn = psycopg2.connect(
+    dbname=db_name,
+    user=db_user,
+    password=db_password,
+    host=os.environ.get("POSTGRES_HOST", "localhost"),
+    port=os.environ.get("POSTGRES_PORT", "5432"),
+)
+
+with conn, conn.cursor() as cur:
+    cur.execute(
+        """
+        WITH RECURSIVE subtree AS (
+            SELECT id_directory
+            FROM directories
+            WHERE id_parent IS NULL AND name = %s
+            UNION ALL
+            SELECT d.id_directory
+            FROM directories d
+            JOIN subtree s ON d.id_parent = s.id_directory
+        ),
+        file_ids AS (
+            SELECT id_file FROM files WHERE id_directory IN (SELECT id_directory FROM subtree)
+        )
+        DELETE FROM data_blocks WHERE id_file IN (SELECT id_file FROM file_ids)
+        """
+        ,
+        (root_name,),
+    )
+    cur.execute(
+        """
+        WITH RECURSIVE subtree AS (
+            SELECT id_directory
+            FROM directories
+            WHERE id_parent IS NULL AND name = %s
+            UNION ALL
+            SELECT d.id_directory
+            FROM directories d
+            JOIN subtree s ON d.id_parent = s.id_directory
+        )
+        DELETE FROM files WHERE id_directory IN (SELECT id_directory FROM subtree)
+        """,
+        (root_name,),
+    )
+    cur.execute(
+        """
+        WITH RECURSIVE subtree AS (
+            SELECT id_directory
+            FROM directories
+            WHERE id_parent IS NULL AND name = %s
+            UNION ALL
+            SELECT d.id_directory
+            FROM directories d
+            JOIN subtree s ON d.id_parent = s.id_directory
+        )
+        DELETE FROM directories WHERE id_directory IN (SELECT id_directory FROM subtree)
+        """,
+        (root_name,),
+    )
+
+conn.close()
+PY
+}
+
+dbfs_tree_scale_cleanup() {
+  set +e
+  dbfs_test_cleanup
+  dbfs_tree_scale_cleanup_db
+}
+
+trap dbfs_tree_scale_cleanup EXIT
 
 dbfs_test_init_schema
 
 dir_count="${TREE_SCALE_DIRS:-60}"
 files_per_dir="${TREE_SCALE_FILES:-100}"
 
-"${VENV_PYTHON}" - "${POSTGRES_DB}" "${POSTGRES_USER}" "${POSTGRES_PASSWORD}" "${dir_count}" "${files_per_dir}" <<'PY'
+"${VENV_PYTHON}" - "${POSTGRES_DB}" "${POSTGRES_USER}" "${POSTGRES_PASSWORD}" "${dir_count}" "${files_per_dir}" "${tree_scale_root_name}" <<'PY'
 import os
 import sys
 import psycopg2
 from psycopg2.extras import execute_values
 
-db_name, db_user, db_password, dir_count, files_per_dir = sys.argv[1:]
+db_name, db_user, db_password, dir_count, files_per_dir, root_name = sys.argv[1:]
 dir_count = int(dir_count)
 files_per_dir = int(files_per_dir)
 
@@ -40,13 +119,13 @@ with conn, conn.cursor() as cur:
         VALUES (%s, %s, '755', %s, %s, %s, NOW(), NOW(), NOW(), NOW())
         RETURNING id_directory
         """,
-        (None, "scale", uid, gid, "scale:root"),
+        (None, root_name, uid, gid, f"{root_name}:root"),
     )
     scale_id = cur.fetchone()[0]
 
     for dir_idx in range(dir_count):
         dir_name = f"d{dir_idx:03d}"
-        inode_seed = f"scale:dir:{dir_idx:03d}"
+        inode_seed = f"{root_name}:dir:{dir_idx:03d}"
         cur.execute(
             """
             INSERT INTO directories (id_parent, name, mode, uid, gid, inode_seed, modification_date, access_date, change_date, creation_date)
@@ -67,7 +146,7 @@ with conn, conn.cursor() as cur:
                     "644",
                     uid,
                     gid,
-                    f"scale:file:{dir_idx:03d}:{file_idx:03d}",
+                    f"{root_name}:file:{dir_idx:03d}:{file_idx:03d}",
                 )
             )
 
@@ -86,7 +165,7 @@ PY
 
 dbfs_test_start_mount "${MOUNTPOINT}"
 
-tree_root="${MOUNTPOINT}/scale"
+tree_root="${MOUNTPOINT}/${tree_scale_root_name}"
 sample_dir="${tree_root}/d000"
 sample_file="${sample_dir}/f000.txt"
 measure_find="/tmp/dbfs-tree-scale.find"

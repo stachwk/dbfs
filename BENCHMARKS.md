@@ -8,6 +8,7 @@ This file records the current comparison baselines for the main performance-sens
 - Throughput, finalization, read-cache, and atime numbers are treated as baselines, not fixed promises.
 - `make test-throughput` and `make test-flush-release-profile` are the current write-path and finalization entry points.
 - Additional write-oriented baselines now cover large `copy_file_range()` transfers, large multi-block file writes, and remount durability checks.
+- `test-tree-scale` now seeds a unique root per run and cleans it up afterward, so profile comparisons can be rerun on the same seed without duplicate-key conflicts.
 - When a tuning change matters, the repository should record the before/after numbers here and in `TODO.md`.
 - DBFS assumes transactional PostgreSQL connections with `autocommit` disabled; the practical operating floor is PostgreSQL 9.5+, `read committed`, and `max_connections` above `pool_max_connections + 2`.
 - The next write-path comparison should separate `write` without `fsync`, `write` with `fsync`, and a larger `THROUGHPUT_BLOCK_SIZE` batch so the dominant bottleneck becomes explicit.
@@ -120,6 +121,23 @@ Sequential read-cache comparison:
 - `DBFS_READ_CACHE_BLOCKS=1024` -> `elapsed_ms=7563`
 
 The larger cache is the current default and the tests keep the regression covered.
+
+## Tree Scale / Metadata Heavy
+
+Comparison on the same `20 x 20` seeded tree:
+
+- default profile
+  - `dirs=20`
+  - `files_per_dir=20`
+  - `ls_ms=1184.08`
+  - `find_ms=21506.29`
+- `metadata_heavy`
+  - `dirs=20`
+  - `files_per_dir=20`
+  - `ls_ms=857.01`
+  - `find_ms=20448.25`
+
+`metadata_heavy` is noticeably better for `ls` on this tree and slightly better for `find`, which matches its goal: reduce metadata churn on tree-walking workloads without pushing the write side.
 
 ## Atime Behavior
 
