@@ -225,6 +225,7 @@ Status: active design direction, but the main decisions below are already taken.
 - `LICENSE` is already set to MIT.
 - PostgreSQL TLS is optional: `sslmode=require` gives encryption, and `mkfs.dbfs.py --generate-client-tls-pair` can create a local client cert/key pair for certificate-auth setups during `init` or `upgrade`.
 - DBFS expects transactional PostgreSQL connections with `autocommit` disabled; `read committed` is sufficient for the current lock and metadata flows.
+- Detect single-node vs read-only replica mode early and let the runtime pick an appropriate lock strategy for each case; `postgres_lease` stays the default production backend for writable primary mounts.
 
 ## Notes
 
