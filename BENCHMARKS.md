@@ -134,6 +134,29 @@ Observed on the current `bulk_write` profile after restoring a stronger read-sid
 The write-path optimization that avoids loading brand-new blocks from PostgreSQL before writing them made the `bulk_write` profile much stronger on copy-heavy ingest and large multi-block writes.
 The profile is still workload-specific, but it now clearly favors the intended ingest/copy path while keeping finalization cost bounded.
 
+### Copy Dedupe / Repeated Copy
+
+Observed on a repeated copy where the destination already contained the same block content:
+
+- `copy_skip_unchanged_blocks=off`
+  - `bytes=67108864`
+  - `elapsed_s=8.557302`
+  - `throughput_mib_s=7.48`
+  - `write_seconds=0.000000`
+  - `persist_seconds=1.753822`
+  - `flush_seconds=0.000000`
+  - `finalization_seconds=1.753822`
+- `copy_skip_unchanged_blocks=on`
+  - `bytes=67108864`
+  - `elapsed_s=56.208670`
+  - `throughput_mib_s=1.14`
+  - `write_seconds=0.000000`
+  - `persist_seconds=0.000000`
+  - `flush_seconds=0.000000`
+  - `finalization_seconds=0.000000`
+
+This run shows that the dedupe path is only worth enabling for cases where avoiding rewritten destination blocks matters more than the extra comparison cost. For identical destination copies on this host, the comparison overhead is much higher than a normal replay of the write path, so the knob should stay off by default and be reserved for repeated sync-style workloads with a clear skip win.
+
 ### PostgreSQL Session Cost
 
 Measured on a pooled DBFS backend:

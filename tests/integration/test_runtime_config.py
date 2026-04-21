@@ -18,6 +18,7 @@ def main():
     runtime_config = load_dbfs_runtime_config(ROOT)
     previous_lock_backend = os.environ.get("DBFS_LOCK_BACKEND")
     previous_sync_commit = os.environ.get("DBFS_SYNCHRONOUS_COMMIT")
+    previous_copy_skip = os.environ.get("DBFS_COPY_SKIP_UNCHANGED_BLOCKS")
     os.environ.pop("DBFS_SYNCHRONOUS_COMMIT", None)
     os.environ["DBFS_LOCK_BACKEND"] = "memory"
     fs = None
@@ -87,6 +88,19 @@ def main():
             os.environ.pop("DBFS_SYNCHRONOUS_COMMIT", None)
         else:
             os.environ["DBFS_SYNCHRONOUS_COMMIT"] = previous_sync_commit
+
+    os.environ["DBFS_COPY_SKIP_UNCHANGED_BLOCKS"] = "1"
+    fs_copy_override = None
+    try:
+        fs_copy_override = DBFS(dsn, db_config, runtime_config=runtime_config)
+        assert fs_copy_override.copy_skip_unchanged_blocks is True, fs_copy_override.copy_skip_unchanged_blocks
+    finally:
+        if fs_copy_override is not None:
+            fs_copy_override.close()
+        if previous_copy_skip is None:
+            os.environ.pop("DBFS_COPY_SKIP_UNCHANGED_BLOCKS", None)
+        else:
+            os.environ["DBFS_COPY_SKIP_UNCHANGED_BLOCKS"] = previous_copy_skip
 
     fs.close()
 
