@@ -5,6 +5,16 @@ rooms:
   keywords:
   - testing
   - tests
+- name: migrations
+  description: Files from migrations/
+  keywords:
+  - migrations
+  - migrations
+- name: mod
+  description: Files from mod/
+  keywords:
+  - mod
+  - mod
 - name: general
   description: Files that don't fit other rooms
   keywords: []
