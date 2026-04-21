@@ -9,6 +9,56 @@ This document records the small set of open follow-ups plus completed work, clos
 - Keep the long-term direction visible: userspace FUSE + PostgreSQL backend + a native Rust storage/hot-path engine, with Python staying as the orchestration layer until the native core is ready.
 - When schema changes actually hit a limit or compatibility failure, add a concrete migration file plus a regression test instead of widening the schema bootstrap path ad hoc.
 
+## Target Architecture
+
+### Warstwa 1 - Python zostaje jako orchestrator
+
+Python should remain the orchestration and control plane for DBFS:
+
+- `dbfs_bootstrap.py`
+- `mkfs.dbfs.py`
+- config and profile loading
+- `dbfs_fuse.py` FUSE callbacks
+- administrative logic
+- schema migrations
+- integration tests
+- ACL / permissions / journal / runtime validation policy layers
+
+Why this stays in Python:
+
+- the project already has good modularity and test coverage around these areas
+- the README and roadmap already point toward thinner `dbfs_fuse.py`, more delegation, and explicit userspace layering
+
+### Warstwa 2 - Rust jako silnik storage hot-path
+
+Move only the CPU/memory-heavy hot path into Rust:
+
+- block engine
+- read block assembly
+- range slicing
+- overlay plus `block_map` merging
+- read buffer preparation
+- write overlay engine
+- `write_into_state()`
+- `truncate_to_size()`
+- dirty block management
+- block payload assembly for flush
+- copy engine
+- `copy_file_range_into_state()`
+- copy segmentation
+- worker coordination for read/write copy paths
+- segment ordering
+- persist preparation
+- list preparation for `(file_id, block_index, data)`
+- block padding
+- deleting blocks beyond EOF
+- dirty range accounting
+
+Why this matters:
+
+- the benchmarks show that write path and finalization are the main bottleneck, not the project structure itself
+- the highest-value Rust work is the part that reshapes data before SQL, not the SQL layer itself
+
 ## Archived Work
 
 ### Recent Architecture Cleanup
