@@ -15,13 +15,21 @@ class StorageSupport:
         return self.read_file_slice(file_id, 0, size)
 
     def get_file_size(self, file_id):
-        with self.owner.db_connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT size FROM files WHERE id_file = %s",
-                (file_id,),
-            )
-            result = cur.fetchone()
-            return int(result[0]) if result else 0
+        conn = None
+        for attempt in range(2):
+            try:
+                with self.owner.db_connection() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT size FROM files WHERE id_file = %s",
+                        (file_id,),
+                    )
+                    result = cur.fetchone()
+                    return int(result[0]) if result else 0
+            except Exception as exc:
+                if not self.owner.backend.is_transient_connection_error(exc) or attempt >= 1:
+                    raise
+                self.owner.backend.discard_connection(conn)
+                continue
 
     def read_cache_limit_blocks(self):
         return max(1, int(getattr(self.owner, "read_cache_max_blocks", 256) or 256))
@@ -76,19 +84,28 @@ class StorageSupport:
 
     def _fetch_block_range_chunk(self, file_id, first_block, last_block):
         result = {}
-        with self.owner.db_connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT _order, data
-                FROM data_blocks
-                WHERE id_file = %s AND _order BETWEEN %s AND %s
-                ORDER BY _order ASC
-                """,
-                (file_id, first_block, last_block),
-            )
-            for block_index, data in cur.fetchall():
-                result[block_index] = bytes(data)
-        return result
+        conn = None
+        for attempt in range(2):
+            try:
+                with self.owner.db_connection() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT _order, data
+                        FROM data_blocks
+                        WHERE id_file = %s AND _order BETWEEN %s AND %s
+                        ORDER BY _order ASC
+                        """,
+                        (file_id, first_block, last_block),
+                    )
+                    for block_index, data in cur.fetchall():
+                        result[block_index] = bytes(data)
+                    return result
+            except Exception as exc:
+                if not self.owner.backend.is_transient_connection_error(exc) or attempt >= 1:
+                    raise
+                self.owner.backend.discard_connection(conn)
+                result = {}
+                continue
 
     def _fetch_block_range(self, file_id, first_block, last_block):
         if last_block < first_block:
@@ -398,39 +415,48 @@ class StorageSupport:
 
         started = time.perf_counter()
 
-        with self.owner.db_connection() as conn, conn.cursor() as cur:
-            if total_blocks == 0:
-                cur.execute(
-                    """
-                    DELETE FROM data_blocks
-                    WHERE id_file = %s
-                    """,
-                    (file_id,),
-                )
-            else:
-                cur.execute(
-                    """
-                    DELETE FROM data_blocks
-                    WHERE id_file = %s AND _order >= %s
-                    """,
-                    (file_id, total_blocks),
-                )
+        conn = None
+        for attempt in range(2):
+            try:
+                with self.owner.db_connection() as conn, conn.cursor() as cur:
+                    if total_blocks == 0:
+                        cur.execute(
+                            """
+                            DELETE FROM data_blocks
+                            WHERE id_file = %s
+                            """,
+                            (file_id,),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            DELETE FROM data_blocks
+                            WHERE id_file = %s AND _order >= %s
+                            """,
+                            (file_id, total_blocks),
+                        )
 
-            if blocks:
-                self._persist_block_chunks(cur, blocks)
+                    if blocks:
+                        self._persist_block_chunks(cur, blocks)
 
-            cur.execute(
-                """
-                UPDATE files
-                SET size = %s,
-                    modification_date = NOW(),
-                    {file_ctime} = NOW()
-                WHERE id_file = %s
-                """.format(file_ctime=self.owner.ctime_column("files")),
-                (file_size, file_id),
-            )
+                    cur.execute(
+                        """
+                        UPDATE files
+                        SET size = %s,
+                            modification_date = NOW(),
+                            {file_ctime} = NOW()
+                        WHERE id_file = %s
+                        """.format(file_ctime=self.owner.ctime_column("files")),
+                        (file_size, file_id),
+                    )
 
-            conn.commit()
+                    conn.commit()
+                    break
+            except Exception as exc:
+                if not self.owner.backend.is_transient_connection_error(exc) or attempt >= 1:
+                    raise
+                self.owner.backend.discard_connection(conn)
+                continue
 
         elapsed = time.perf_counter() - started
         self.owner.record_io_profile(
@@ -498,16 +524,26 @@ class StorageSupport:
         if cached is not None:
             return cached
 
-        with self.owner.db_connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT data
-                FROM data_blocks
-                WHERE id_file = %s AND _order = %s
-                """,
-                (file_id, block_index),
-            )
-            row = cur.fetchone()
+        conn = None
+        row = None
+        for attempt in range(2):
+            try:
+                with self.owner.db_connection() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT data
+                        FROM data_blocks
+                        WHERE id_file = %s AND _order = %s
+                        """,
+                        (file_id, block_index),
+                    )
+                    row = cur.fetchone()
+                    break
+            except Exception as exc:
+                if not self.owner.backend.is_transient_connection_error(exc) or attempt >= 1:
+                    raise
+                self.owner.backend.discard_connection(conn)
+                continue
 
         if row is None:
             block = b"\x00" * self.owner.block_size
@@ -676,4 +712,3 @@ class StorageSupport:
             copied += len(payload)
 
         return copied
-

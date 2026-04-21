@@ -20,6 +20,7 @@ Projekt skupia się na:
 - Warstwa metadanych/zapytań oraz krótkie cache TTL zostały wydzielone do `dbfs_metadata.py`, logika dopisywania do journala żyje teraz w `dbfs_journal.py`, polityka uprawnień/własności została wydzielona do `dbfs_permissions.py`, a walidacja mount/runtime żyje teraz w `dbfs_runtime_validation.py`, więc główny moduł FUSE nie trzyma już bezpośrednio tych warstw helperów.
 - SELinux działa jako xattr z runtime gating; pełna polityka mount-label jest celowo poza zakresem.
 - PostgreSQL TLS jest opcjonalny i konfigurowalny; DBFS może też wygenerować lokalną parę certyfikat/klucz na żądanie.
+- Przejściowe zerwania połączenia PostgreSQL w gorącej ścieżce odczytu/zapisu są ponawiane raz, z zachowaniem stanu po stronie procesu klienta, więc aktywny dirty write state i cache odczytu mogą przetrwać próbę reconnect.
 - Migracja lock managera już się dokonała: PostgreSQL-backed leases są produkcyjną ścieżką dla zarówno `flock`, jak i range-locków `fcntl`, z TTL i heartbeat. `make test-locking` pozostaje zestawem semantyki locków, a `make test-pg-lock-manager` pokrywa produkcyjny backend PostgreSQL, w tym regresję dla dwóch klientów piszących do tego samego pliku, która pokazuje że DBFS nie pozwala im rozjechać zapisów chronionych lockiem.
 - `make test-pg-lock-manager` pokrywa produkcyjny backend locków oparty o PostgreSQL, w tym regresję dla dwóch klientów piszących do tego samego pliku, która pokazuje że DBFS nie pozwala im rozjechać zapisów chronionych lockiem.
 - Zmiany schematu żyją teraz w `migrations/` z sekwencyjnymi wersjami, jawnym eksportem `mkfs.dbfs.py status` i ścieżką upgrade ze starszych stanów schematu.
@@ -56,6 +57,7 @@ Workflow GitHub Actions uruchamia krótki job kompilacyjny oraz wybrany matrix t
 - `make test-all` jest głównym targetem regresji; workflow mounta są pokryte, ale CI skupia się na wybranym zestawie stabilnym w automatyzacji.
 - Upgrade schematu jest na razie zachowawczy: `init` jest idempotentne i nie niszczy istniejących obiektów, `upgrade` naprawia brakujący stan schematu i przywraca bieżącą wersję, ale repo nie ma jeszcze długiego łańcucha plików migracji.
 - DBFS normalizuje timestampy przez sesję PostgreSQL ustawioną na UTC oraz konwersje po stronie Pythona, więc lokalne różnice stref czasowych nie przesuwają metadanych. Ustawienie UTC jest inicjalizowane raz na fizyczne połączenie z puli, a nie przy każdej operacji filesystemu, i nie opiera się na domyślnych ustawieniach tworzenia bazy.
+- Recovery jest ograniczone do ponawiania przejściowych disconnectów w gorącej ścieżce odczytu/zapisu; DBFS trzyma stan dirty i cache w pamięci procesu, ale nie robi jeszcze pełnego replay dowolnych trwających operacji SQL.
 
 Licencja: MIT
 

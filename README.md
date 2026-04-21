@@ -22,6 +22,7 @@ The project focuses on:
 - Metadata caching is now explicitly split between attribute cache and directory-entry cache instead of using one shared payload shape for both.
 - SELinux is xattr-backed with runtime gating; full mount-label policy is intentionally out of scope.
 - PostgreSQL TLS is optional and config-driven; DBFS can also generate a local client cert/key pair when requested.
+- Transient PostgreSQL disconnects in the read/write hot path are retried once with state preserved in the client process, so in-flight dirty write state and read caches can survive a reconnect attempt.
 - PostgreSQL-backed leases are the production lock path for both `flock` and `fcntl` range locks, with TTL and heartbeat. `make test-locking` remains the lock-semantics suite, while `make test-pg-lock-manager` covers the production PostgreSQL-backed backend, including a multi-client same-file write regression that proves two DBFS clients do not trample each other's lock-protected writes.
 - Schema changes live under `migrations/` with sequential versions, an explicit `mkfs.dbfs.py status` export, and an upgrade path from older schema states.
 - The current DBFS version is defined in `dbfs_version.py`, and both `dbfs_bootstrap.py --version` and `mkfs.dbfs.py --version` should print the same value.
@@ -57,6 +58,7 @@ The GitHub Actions workflow runs a small compile job plus a curated test matrix:
 - `make test-all` is the main regression target; mount-heavy workflows are covered, but CI is still focused on a curated subset that is stable in automation.
 - Schema upgrades are currently conservative: `init` is idempotent and non-destructive, `upgrade` repairs missing schema state and restores the current version, but the repo does not yet ship a long chain of migration files.
 - DBFS normalizes timestamps through a UTC PostgreSQL session and UTC-aware conversions on the Python side so local timezone differences do not shift metadata. The UTC session setup is initialized once per physical pooled connection, not on every filesystem operation, and the database creation defaults are not relied on.
+- Recovery is limited to retrying transient disconnects on the read/write hot path; DBFS keeps in-memory dirty state and caches across reconnects, but it does not yet implement full replay of arbitrary in-flight SQL work.
 
 License: MIT
 

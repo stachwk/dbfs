@@ -15,7 +15,7 @@ from dbfs_fuse import DBFS, load_dsn_from_config
 
 
 def ensure_schema_ready() -> None:
-    schema_password = os.environ.get("DBFS_SCHEMA_ADMIN_PASSWORD") or secrets.token_urlsafe(24)
+    schema_password = os.environ.get("DBFS_SCHEMA_ADMIN_PASSWORD") or f"dbfs-{secrets.token_urlsafe(24)}"
     result = subprocess.run(
         [
             sys.executable,

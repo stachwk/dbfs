@@ -39,7 +39,7 @@ def main() -> None:
     env.setdefault("POSTGRES_DB", db_config["dbname"])
     env.setdefault("POSTGRES_USER", db_config["user"])
     env.setdefault("POSTGRES_PASSWORD", db_config["password"])
-    schema_password = os.environ.get("DBFS_SCHEMA_ADMIN_PASSWORD") or secrets.token_urlsafe(24)
+    schema_password = os.environ.get("DBFS_SCHEMA_ADMIN_PASSWORD") or f"dbfs-{secrets.token_urlsafe(24)}"
     schema_args = ["--schema-admin-password", schema_password]
 
     with psycopg2.connect(**db_config) as conn, conn.cursor() as cur:

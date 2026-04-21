@@ -8,7 +8,7 @@ dbfs_test_setup() {
   POSTGRES_USER="${POSTGRES_USER:-dbfsuser}"
   POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-cichosza}"
   if [[ -z "${DBFS_SCHEMA_ADMIN_PASSWORD:-}" ]]; then
-    DBFS_SCHEMA_ADMIN_PASSWORD="$("${VENV_PYTHON}" -c 'import secrets; print(secrets.token_urlsafe(24))')"
+    DBFS_SCHEMA_ADMIN_PASSWORD="$("${VENV_PYTHON}" -c 'import secrets; print("dbfs-" + secrets.token_urlsafe(24))')"
   fi
   DBFS_SELINUX="${DBFS_SELINUX:-off}"
   DBFS_ACL="${DBFS_ACL:-off}"

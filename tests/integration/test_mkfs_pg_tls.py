@@ -110,7 +110,7 @@ def main():
             calls.append((str(material_path), common_name, days))
             return cert_path, key_path
 
-        schema_password = os.environ.get("DBFS_SCHEMA_ADMIN_PASSWORD") or secrets.token_urlsafe(24)
+        schema_password = os.environ.get("DBFS_SCHEMA_ADMIN_PASSWORD") or f"dbfs-{secrets.token_urlsafe(24)}"
 
         def fake_ensure_schema_admin_secret(db_config_arg, password):
             assert password == schema_password, password

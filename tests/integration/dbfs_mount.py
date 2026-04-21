@@ -47,7 +47,7 @@ class DBFSMount:
         self.postgres_db = os.environ.get("POSTGRES_DB", "dbfsdbname")
         self.postgres_user = os.environ.get("POSTGRES_USER", "dbfsuser")
         self.postgres_password = os.environ.get("POSTGRES_PASSWORD", "cichosza")
-        self.schema_admin_password = os.environ.get("DBFS_SCHEMA_ADMIN_PASSWORD") or secrets.token_urlsafe(24)
+        self.schema_admin_password = os.environ.get("DBFS_SCHEMA_ADMIN_PASSWORD") or f"dbfs-{secrets.token_urlsafe(24)}"
         self.role = (role or os.environ.get("DBFS_ROLE", "auto")).lower()
         self.selinux = os.environ.get("DBFS_SELINUX", "off")
         self.acl = os.environ.get("DBFS_ACL", "off")

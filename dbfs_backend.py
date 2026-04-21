@@ -57,6 +57,8 @@ class PostgresBackend:
     @contextmanager
     def connection(self):
         conn = self.connection_pool.getconn()
+        raw_conn = getattr(conn, "_dbfs_raw_connection", conn)
+        discarded = False
         try:
             conn.autocommit = False
             conn_id = id(conn)
@@ -65,16 +67,35 @@ class PostgresBackend:
                     cur.execute("SET TIME ZONE 'UTC'")
                 self._timezone_initialized_connection_ids.add(conn_id)
             yield conn
+        except Exception as exc:
+            if self.is_transient_connection_error(exc):
+                discarded = True
+                self.discard_connection(raw_conn)
+            raise
         finally:
             try:
                 conn.rollback()
             except Exception:
                 pass
-            self.connection_pool.putconn(conn)
+            if not discarded:
+                self.connection_pool.putconn(raw_conn)
 
     def close(self):
         self.connection_pool.closeall()
         self._timezone_initialized_connection_ids.clear()
+
+    def is_transient_connection_error(self, exc):
+        return isinstance(exc, (psycopg2.OperationalError, psycopg2.InterfaceError))
+
+    def discard_connection(self, conn):
+        if conn is None:
+            return
+        raw_conn = getattr(conn, "_dbfs_raw_connection", conn)
+        self._timezone_initialized_connection_ids.discard(id(raw_conn))
+        try:
+            self.connection_pool.putconn(raw_conn, close=True)
+        except Exception:
+            pass
 
     def get_config_value(self, key, default=None):
         with self.connection() as conn, conn.cursor() as cur:
