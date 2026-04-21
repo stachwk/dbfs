@@ -107,6 +107,8 @@ Observed on the current throughput profile:
 
 The effect is workload-sensitive: `off` helped some batch sizes and slightly hurt another, so the knob remains explicit rather than being forced globally.
 
+`copy_skip_unchanged_blocks` should follow the same rule: keep it off for ordinary ingest and one-shot copies, and only enable it for rsync-like workloads or repeated copy-heavy syncs where destination blocks are often already identical. The extra destination reads can easily outweigh the saved writes if the file contents are usually changing anyway.
+
 ### Bulk Write Profile Comparison
 
 Observed on the current `bulk_write` profile after restoring a stronger read-side:
