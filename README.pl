@@ -16,7 +16,7 @@ Projekt skupia się na:
 - Główne operacje FUSE są zaimplementowane i pokryte testami integracyjnymi.
 - `make test-all` przechodzi, a `make test-all-full` jest dostępne jako szerszy zestaw.
 - Odczyty korzystają teraz z blokowego ładowania z małym cache i read-ahead zamiast pełnego ładowania pliku przy każdym dostępie.
-- Warstwa lookup/namespace została wydzielona do `dbfs_namespace.py`, a repozytorium mutacji/zapytań namespace żyje teraz w `dbfs_repository.py`, więc główny moduł FUSE nie trzyma już bezpośrednio logiki rozwiązywania ścieżek, ID ani CRUD dla namespace. Rozwiązywanie katalogów używa teraz cache'owanych rekursywnych CTE, a rozwiązywanie wpisów jest zebrane tak, by zmniejszyć liczbę round-tripów do namespace.
+- Warstwa lookup/namespace została wydzielona do `dbfs_namespace.py`, a logika mutacji/zapytań namespace jest teraz rozbita na `dbfs_repository.py` jako wrapper oraz `dbfs_repository_lookup.py`, `dbfs_repository_create.py` i `dbfs_repository_delete.py`, więc główny moduł FUSE nie trzyma już bezpośrednio logiki rozwiązywania ścieżek, ID ani CRUD dla namespace. Rozwiązywanie katalogów używa teraz cache'owanych rekursywnych CTE, a rozwiązywanie wpisów jest zebrane tak, by zmniejszyć liczbę round-tripów do namespace.
 - Warstwa metadanych/zapytań oraz krótkie cache TTL zostały wydzielone do `dbfs_metadata.py`, logika dopisywania do journala żyje teraz w `dbfs_journal.py`, polityka uprawnień/własności została wydzielona do `dbfs_permissions.py`, a walidacja mount/runtime żyje teraz w `dbfs_runtime_validation.py`, więc główny moduł FUSE nie trzyma już bezpośrednio tych warstw helperów.
 - SELinux działa jako xattr z runtime gating; pełna polityka mount-label jest celowo poza zakresem.
 - PostgreSQL TLS jest opcjonalny i konfigurowalny; DBFS może też wygenerować lokalną parę certyfikat/klucz na żądanie.
@@ -520,3 +520,21 @@ Opcje widoczne w mount:
 | `dbfs-relaxed` | Lokalny dev i smoke testy | `--no-default-permissions`, `DBFS_ACL=off`, `DBFS_SELINUX=off`, `--atime-policy default` |
 | `dbfs-linux-default` | Najbliżej typowego mounta Linuksa | `--default-permissions`, `DBFS_ACL=off`, `DBFS_SELINUX=off`, `--atime-policy relatime` |
 | `dbfs-selinux` | Środowiska z SELinux | `--default-permissions`, `DBFS_ACL=on`, `DBFS_SELINUX=auto` albo `on`, `DBFS_SELINUX_CONTEXT` według potrzeb |
+
+## Rekomendowane workloady
+
+| Profil runtime | Dobry dla | Dlaczego |
+| --- | --- | --- |
+| `dbfs-relaxed` | Lokalny development, smoke runy i szybkie testy ręczne | Najmniej restrykcyjna polityka i najluźniejsza semantyka mounta. |
+| `dbfs-linux-default` | Mieszane workloady z zachowaniem zbliżonym do typowego mounta Linuksa | Zbalansowane ustawienia dla ACL-off, SELinux-off i zachowania podobnego do relatime. |
+| `bulk_write` | Duży ingest sekwencyjny, `copy_file_range()`, testy throughputu, durability po remount | Większe batchowanie flush i bardziej agresywne strojenie strony zapisu. |
+| `metadata_heavy` | `ls`, `find`, `stat`, przeglądanie głębokich drzew, operacje tylko na metadanych | Dłuższy TTL cache metadanych i bardziej zachowawcza presja na write path. |
+| `pg_locking` | Koordynacja wielu klientów i testy regresji locków | Strojenie backendu locków z krótszym poll interval do sprawdzania lease'ów. |
+
+## Antywzorce
+
+- Nie używaj `bulk_write` do nawigacji po metadanych albo pracy na wielu małych plikach; ten profil jest pod throughput, nie pod niską latencję namespace.
+- Nie używaj `metadata_heavy` do dużego sekwencyjnego ingestu albo `copy_file_range()`; ten profil jest świadomie bardziej zachowawczy po stronie zapisu.
+- Nie używaj `dbfs-relaxed` dla wieloużytkowych albo produkcyjnych mountów, gdzie potrzebujesz bardziej linuksowej semantyki uprawnień.
+- Nie traktuj `synchronous_commit=off` jako domyślnego ustawienia trwałości; stosuj je tylko wtedy, gdy workload akceptuje kompromis i benchmark pokazuje sens.
+- Nie oczekuj, że `pg_locking` sam poprawi throughput zapisu; ten profil dotyczy koordynacji i semantyki, a nie przyspieszania data path.

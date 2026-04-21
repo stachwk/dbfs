@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 from dbfs_repository_lookup import NamespaceRepositoryLookup
-from dbfs_repository_mutations import NamespaceRepositoryMutations
+from dbfs_repository_create import NamespaceRepositoryCreateMutations
+from dbfs_repository_delete import NamespaceRepositoryDeleteMutations
 
 
-class NamespaceRepository(NamespaceRepositoryLookup, NamespaceRepositoryMutations):
+class NamespaceRepository(
+    NamespaceRepositoryLookup,
+    NamespaceRepositoryCreateMutations,
+    NamespaceRepositoryDeleteMutations,
+):
     def __init__(self, dbfs):
         self.dbfs = dbfs
         self._lookup_epoch = None

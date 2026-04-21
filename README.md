@@ -16,7 +16,7 @@ The project focuses on:
 - Core FUSE operations are implemented and covered by integration tests.
 - `make test-all` passes, and `make test-all-full` is available for wider coverage.
 - Reads use block-range loading with a small read cache and read-ahead instead of loading whole files on every access.
-- Lookup and namespace resolution have been split into `dbfs_namespace.py`, while namespace mutation and query logic now live in `dbfs_repository.py`.
+- Lookup and namespace resolution have been split into `dbfs_namespace.py`, while namespace mutation and query logic are now split across `dbfs_repository.py` as a wrapper plus `dbfs_repository_lookup.py`, `dbfs_repository_create.py`, and `dbfs_repository_delete.py`.
 - The main FUSE module no longer owns direct path/ID resolution, namespace CRUD, or the query layer for `getattr()` / `readdir()`; those flows delegate through explicit repository wrappers.
 - Metadata/query helpers and short-TTL caches have been split into `dbfs_metadata.py`, journal append logic lives in `dbfs_journal.py`, permission/ownership policy lives in `dbfs_permissions.py`, and mount/runtime validation lives in `dbfs_runtime_validation.py`.
 - Metadata caching is now explicitly split between attribute cache and directory-entry cache instead of using one shared payload shape for both.
@@ -520,3 +520,21 @@ Mount-time visibility options:
 | `dbfs-relaxed` | Simple local dev and smoke runs | `--no-default-permissions`, `DBFS_ACL=off`, `DBFS_SELINUX=off`, `--atime-policy default` |
 | `dbfs-linux-default` | Closest to a typical Linux mount | `--default-permissions`, `DBFS_ACL=off`, `DBFS_SELINUX=off`, `--atime-policy relatime` |
 | `dbfs-selinux` | SELinux-aware environments | `--default-permissions`, `DBFS_ACL=on`, `DBFS_SELINUX=auto` or `on`, `DBFS_SELINUX_CONTEXT` as needed |
+
+## Recommended Workloads
+
+| Runtime profile | Good fit | Why |
+| --- | --- | --- |
+| `dbfs-relaxed` | Local development, smoke runs, and quick manual checks | Minimal policy friction and the loosest mount semantics. |
+| `dbfs-linux-default` | Mixed workloads that should feel close to a normal Linux mount | Balanced defaults for ACL-off, SELinux-off, and relatime-style behavior. |
+| `bulk_write` | Large sequential ingest, `copy_file_range()`, throughput runs, remount durability checks | Larger write flush batches and more aggressive write-side tuning. |
+| `metadata_heavy` | `ls`, `find`, `stat`, browsing deep trees, many small metadata-only operations | Longer metadata cache TTL and more conservative write pressure. |
+| `pg_locking` | Multi-client coordination and lock regression tests | Lock backend tuning only, with a shorter poll interval for lease checks. |
+
+## Anti-Patterns
+
+- Do not use `bulk_write` for metadata storms or tiny-file interactive browsing; it is tuned for throughput, not low-latency namespace churn.
+- Do not use `metadata_heavy` for large sequential ingest or `copy_file_range()` workloads; it is intentionally conservative on the write side.
+- Do not use `dbfs-relaxed` for multi-user or production-like mounts that need Linux-like permission semantics.
+- Do not treat `synchronous_commit=off` as a default durability setting; use it only when the workload accepts the trade-off and the benchmark says it is worthwhile.
+- Do not expect the `pg_locking` profile to improve write throughput by itself; it is about coordination semantics, not data-path speed.
