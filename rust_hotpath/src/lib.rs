@@ -131,6 +131,13 @@ pub fn contiguous_ranges(values: &[u64]) -> Vec<(u64, u64)> {
     ranges
 }
 
+pub fn sorted_contiguous_ranges(values: &[u64]) -> Vec<(u64, u64)> {
+    let mut sorted = values.to_vec();
+    sorted.sort_unstable();
+    sorted.dedup();
+    contiguous_ranges(&sorted)
+}
+
 pub fn read_ahead_blocks(
     read_ahead_blocks: u64,
     sequential_read_ahead_blocks: u64,
@@ -286,9 +293,14 @@ pub fn write_copy_plan(
         workers_write_min_blocks,
         true,
     );
-    let dedupe_enabled = copy_dedupe_enabled
-        && total_blocks >= copy_dedupe_min_blocks.max(1)
-        && (copy_dedupe_max_blocks == 0 || total_blocks <= copy_dedupe_max_blocks);
+    let dedupe_enabled = write_copy_dedupe_plan(
+        length,
+        block_size,
+        copy_dedupe_enabled,
+        copy_dedupe_min_blocks,
+        copy_dedupe_max_blocks,
+    )
+    .1;
     (total_blocks, dedupe_enabled, parallel, workers)
 }
 
@@ -387,7 +399,7 @@ mod tests {
     use super::{
         assemble_read_slice, block_count_for_length, copy_segments, pack_changed_copy_pairs,
         block_transfer_plan, pack_changed_ranges, pad_block_bytes, parallel_worker_count,
-        parallel_worker_plan,
+        parallel_worker_plan, sorted_contiguous_ranges,
         read_ahead_blocks, read_fetch_bounds, read_missing_range_worker_count, read_slice_plan,
         write_copy_dedupe_plan, write_copy_plan, write_copy_worker_count,
     };
@@ -557,6 +569,14 @@ mod tests {
         assert_eq!(parallel_worker_plan(4, 8, 8, 1), (false, 1));
         assert_eq!(parallel_worker_plan(4, 8, 9, 3), (true, 3));
         assert_eq!(parallel_worker_plan(8, 8, 9, 12), (true, 8));
+    }
+
+    #[test]
+    fn sorts_and_packs_contiguous_ranges() {
+        assert_eq!(
+            sorted_contiguous_ranges(&[7, 3, 4, 10, 11, 11, 8]),
+            vec![(3, 4), (7, 8), (10, 11)]
+        );
     }
 
     #[test]

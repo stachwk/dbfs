@@ -6,7 +6,7 @@ use crate::{
     copy_segments, crc32_bytes, pack_changed_ranges, pad_block_bytes, read_ahead_blocks,
     read_fetch_bounds,
     parallel_worker_count, parallel_worker_plan, read_missing_range_worker_count, read_slice_plan,
-    write_copy_dedupe_plan, write_copy_plan, write_copy_worker_count,
+    sorted_contiguous_ranges, write_copy_dedupe_plan, write_copy_plan, write_copy_worker_count,
 };
 
 #[repr(C)]
@@ -599,6 +599,71 @@ pub extern "C" fn dbfs_contiguous_missing_ranges(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn dbfs_sorted_contiguous_ranges(
+    values_ptr: *const u64,
+    values_len: usize,
+    out_ptr: *mut *mut DbfsRange,
+    out_len: *mut usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if values_len == 0 {
+            return write_boxed_output(Vec::<DbfsRange>::new(), out_ptr, out_len);
+        }
+        if values_ptr.is_null() {
+            return 1;
+        }
+        let values = slice::from_raw_parts(values_ptr, values_len);
+        let ranges = sorted_contiguous_ranges(values)
+            .into_iter()
+            .map(|(start, end)| DbfsRange { start, end })
+            .collect::<Vec<_>>();
+        write_boxed_output(ranges, out_ptr, out_len)
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_dirty_block_ranges_plan(
+    file_size: u64,
+    block_size: u64,
+    dirty_ptr: *const u64,
+    dirty_len: usize,
+    out_total_blocks: *mut u64,
+    out_ptr: *mut *mut DbfsRange,
+    out_len: *mut usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if out_total_blocks.is_null() {
+            return 1;
+        }
+        let total_blocks = block_count_for_length(file_size, block_size, false);
+        if dirty_len == 0 {
+            *out_total_blocks = total_blocks;
+            return write_boxed_output(Vec::<DbfsRange>::new(), out_ptr, out_len);
+        }
+        if dirty_ptr.is_null() {
+            return 1;
+        }
+        let dirty = slice::from_raw_parts(dirty_ptr, dirty_len);
+        let ranges = sorted_contiguous_ranges(dirty)
+            .into_iter()
+            .map(|(start, end)| DbfsRange { start, end })
+            .collect::<Vec<_>>();
+        *out_total_blocks = total_blocks;
+        write_boxed_output(ranges, out_ptr, out_len)
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn dbfs_free_copy_segments(ptr: *mut DbfsCopySegment, len: usize) {
     if ptr.is_null() || len == 0 {
         return;
@@ -638,11 +703,12 @@ mod tests {
         dbfs_copy_pack, dbfs_copy_plan, dbfs_crc32, dbfs_free_bytes, dbfs_free_copy_segments,
         dbfs_free_ranges, dbfs_persist_pad, dbfs_read_assemble, dbfs_read_ahead_blocks,
         dbfs_read_fetch_bounds, dbfs_read_missing_range_worker_count, dbfs_read_sequence_step,
-        dbfs_read_slice_plan, dbfs_block_transfer_plan, dbfs_parallel_worker_count,
-        dbfs_parallel_worker_plan, dbfs_write_copy_dedupe_plan, dbfs_write_copy_plan,
-        dbfs_write_copy_worker_count, DbfsBlockTransferPlan, DbfsCopySegment,
-        DbfsParallelWorkerPlan, DbfsRange, DbfsReadBlock, DbfsReadBounds, DbfsReadSlicePlan,
-        DbfsWriteCopyDedupePlan, DbfsWriteCopyPlan,
+        dbfs_read_slice_plan, dbfs_sorted_contiguous_ranges, dbfs_block_transfer_plan,
+        dbfs_dirty_block_ranges_plan, dbfs_parallel_worker_count, dbfs_parallel_worker_plan,
+        dbfs_write_copy_dedupe_plan, dbfs_write_copy_plan, dbfs_write_copy_worker_count,
+        DbfsBlockTransferPlan, DbfsCopySegment, DbfsParallelWorkerPlan, DbfsRange,
+        DbfsReadBlock, DbfsReadBounds, DbfsReadSlicePlan, DbfsWriteCopyDedupePlan,
+        DbfsWriteCopyPlan,
     };
 
     #[test]
@@ -818,6 +884,61 @@ mod tests {
                 DbfsRange { start: 2, end: 4 },
                 DbfsRange { start: 7, end: 8 },
                 DbfsRange { start: 10, end: 10 },
+            ]
+        );
+        dbfs_free_ranges(out_ptr, out_len);
+    }
+
+    #[test]
+    fn exports_sorted_contiguous_ranges() {
+        let missing = [7u64, 3, 4, 10, 11, 11, 8];
+        let mut out_ptr: *mut DbfsRange = std::ptr::null_mut();
+        let mut out_len: usize = 0;
+
+        let status = dbfs_sorted_contiguous_ranges(
+            missing.as_ptr(),
+            missing.len(),
+            &mut out_ptr,
+            &mut out_len,
+        );
+        assert_eq!(status, 0);
+        let ranges = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(
+            ranges,
+            &[
+                DbfsRange { start: 3, end: 4 },
+                DbfsRange { start: 7, end: 8 },
+                DbfsRange { start: 10, end: 11 },
+            ]
+        );
+        dbfs_free_ranges(out_ptr, out_len);
+    }
+
+    #[test]
+    fn exports_dirty_block_ranges_plan() {
+        let dirty = [7u64, 3, 4, 10, 11, 11, 8];
+        let mut total_blocks = 0u64;
+        let mut out_ptr: *mut DbfsRange = std::ptr::null_mut();
+        let mut out_len: usize = 0;
+
+        let status = dbfs_dirty_block_ranges_plan(
+            65536,
+            4096,
+            dirty.as_ptr(),
+            dirty.len(),
+            &mut total_blocks,
+            &mut out_ptr,
+            &mut out_len,
+        );
+        assert_eq!(status, 0);
+        assert_eq!(total_blocks, 16);
+        let ranges = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(
+            ranges,
+            &[
+                DbfsRange { start: 3, end: 4 },
+                DbfsRange { start: 7, end: 8 },
+                DbfsRange { start: 10, end: 11 },
             ]
         );
         dbfs_free_ranges(out_ptr, out_len);

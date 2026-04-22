@@ -157,7 +157,7 @@ class StorageSupport:
         if not missing:
             return []
 
-        stepped = self._missing_block_ranges_rust_ffi(missing)
+        stepped = self._sorted_contiguous_ranges_rust_ffi(missing)
         if stepped is not None:
             return stepped
 
@@ -581,6 +581,23 @@ class StorageSupport:
             ctypes.POINTER(ctypes.c_size_t),
         ]
         lib.dbfs_contiguous_missing_ranges.restype = ctypes.c_int
+        lib.dbfs_sorted_contiguous_ranges.argtypes = [
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.POINTER(DbfsRange)),
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        lib.dbfs_sorted_contiguous_ranges.restype = ctypes.c_int
+        lib.dbfs_dirty_block_ranges_plan.argtypes = [
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.POINTER(DbfsRange)),
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        lib.dbfs_dirty_block_ranges_plan.restype = ctypes.c_int
 
         self._rust_hotpath_lib_handle = lib
         return lib
@@ -674,6 +691,12 @@ class StorageSupport:
             ctypes.c_ubyte(1 if minimum_one else 0),
         )
         return int(result.total_blocks), bool(result.parallel), int(result.workers)
+
+    def _block_transfer_total_blocks_rust_ffi(self, length, block_size, minimum_one):
+        plan = self._block_transfer_plan_rust_ffi(length, block_size, 1, 1, minimum_one)
+        if plan is None:
+            return None
+        return int(plan[0])
 
     def _read_missing_range_worker_count_rust_ffi(self, workers_read, workers_read_min_blocks, missing_len, contiguous_ranges_len):
         plan = self._parallel_worker_plan_rust_ffi(
@@ -820,6 +843,62 @@ class StorageSupport:
 
         try:
             return [(int(out_ptr[i].start), int(out_ptr[i].end)) for i in range(out_len.value)]
+        finally:
+            lib.dbfs_free_ranges(out_ptr, out_len)
+
+    def _sorted_contiguous_ranges_rust_ffi(self, values):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        values = [int(block_index) for block_index in values]
+        if not values:
+            return []
+
+        values_array = (ctypes.c_uint64 * len(values))(*values)
+        out_ptr = ctypes.POINTER(DbfsRange)()
+        out_len = ctypes.c_size_t()
+
+        rc = lib.dbfs_sorted_contiguous_ranges(
+            values_array,
+            ctypes.c_size_t(len(values)),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+        )
+        if rc != 0:
+            return None
+
+        try:
+            return [(int(out_ptr[i].start), int(out_ptr[i].end)) for i in range(out_len.value)]
+        finally:
+            lib.dbfs_free_ranges(out_ptr, out_len)
+
+    def _dirty_block_ranges_plan_rust_ffi(self, file_size, block_size, dirty_blocks):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        dirty_blocks = [int(block_index) for block_index in dirty_blocks]
+        dirty_array = (ctypes.c_uint64 * len(dirty_blocks))(*dirty_blocks) if dirty_blocks else None
+        out_total_blocks = ctypes.c_uint64()
+        out_ptr = ctypes.POINTER(DbfsRange)()
+        out_len = ctypes.c_size_t()
+
+        rc = lib.dbfs_dirty_block_ranges_plan(
+            ctypes.c_uint64(int(file_size)),
+            ctypes.c_uint64(int(block_size)),
+            dirty_array,
+            ctypes.c_size_t(len(dirty_blocks)),
+            ctypes.byref(out_total_blocks),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+        )
+        if rc != 0:
+            return None
+
+        try:
+            ranges = [(int(out_ptr[i].start), int(out_ptr[i].end)) for i in range(out_len.value)]
+            return int(out_total_blocks.value), ranges
         finally:
             lib.dbfs_free_ranges(out_ptr, out_len)
 
@@ -1137,13 +1216,9 @@ class StorageSupport:
 
         plan = self._read_slice_plan_rust_ffi(file_size, offset, size, block_size, sequential, streak)
         if plan is None:
-            transfer_plan = self._block_transfer_plan_rust_ffi(file_size, block_size, 1, 1, False)
-            if transfer_plan is None:
-                total_blocks = self._block_count_for_length_rust_ffi(file_size, block_size, False)
-                if total_blocks is None:
-                    total_blocks = (file_size + block_size - 1) // block_size
-            else:
-                total_blocks, _, _ = transfer_plan
+            total_blocks = self._block_transfer_total_blocks_rust_ffi(file_size, block_size, False)
+            if total_blocks is None:
+                total_blocks = (file_size + block_size - 1) // block_size
             if total_blocks == 0:
                 return b""
 
@@ -1306,13 +1381,9 @@ class StorageSupport:
         state = self.ensure_write_state(file_id)
         file_size = int(state["file_size"])
         block_size = self.owner.block_size
-        transfer_plan = self._block_transfer_plan_rust_ffi(file_size, block_size, 1, 1, False)
-        if transfer_plan is None:
-            total_blocks = self._block_count_for_length_rust_ffi(file_size, block_size, False)
-            if total_blocks is None:
-                total_blocks = (file_size + block_size - 1) // block_size if file_size > 0 else 0
-        else:
-            total_blocks, _, _ = transfer_plan
+        total_blocks = self._block_transfer_total_blocks_rust_ffi(file_size, block_size, False)
+        if total_blocks is None:
+            total_blocks = (file_size + block_size - 1) // block_size if file_size > 0 else 0
         for block_index in range(total_blocks):
             self._mark_dirty_block(state, block_index, file_size)
 
@@ -1372,13 +1443,27 @@ class StorageSupport:
 
         file_size = int(state["file_size"])
         block_size = self.owner.block_size
-        transfer_plan = self._block_transfer_plan_rust_ffi(file_size, block_size, 1, 1, False)
-        if transfer_plan is None:
-            total_blocks = self._block_count_for_length_rust_ffi(file_size, block_size, False)
+        plan = self._dirty_block_ranges_plan_rust_ffi(file_size, block_size, dirty_blocks)
+        if plan is None:
+            total_blocks = self._block_transfer_total_blocks_rust_ffi(file_size, block_size, False)
             if total_blocks is None:
                 total_blocks = (file_size + block_size - 1) // block_size if file_size > 0 else 0
+            ordered_dirty_ranges = self._sorted_contiguous_ranges_rust_ffi(dirty_blocks)
+            if ordered_dirty_ranges is None:
+                ordered_dirty_ranges = []
+                ordered_dirty_blocks = sorted(dirty_blocks)
+                if ordered_dirty_blocks:
+                    range_start = ordered_dirty_blocks[0]
+                    range_end = ordered_dirty_blocks[0]
+                    for block_index in ordered_dirty_blocks[1:]:
+                        if block_index == range_end + 1:
+                            range_end = block_index
+                            continue
+                        ordered_dirty_ranges.append((range_start, range_end))
+                        range_start = range_end = block_index
+                    ordered_dirty_ranges.append((range_start, range_end))
         else:
-            total_blocks, _, _ = transfer_plan
+            total_blocks, ordered_dirty_ranges = plan
         truncate_only = bool(truncate_pending and not dirty_blocks)
         blocks_written = 0
 
@@ -1422,24 +1507,23 @@ class StorageSupport:
 
                     if not truncate_only:
                         overlay_blocks = state["overlay_blocks"]
-                        ordered_dirty_blocks = sorted(dirty_blocks)
                         block_rows = []
-                        for block_index in ordered_dirty_blocks:
-                            if block_index >= total_blocks:
-                                # Blok poza EOF nie powinien byc upsertowany
+                        for range_start, range_end in ordered_dirty_ranges:
+                            if range_start >= total_blocks:
                                 continue
+                            range_end = min(range_end, total_blocks - 1)
+                            for block_index in range(range_start, range_end + 1):
+                                payload = overlay_blocks.get(block_index)
+                                if payload is None:
+                                    continue
 
-                            payload = overlay_blocks.get(block_index)
-                            if payload is None:
-                                continue
+                                block_start = block_index * block_size
+                                block_end = min(file_size, block_start + block_size)
+                                used_len = max(0, block_end - block_start)
 
-                            block_start = block_index * block_size
-                            block_end = min(file_size, block_start + block_size)
-                            used_len = max(0, block_end - block_start)
-
-                            data = self._persist_block_payload(payload, used_len, block_size)
-                            block_rows.append((file_id, block_index, data, used_len))
-                            blocks_written += 1
+                                data = self._persist_block_payload(payload, used_len, block_size)
+                                block_rows.append((file_id, block_index, data, used_len))
+                                blocks_written += 1
 
                         if block_rows:
                             self._persist_block_chunks(
@@ -2033,7 +2117,7 @@ class StorageSupport:
         workers_write_min_blocks = max(1, int(getattr(self.owner, "workers_write_min_blocks", 8) or 8))
         plan = self._block_transfer_plan_rust_ffi(length, block_size, workers_write, workers_write_min_blocks, True)
         if plan is None:
-            total_blocks = self._block_count_for_length_rust_ffi(length, block_size, True)
+            total_blocks = self._block_transfer_total_blocks_rust_ffi(length, block_size, True)
             if total_blocks is None:
                 total_blocks = max(1, (length + block_size - 1) // block_size)
             skip_unchanged_blocks = bool(getattr(self.owner, "copy_dedupe_enabled", False))

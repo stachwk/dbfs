@@ -19,11 +19,12 @@ def main() -> None:
         ([], []),
         ([1], [(1, 1)]),
         ([2, 3, 4, 7, 8, 10], [(2, 4), (7, 8), (10, 10)]),
+        ([7, 3, 4, 10, 11, 11, 8], [(3, 4), (7, 8), (10, 11)]),
         ([5, 7, 8, 9, 12, 13], [(5, 5), (7, 9), (12, 13)]),
     ]
 
     for missing, expected in cases:
-        result = storage._missing_block_ranges_rust_ffi(missing)
+        result = storage._sorted_contiguous_ranges_rust_ffi(missing)
         assert result is not None, missing
         assert result == expected, (missing, result, expected)
         assert storage._missing_block_ranges(missing) == expected
