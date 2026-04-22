@@ -50,6 +50,30 @@ class DbfsReadBounds(ctypes.Structure):
     ]
 
 
+class DbfsReadSlicePlan(ctypes.Structure):
+    _fields_ = [
+        ("total_blocks", ctypes.c_uint64),
+        ("fetch_first", ctypes.c_uint64),
+        ("fetch_last", ctypes.c_uint64),
+    ]
+
+
+class DbfsParallelWorkerPlan(ctypes.Structure):
+    _fields_ = [
+        ("parallel", ctypes.c_ubyte),
+        ("workers", ctypes.c_uint64),
+    ]
+
+
+class DbfsWriteCopyPlan(ctypes.Structure):
+    _fields_ = [
+        ("total_blocks", ctypes.c_uint64),
+        ("dedupe_enabled", ctypes.c_ubyte),
+        ("parallel", ctypes.c_ubyte),
+        ("workers", ctypes.c_uint64),
+    ]
+
+
 class StorageSupport:
     PERSIST_BUFFER_CHUNK_BLOCKS = 128
 
@@ -177,17 +201,21 @@ class StorageSupport:
             workers_read_min_blocks = max(1, int(getattr(self.owner, "workers_read_min_blocks", 8) or 8))
             contiguous_ranges = self._missing_block_ranges(missing)
 
-            max_workers = self._read_missing_range_worker_count_rust_ffi(
+            plan = self._read_missing_range_worker_plan_rust_ffi(
                 workers_read,
                 workers_read_min_blocks,
                 len(missing),
                 len(contiguous_ranges),
             )
-            if max_workers is None:
+            if plan is None:
                 if workers_read <= 1 or len(missing) < workers_read_min_blocks or len(contiguous_ranges) <= 1:
                     max_workers = 1
                 else:
                     max_workers = max(1, min(workers_read, len(contiguous_ranges)))
+            else:
+                parallel, max_workers = plan
+                if not parallel:
+                    max_workers = 1
 
             if max_workers <= 1:
                 fetched_maps = [self._fetch_block_range_chunk(file_id, missing[0], missing[-1])]
@@ -458,6 +486,20 @@ class StorageSupport:
             ctypes.POINTER(DbfsReadBounds),
         ]
         lib.dbfs_read_fetch_bounds.restype = ctypes.c_int
+        lib.dbfs_read_slice_plan.argtypes = [
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_ubyte,
+            ctypes.c_uint64,
+            ctypes.POINTER(DbfsReadSlicePlan),
+        ]
+        lib.dbfs_read_slice_plan.restype = ctypes.c_int
         lib.dbfs_read_missing_range_worker_count.argtypes = [
             ctypes.c_uint64,
             ctypes.c_uint64,
@@ -471,6 +513,36 @@ class StorageSupport:
             ctypes.c_ubyte,
         ]
         lib.dbfs_block_count_for_length.restype = ctypes.c_uint64
+        lib.dbfs_write_copy_worker_count.argtypes = [
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+        ]
+        lib.dbfs_write_copy_worker_count.restype = ctypes.c_uint64
+        lib.dbfs_parallel_worker_count.argtypes = [
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+        ]
+        lib.dbfs_parallel_worker_count.restype = ctypes.c_uint64
+        lib.dbfs_parallel_worker_plan.argtypes = [
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+        ]
+        lib.dbfs_parallel_worker_plan.restype = DbfsParallelWorkerPlan
+        lib.dbfs_write_copy_plan.argtypes = [
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_ubyte,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+        ]
+        lib.dbfs_write_copy_plan.restype = DbfsWriteCopyPlan
         lib.dbfs_contiguous_missing_ranges.argtypes = [
             ctypes.POINTER(ctypes.c_uint64),
             ctypes.c_size_t,
@@ -535,18 +607,46 @@ class StorageSupport:
             return None
         return int(out.fetch_first), int(out.fetch_last)
 
-    def _read_missing_range_worker_count_rust_ffi(self, workers_read, workers_read_min_blocks, missing_len, contiguous_ranges_len):
+    def _read_slice_plan_rust_ffi(self, file_size, offset, size, block_size, sequential, streak):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
             return None
 
-        return int(
-            lib.dbfs_read_missing_range_worker_count(
-                ctypes.c_uint64(int(workers_read)),
-                ctypes.c_uint64(int(workers_read_min_blocks)),
-                ctypes.c_uint64(int(missing_len)),
-                ctypes.c_uint64(int(contiguous_ranges_len)),
-            )
+        out = DbfsReadSlicePlan()
+        rc = lib.dbfs_read_slice_plan(
+            ctypes.c_uint64(int(file_size)),
+            ctypes.c_uint64(int(offset)),
+            ctypes.c_uint64(int(size)),
+            ctypes.c_uint64(int(block_size)),
+            ctypes.c_uint64(int(self.read_ahead_blocks())),
+            ctypes.c_uint64(int(self.sequential_read_ahead_blocks())),
+            ctypes.c_uint64(int(streak)),
+            ctypes.c_uint64(int(self.read_cache_limit_blocks())),
+            ctypes.c_ubyte(1 if sequential else 0),
+            ctypes.c_uint64(int(self.small_file_threshold_blocks())),
+            ctypes.byref(out),
+        )
+        if rc != 0:
+            return None
+        return int(out.total_blocks), int(out.fetch_first), int(out.fetch_last)
+
+    def _read_missing_range_worker_count_rust_ffi(self, workers_read, workers_read_min_blocks, missing_len, contiguous_ranges_len):
+        plan = self._parallel_worker_plan_rust_ffi(
+            workers_read,
+            workers_read_min_blocks,
+            missing_len,
+            contiguous_ranges_len,
+        )
+        if plan is None:
+            return None
+        return plan[1]
+
+    def _read_missing_range_worker_plan_rust_ffi(self, workers_read, workers_read_min_blocks, missing_len, contiguous_ranges_len):
+        return self._parallel_worker_plan_rust_ffi(
+            workers_read,
+            workers_read_min_blocks,
+            missing_len,
+            contiguous_ranges_len,
         )
 
     def _block_count_for_length_rust_ffi(self, length, block_size, minimum_one):
@@ -561,6 +661,77 @@ class StorageSupport:
                 ctypes.c_ubyte(1 if minimum_one else 0),
             )
         )
+
+    def _write_copy_worker_count_rust_ffi(self, total_blocks, workers_write, workers_write_min_blocks):
+        plan = self._parallel_worker_plan_rust_ffi(
+            workers_write,
+            workers_write_min_blocks,
+            total_blocks,
+            total_blocks,
+        )
+        if plan is None:
+            return None
+        return plan[1]
+
+    def _write_copy_worker_plan_rust_ffi(self, total_blocks, workers_write, workers_write_min_blocks):
+        return self._parallel_worker_plan_rust_ffi(
+            workers_write,
+            workers_write_min_blocks,
+            total_blocks,
+            total_blocks,
+        )
+
+    def _write_copy_plan_rust_ffi(self, length, block_size, workers_write, workers_write_min_blocks):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        copy_dedupe_enabled = bool(getattr(self.owner, "copy_dedupe_enabled", False))
+        copy_dedupe_min_blocks = max(1, int(getattr(self.owner, "copy_dedupe_min_blocks", 16) or 16))
+        copy_dedupe_max_blocks = max(0, int(getattr(self.owner, "copy_dedupe_max_blocks", 0) or 0))
+
+        result = lib.dbfs_write_copy_plan(
+            ctypes.c_uint64(int(length)),
+            ctypes.c_uint64(int(block_size)),
+            ctypes.c_uint64(int(workers_write)),
+            ctypes.c_uint64(int(workers_write_min_blocks)),
+            ctypes.c_ubyte(1 if copy_dedupe_enabled else 0),
+            ctypes.c_uint64(int(copy_dedupe_min_blocks)),
+            ctypes.c_uint64(int(copy_dedupe_max_blocks)),
+        )
+        return (
+            int(result.total_blocks),
+            bool(result.dedupe_enabled),
+            bool(result.parallel),
+            int(result.workers),
+        )
+
+    def _parallel_worker_count_rust_ffi(self, requested_workers, minimum_items_for_parallel, total_items, parallel_groups):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        return int(
+            lib.dbfs_parallel_worker_count(
+                ctypes.c_uint64(int(requested_workers)),
+                ctypes.c_uint64(int(minimum_items_for_parallel)),
+                ctypes.c_uint64(int(total_items)),
+                ctypes.c_uint64(int(parallel_groups)),
+            )
+        )
+
+    def _parallel_worker_plan_rust_ffi(self, requested_workers, minimum_items_for_parallel, total_items, parallel_groups):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        result = lib.dbfs_parallel_worker_plan(
+            ctypes.c_uint64(int(requested_workers)),
+            ctypes.c_uint64(int(minimum_items_for_parallel)),
+            ctypes.c_uint64(int(total_items)),
+            ctypes.c_uint64(int(parallel_groups)),
+        )
+        return bool(result.parallel), int(result.workers)
 
     def _missing_block_ranges_rust_ffi(self, missing):
         lib = self._load_rust_hotpath_lib()
@@ -899,41 +1070,50 @@ class StorageSupport:
 
         end_offset = min(file_size, offset + size)
         block_size = self.owner.block_size
-        total_blocks = self._block_count_for_length_rust_ffi(file_size, block_size, False)
-        if total_blocks is None:
-            total_blocks = (file_size + block_size - 1) // block_size
-        if total_blocks == 0:
-            return b""
-
-        requested_first = offset // block_size
-        requested_last = max(requested_first, (end_offset - 1) // block_size)
         sequential, streak = self._record_read_sequence(file_id, offset, end_offset)
 
-        stepped = self._read_fetch_bounds_rust_ffi(total_blocks, requested_first, requested_last, sequential, streak)
-        if stepped is None:
-            if total_blocks <= self.small_file_threshold_blocks():
-                fetch_first = 0
-                fetch_last = total_blocks - 1
-            else:
-                fetch_first = requested_first
-                read_ahead_blocks = self.read_ahead_blocks()
-                stepped_read_ahead = self._read_ahead_blocks_rust_ffi(
-                    read_ahead_blocks,
-                    self.sequential_read_ahead_blocks(),
-                    streak,
-                    self.read_cache_limit_blocks(),
-                    sequential,
-                )
-                if stepped_read_ahead is not None:
-                    read_ahead_blocks = stepped_read_ahead
+        plan = self._read_slice_plan_rust_ffi(file_size, offset, size, block_size, sequential, streak)
+        if plan is None:
+            total_blocks = self._block_count_for_length_rust_ffi(file_size, block_size, False)
+            if total_blocks is None:
+                total_blocks = (file_size + block_size - 1) // block_size
+            if total_blocks == 0:
+                return b""
+
+            requested_first = offset // block_size
+            requested_last = max(requested_first, (end_offset - 1) // block_size)
+            stepped = self._read_fetch_bounds_rust_ffi(total_blocks, requested_first, requested_last, sequential, streak)
+            if stepped is None:
+                if total_blocks <= self.small_file_threshold_blocks():
+                    fetch_first = 0
+                    fetch_last = total_blocks - 1
                 else:
-                    if sequential:
-                        dynamic_ahead = self.sequential_read_ahead_blocks() * max(1, streak)
-                        read_ahead_blocks = max(read_ahead_blocks, dynamic_ahead)
-                    read_ahead_blocks = min(read_ahead_blocks, max(0, self.read_cache_limit_blocks() - 1))
-                fetch_last = min(total_blocks - 1, requested_last + read_ahead_blocks)
+                    fetch_first = requested_first
+                    read_ahead_blocks = self.read_ahead_blocks()
+                    stepped_read_ahead = self._read_ahead_blocks_rust_ffi(
+                        read_ahead_blocks,
+                        self.sequential_read_ahead_blocks(),
+                        streak,
+                        self.read_cache_limit_blocks(),
+                        sequential,
+                    )
+                    if stepped_read_ahead is not None:
+                        read_ahead_blocks = stepped_read_ahead
+                    else:
+                        if sequential:
+                            dynamic_ahead = self.sequential_read_ahead_blocks() * max(1, streak)
+                            read_ahead_blocks = max(read_ahead_blocks, dynamic_ahead)
+                        read_ahead_blocks = min(read_ahead_blocks, max(0, self.read_cache_limit_blocks() - 1))
+                    fetch_last = min(total_blocks - 1, requested_last + read_ahead_blocks)
+            else:
+                fetch_first, fetch_last = stepped
         else:
-            fetch_first, fetch_last = stepped
+            total_blocks, fetch_first, fetch_last = plan
+            if total_blocks == 0:
+                return b""
+
+        if total_blocks == 0:
+            return b""
 
         block_map = self._fetch_block_range(file_id, fetch_first, fetch_last)
 
@@ -1652,15 +1832,19 @@ class StorageSupport:
             self.write_into_state(dst_file_id, payload, dst_offset)
             return len(payload)
 
-        skip_unchanged_blocks = bool(getattr(self.owner, "copy_dedupe_enabled", False))
-        skip_unchanged_blocks_min_blocks = max(1, int(getattr(self.owner, "copy_dedupe_min_blocks", 16) or 16))
-        skip_unchanged_blocks_max_blocks = max(0, int(getattr(self.owner, "copy_dedupe_max_blocks", 0) or 0))
-        total_blocks = max(1, (len(payload) + block_size - 1) // block_size)
-        dedupe_enabled = (
-            skip_unchanged_blocks
-            and total_blocks >= skip_unchanged_blocks_min_blocks
-            and (skip_unchanged_blocks_max_blocks <= 0 or total_blocks <= skip_unchanged_blocks_max_blocks)
-        )
+        plan = self._write_copy_plan_rust_ffi(len(payload), block_size, 1, 1)
+        if plan is None:
+            skip_unchanged_blocks = bool(getattr(self.owner, "copy_dedupe_enabled", False))
+            skip_unchanged_blocks_min_blocks = max(1, int(getattr(self.owner, "copy_dedupe_min_blocks", 16) or 16))
+            skip_unchanged_blocks_max_blocks = max(0, int(getattr(self.owner, "copy_dedupe_max_blocks", 0) or 0))
+            total_blocks = max(1, (len(payload) + block_size - 1) // block_size)
+            dedupe_enabled = (
+                skip_unchanged_blocks
+                and total_blocks >= skip_unchanged_blocks_min_blocks
+                and (skip_unchanged_blocks_max_blocks <= 0 or total_blocks <= skip_unchanged_blocks_max_blocks)
+            )
+        else:
+            total_blocks, dedupe_enabled, _, _ = plan
 
         if dedupe_enabled and self.rust_hotpath_copy_dedupe_enabled():
             ffi_ranges = self._copy_dedupe_rust_ffi(
@@ -1772,17 +1956,29 @@ class StorageSupport:
         block_size = self.owner.block_size
         workers_write = max(1, int(getattr(self.owner, "workers_write", 1) or 1))
         workers_write_min_blocks = max(1, int(getattr(self.owner, "workers_write_min_blocks", 8) or 8))
-        skip_unchanged_blocks = bool(getattr(self.owner, "copy_dedupe_enabled", False))
-        skip_unchanged_blocks_min_blocks = max(1, int(getattr(self.owner, "copy_dedupe_min_blocks", 16) or 16))
-        skip_unchanged_blocks_max_blocks = max(0, int(getattr(self.owner, "copy_dedupe_max_blocks", 0) or 0))
-        total_blocks = max(1, (length + block_size - 1) // block_size)
-        dedupe_enabled = (
-            skip_unchanged_blocks
-            and total_blocks >= skip_unchanged_blocks_min_blocks
-            and (skip_unchanged_blocks_max_blocks <= 0 or total_blocks <= skip_unchanged_blocks_max_blocks)
-        )
+        plan = self._write_copy_plan_rust_ffi(length, block_size, workers_write, workers_write_min_blocks)
+        if plan is None:
+            total_blocks = self._block_count_for_length_rust_ffi(length, block_size, True)
+            if total_blocks is None:
+                total_blocks = max(1, (length + block_size - 1) // block_size)
+            skip_unchanged_blocks = bool(getattr(self.owner, "copy_dedupe_enabled", False))
+            skip_unchanged_blocks_min_blocks = max(1, int(getattr(self.owner, "copy_dedupe_min_blocks", 16) or 16))
+            skip_unchanged_blocks_max_blocks = max(0, int(getattr(self.owner, "copy_dedupe_max_blocks", 0) or 0))
+            dedupe_enabled = (
+                skip_unchanged_blocks
+                and total_blocks >= skip_unchanged_blocks_min_blocks
+                and (skip_unchanged_blocks_max_blocks <= 0 or total_blocks <= skip_unchanged_blocks_max_blocks)
+            )
+            if workers_write <= 1 or total_blocks < workers_write_min_blocks:
+                parallel_workers = 1
+            else:
+                parallel_workers = max(1, min(workers_write, total_blocks))
+        else:
+            total_blocks, dedupe_enabled, parallel, parallel_workers = plan
+            if not parallel:
+                parallel_workers = 1
 
-        if workers_write <= 1 or total_blocks < workers_write_min_blocks:
+        if parallel_workers <= 1:
             chunk = self.read_file_slice(src_file_id, off_in, length)
             if not chunk:
                 return 0
@@ -1793,7 +1989,7 @@ class StorageSupport:
             return len(chunk)
 
         segments = self._copy_segments(off_in, off_out, length, block_size, workers_write)
-        max_workers = max(1, min(workers_write, len(segments)))
+        max_workers = max(1, min(parallel_workers, len(segments)))
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [

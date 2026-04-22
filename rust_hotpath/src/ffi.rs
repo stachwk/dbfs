@@ -4,7 +4,8 @@ use std::slice;
 use crate::{
     assemble_read_slice, block_count_for_length, contiguous_ranges, copy_segments, crc32_bytes,
     pack_changed_ranges, pad_block_bytes, read_ahead_blocks, read_fetch_bounds,
-    read_missing_range_worker_count,
+    parallel_worker_count, parallel_worker_plan, read_missing_range_worker_count, read_slice_plan,
+    write_copy_plan, write_copy_worker_count,
 };
 
 #[repr(C)]
@@ -42,6 +43,30 @@ pub struct DbfsReadSequenceStepResult {
 pub struct DbfsReadBounds {
     pub fetch_first: u64,
     pub fetch_last: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct DbfsReadSlicePlan {
+    pub total_blocks: u64,
+    pub fetch_first: u64,
+    pub fetch_last: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct DbfsParallelWorkerPlan {
+    pub parallel: u8,
+    pub workers: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct DbfsWriteCopyPlan {
+    pub total_blocks: u64,
+    pub dedupe_enabled: u8,
+    pub parallel: u8,
+    pub workers: u64,
 }
 
 unsafe fn slice_from_raw<'a>(ptr: *const u8, len: usize) -> Option<&'a [u8]> {
@@ -347,6 +372,56 @@ pub extern "C" fn dbfs_read_fetch_bounds(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn dbfs_read_slice_plan(
+    file_size: u64,
+    offset: u64,
+    size: u64,
+    block_size: u64,
+    read_ahead_blocks_value: u64,
+    sequential_read_ahead_blocks_value: u64,
+    streak: u64,
+    read_cache_limit_blocks: u64,
+    sequential: u8,
+    small_file_threshold_blocks: u64,
+    out_ptr: *mut DbfsReadSlicePlan,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        let plan = match read_slice_plan(
+            file_size,
+            offset,
+            size,
+            block_size,
+            read_ahead_blocks_value,
+            sequential_read_ahead_blocks_value,
+            streak,
+            read_cache_limit_blocks,
+            sequential != 0,
+            small_file_threshold_blocks,
+        ) {
+            Some((total_blocks, fetch_first, fetch_last)) => DbfsReadSlicePlan {
+                total_blocks,
+                fetch_first,
+                fetch_last,
+            },
+            None => return 1,
+        };
+
+        if out_ptr.is_null() {
+            return 1;
+        }
+        unsafe {
+            *out_ptr = plan;
+        }
+        0
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn dbfs_read_missing_range_worker_count(
     workers_read: u64,
     workers_read_min_blocks: u64,
@@ -364,6 +439,76 @@ pub extern "C" fn dbfs_read_missing_range_worker_count(
 #[unsafe(no_mangle)]
 pub extern "C" fn dbfs_block_count_for_length(length: u64, block_size: u64, minimum_one: u8) -> u64 {
     block_count_for_length(length, block_size, minimum_one != 0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_write_copy_worker_count(
+    total_blocks: u64,
+    workers_write: u64,
+    workers_write_min_blocks: u64,
+) -> u64 {
+    write_copy_worker_count(total_blocks, workers_write, workers_write_min_blocks)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_parallel_worker_count(
+    requested_workers: u64,
+    minimum_items_for_parallel: u64,
+    total_items: u64,
+    parallel_groups: u64,
+) -> u64 {
+    parallel_worker_count(
+        requested_workers,
+        minimum_items_for_parallel,
+        total_items,
+        parallel_groups,
+    )
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_parallel_worker_plan(
+    requested_workers: u64,
+    minimum_items_for_parallel: u64,
+    total_items: u64,
+    parallel_groups: u64,
+) -> DbfsParallelWorkerPlan {
+    let (parallel, workers) = parallel_worker_plan(
+        requested_workers,
+        minimum_items_for_parallel,
+        total_items,
+        parallel_groups,
+    );
+    DbfsParallelWorkerPlan {
+        parallel: parallel as u8,
+        workers,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_write_copy_plan(
+    length: u64,
+    block_size: u64,
+    workers_write: u64,
+    workers_write_min_blocks: u64,
+    copy_dedupe_enabled: u8,
+    copy_dedupe_min_blocks: u64,
+    copy_dedupe_max_blocks: u64,
+) -> DbfsWriteCopyPlan {
+    let (total_blocks, dedupe_enabled, parallel, workers) = write_copy_plan(
+        length,
+        block_size,
+        workers_write,
+        workers_write_min_blocks,
+        copy_dedupe_enabled != 0,
+        copy_dedupe_min_blocks,
+        copy_dedupe_max_blocks,
+    );
+    DbfsWriteCopyPlan {
+        total_blocks,
+        dedupe_enabled: dedupe_enabled as u8,
+        parallel: parallel as u8,
+        workers,
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -434,7 +579,10 @@ mod tests {
         dbfs_copy_pack, dbfs_copy_plan, dbfs_crc32, dbfs_free_bytes, dbfs_free_copy_segments,
         dbfs_free_ranges, dbfs_persist_pad, dbfs_read_assemble, dbfs_read_ahead_blocks,
         dbfs_read_fetch_bounds, dbfs_read_missing_range_worker_count, dbfs_read_sequence_step,
-        DbfsCopySegment, DbfsRange, DbfsReadBlock, DbfsReadBounds,
+        dbfs_read_slice_plan, dbfs_parallel_worker_count, dbfs_parallel_worker_plan,
+        dbfs_write_copy_plan, dbfs_write_copy_worker_count, DbfsCopySegment,
+        DbfsParallelWorkerPlan, DbfsRange, DbfsReadBlock, DbfsReadBounds, DbfsReadSlicePlan,
+        DbfsWriteCopyPlan,
     };
 
     #[test]
@@ -641,6 +789,28 @@ mod tests {
     }
 
     #[test]
+    fn exports_read_slice_plan() {
+        let mut out = DbfsReadSlicePlan {
+            total_blocks: 0,
+            fetch_first: 0,
+            fetch_last: 0,
+        };
+
+        assert_eq!(
+            dbfs_read_slice_plan(16, 0, 4, 4, 2, 8, 0, 256, 0, 8, &mut out),
+            0
+        );
+        assert_eq!(
+            out,
+            DbfsReadSlicePlan {
+                total_blocks: 4,
+                fetch_first: 0,
+                fetch_last: 3,
+            }
+        );
+    }
+
+    #[test]
     fn exports_read_missing_range_worker_count() {
         assert_eq!(dbfs_read_missing_range_worker_count(1, 8, 10, 3), 1);
         assert_eq!(dbfs_read_missing_range_worker_count(4, 8, 7, 3), 1);
@@ -656,5 +826,63 @@ mod tests {
         assert_eq!(dbfs_block_count_for_length(1, 4096, 0), 1);
         assert_eq!(dbfs_block_count_for_length(4096, 4096, 0), 1);
         assert_eq!(dbfs_block_count_for_length(4097, 4096, 0), 2);
+    }
+
+    #[test]
+    fn exports_write_copy_worker_count() {
+        assert_eq!(dbfs_write_copy_worker_count(0, 4, 8), 1);
+        assert_eq!(dbfs_write_copy_worker_count(7, 4, 8), 1);
+        assert_eq!(dbfs_write_copy_worker_count(8, 1, 8), 1);
+        assert_eq!(dbfs_write_copy_worker_count(8, 4, 8), 4);
+        assert_eq!(dbfs_write_copy_worker_count(3, 8, 1), 3);
+    }
+
+    #[test]
+    fn exports_parallel_worker_count() {
+        assert_eq!(dbfs_parallel_worker_count(1, 8, 10, 3), 1);
+        assert_eq!(dbfs_parallel_worker_count(4, 8, 7, 3), 1);
+        assert_eq!(dbfs_parallel_worker_count(4, 8, 8, 1), 1);
+        assert_eq!(dbfs_parallel_worker_count(4, 8, 9, 3), 3);
+        assert_eq!(dbfs_parallel_worker_count(8, 8, 9, 12), 8);
+    }
+
+    #[test]
+    fn exports_parallel_worker_plan() {
+        assert_eq!(
+            dbfs_parallel_worker_plan(1, 8, 10, 3),
+            DbfsParallelWorkerPlan {
+                parallel: 0,
+                workers: 1,
+            }
+        );
+        assert_eq!(
+            dbfs_parallel_worker_plan(4, 8, 9, 3),
+            DbfsParallelWorkerPlan {
+                parallel: 1,
+                workers: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn exports_write_copy_plan() {
+        assert_eq!(
+            dbfs_write_copy_plan(0, 4096, 4, 8, 1, 16, 0),
+            DbfsWriteCopyPlan {
+                total_blocks: 1,
+                dedupe_enabled: 0,
+                parallel: 0,
+                workers: 1,
+            }
+        );
+        assert_eq!(
+            dbfs_write_copy_plan(65536, 4096, 4, 8, 1, 16, 0),
+            DbfsWriteCopyPlan {
+                total_blocks: 16,
+                dedupe_enabled: 1,
+                parallel: 1,
+                workers: 4,
+            }
+        );
     }
 }

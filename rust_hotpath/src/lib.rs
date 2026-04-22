@@ -181,17 +181,63 @@ pub fn read_fetch_bounds(
     Some((fetch_first, fetch_last))
 }
 
+pub fn read_slice_plan(
+    file_size: u64,
+    offset: u64,
+    size: u64,
+    block_size: u64,
+    read_ahead_blocks_value: u64,
+    sequential_read_ahead_blocks_value: u64,
+    streak: u64,
+    read_cache_limit_blocks: u64,
+    sequential: bool,
+    small_file_threshold_blocks: u64,
+) -> Option<(u64, u64, u64)> {
+    if size == 0 || offset >= file_size {
+        return None;
+    }
+
+    let block_size = block_size.max(1);
+    let total_blocks = block_count_for_length(file_size, block_size, false);
+    if total_blocks == 0 {
+        return None;
+    }
+
+    let end_offset = offset.saturating_add(size).min(file_size);
+    let requested_first = offset / block_size;
+    let requested_last = end_offset
+        .saturating_sub(1)
+        .checked_div(block_size)
+        .unwrap_or(0)
+        .max(requested_first);
+
+    let (fetch_first, fetch_last) = read_fetch_bounds(
+        total_blocks,
+        requested_first,
+        requested_last,
+        read_ahead_blocks_value,
+        sequential_read_ahead_blocks_value,
+        streak,
+        read_cache_limit_blocks,
+        sequential,
+        small_file_threshold_blocks,
+    )?;
+
+    Some((total_blocks, fetch_first, fetch_last))
+}
+
 pub fn read_missing_range_worker_count(
     workers_read: u64,
     workers_read_min_blocks: u64,
     missing_len: u64,
     contiguous_ranges_len: u64,
 ) -> u64 {
-    if workers_read <= 1 || missing_len < workers_read_min_blocks || contiguous_ranges_len <= 1 {
-        return 1;
-    }
-
-    workers_read.min(contiguous_ranges_len).max(1)
+    parallel_worker_count(
+        workers_read,
+        workers_read_min_blocks,
+        missing_len,
+        contiguous_ranges_len,
+    )
 }
 
 pub fn block_count_for_length(length: u64, block_size: u64, minimum_one: bool) -> u64 {
@@ -201,6 +247,61 @@ pub fn block_count_for_length(length: u64, block_size: u64, minimum_one: bool) -
     let block_size = block_size.max(1);
     let count = 1 + (length - 1) / block_size;
     if minimum_one { count.max(1) } else { count }
+}
+
+pub fn write_copy_worker_count(total_blocks: u64, workers_write: u64, workers_write_min_blocks: u64) -> u64 {
+    parallel_worker_count(workers_write, workers_write_min_blocks, total_blocks, total_blocks)
+}
+
+pub fn write_copy_plan(
+    length: u64,
+    block_size: u64,
+    workers_write: u64,
+    workers_write_min_blocks: u64,
+    copy_dedupe_enabled: bool,
+    copy_dedupe_min_blocks: u64,
+    copy_dedupe_max_blocks: u64,
+) -> (u64, bool, bool, u64) {
+    let block_size = block_size.max(1);
+    let total_blocks = block_count_for_length(length, block_size, true);
+    let dedupe_enabled = copy_dedupe_enabled
+        && total_blocks >= copy_dedupe_min_blocks.max(1)
+        && (copy_dedupe_max_blocks == 0 || total_blocks <= copy_dedupe_max_blocks);
+    let (parallel, workers) = parallel_worker_plan(
+        workers_write,
+        workers_write_min_blocks,
+        total_blocks,
+        total_blocks,
+    );
+    (total_blocks, dedupe_enabled, parallel, workers)
+}
+
+pub fn parallel_worker_count(
+    requested_workers: u64,
+    minimum_items_for_parallel: u64,
+    total_items: u64,
+    parallel_groups: u64,
+) -> u64 {
+    if requested_workers <= 1 || total_items < minimum_items_for_parallel || parallel_groups <= 1 {
+        return 1;
+    }
+
+    requested_workers.min(parallel_groups).max(1)
+}
+
+pub fn parallel_worker_plan(
+    requested_workers: u64,
+    minimum_items_for_parallel: u64,
+    total_items: u64,
+    parallel_groups: u64,
+) -> (bool, u64) {
+    let workers = parallel_worker_count(
+        requested_workers,
+        minimum_items_for_parallel,
+        total_items,
+        parallel_groups,
+    );
+    (workers > 1, workers)
 }
 
 pub fn pad_block_bytes(payload: &[u8], used_len: u64, block_size: u64) -> Vec<u8> {
@@ -254,9 +355,10 @@ pub fn assemble_read_slice(
 #[cfg(test)]
 mod tests {
     use super::{
-        assemble_read_slice, copy_segments, pack_changed_copy_pairs, pack_changed_ranges,
-        block_count_for_length, pad_block_bytes, read_ahead_blocks, read_fetch_bounds,
-        read_missing_range_worker_count,
+        assemble_read_slice, block_count_for_length, copy_segments, pack_changed_copy_pairs,
+        pack_changed_ranges, pad_block_bytes, parallel_worker_count, parallel_worker_plan,
+        read_ahead_blocks, read_fetch_bounds, read_missing_range_worker_count, read_slice_plan,
+        write_copy_plan, write_copy_worker_count,
     };
 
     #[test]
@@ -352,6 +454,13 @@ mod tests {
     }
 
     #[test]
+    fn plans_read_slice_plan() {
+        assert_eq!(read_slice_plan(0, 0, 1, 4, 2, 8, 0, 256, false, 8), None);
+        assert_eq!(read_slice_plan(16, 0, 4, 4, 2, 8, 0, 256, false, 8), Some((4, 0, 3)));
+        assert_eq!(read_slice_plan(64, 8, 8, 4, 2, 8, 1, 256, true, 8), Some((16, 2, 11)));
+    }
+
+    #[test]
     fn plans_missing_range_worker_count() {
         assert_eq!(read_missing_range_worker_count(1, 8, 10, 3), 1);
         assert_eq!(read_missing_range_worker_count(4, 8, 7, 3), 1);
@@ -367,6 +476,41 @@ mod tests {
         assert_eq!(block_count_for_length(1, 4096, false), 1);
         assert_eq!(block_count_for_length(4096, 4096, false), 1);
         assert_eq!(block_count_for_length(4097, 4096, false), 2);
+    }
+
+    #[test]
+    fn plans_write_copy_worker_count() {
+        assert_eq!(write_copy_worker_count(0, 4, 8), 1);
+        assert_eq!(write_copy_worker_count(7, 4, 8), 1);
+        assert_eq!(write_copy_worker_count(8, 1, 8), 1);
+        assert_eq!(write_copy_worker_count(8, 4, 8), 4);
+        assert_eq!(write_copy_worker_count(3, 8, 1), 3);
+    }
+
+    #[test]
+    fn plans_write_copy_plan() {
+        assert_eq!(write_copy_plan(0, 4096, 4, 8, true, 16, 0), (1, false, false, 1));
+        assert_eq!(write_copy_plan(4096, 4096, 4, 8, true, 16, 0), (1, false, false, 1));
+        assert_eq!(write_copy_plan(65536, 4096, 4, 8, true, 16, 0), (16, true, true, 4));
+        assert_eq!(write_copy_plan(65536, 4096, 1, 8, true, 16, 0), (16, true, false, 1));
+    }
+
+    #[test]
+    fn plans_parallel_worker_count() {
+        assert_eq!(parallel_worker_count(1, 8, 10, 3), 1);
+        assert_eq!(parallel_worker_count(4, 8, 7, 3), 1);
+        assert_eq!(parallel_worker_count(4, 8, 8, 1), 1);
+        assert_eq!(parallel_worker_count(4, 8, 9, 3), 3);
+        assert_eq!(parallel_worker_count(8, 8, 9, 12), 8);
+    }
+
+    #[test]
+    fn plans_parallel_worker_plan() {
+        assert_eq!(parallel_worker_plan(1, 8, 10, 3), (false, 1));
+        assert_eq!(parallel_worker_plan(4, 8, 7, 3), (false, 1));
+        assert_eq!(parallel_worker_plan(4, 8, 8, 1), (false, 1));
+        assert_eq!(parallel_worker_plan(4, 8, 9, 3), (true, 3));
+        assert_eq!(parallel_worker_plan(8, 8, 9, 12), (true, 8));
     }
 
     #[test]

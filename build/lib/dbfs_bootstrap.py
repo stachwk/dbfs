@@ -159,7 +159,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.info(
         "DBFS Rust hot-path dbfs-copy-plan=%s helper=%s",
         fs.rust_hotpath_copy_plan,
-        fs.rust_hotpath_copy_plan_bin_path(),
+        fs.storage.rust_hotpath_copy_plan_bin_path(),
     )
     logging.info(
         "DBFS Rust hot-path dbfs-copy-dedupe=%s helper=%s",
@@ -169,7 +169,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.info(
         "DBFS Rust hot-path dbfs-copy-pack=%s helper=%s",
         fs.rust_hotpath_copy_pack,
-        fs.rust_hotpath_copy_pack_bin_path(),
+        fs.storage.rust_hotpath_copy_pack_bin_path(),
     )
     logging.info(
         "DBFS Rust hot-path dbfs-persist-pad=%s helper=%s",
