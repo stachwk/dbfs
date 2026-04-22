@@ -29,7 +29,7 @@ The project focuses on:
 - Schema changes live under `migrations/` with sequential versions, an explicit `mkfs.dbfs.py status` export, and an upgrade path from older schema states.
 - The current DBFS version is defined in `dbfs_version.py`, and both `dbfs_bootstrap.py --version` and `mkfs.dbfs.py --version` should print the same value.
 - Performance work is merged, and the current benchmark baselines are recorded in `BENCHMARKS.md`.
-- The Rust hot-path POC now ships enabled by default for the planner, changed-copy dedupe, changed-run packing, and persist padding. The latest changed-copy benchmark did not show a meaningful end-to-end win on this host, so the Python fallback remains available for comparison and rollback.
+- The Rust hot-path POC now ships enabled by default for the planner, changed-copy dedupe, changed-run packing, persist padding, and read assembly. The latest changed-copy benchmark did not show a meaningful end-to-end win on this host, so the Python fallback remains available for comparison and rollback.
 - The local Docker Compose stack preloads `pg_stat_statements`, so query analysis and runtime profiling can use persistent PostgreSQL statistics.
 - `TODO.md` serves as a decisions-and-notes log rather than an active implementation backlog.
 

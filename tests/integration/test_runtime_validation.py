@@ -111,6 +111,15 @@ def main() -> None:
             raise AssertionError("expected invalid rust_hotpath_persist_pad to fail fast")
 
         try:
+            DBFS(dsn, db_config, runtime_config={"rust_hotpath_read_assemble": "maybe"})
+        except ValueError as exc:
+            message = str(exc)
+            if "rust_hotpath_read_assemble" not in message:
+                raise AssertionError(message)
+        else:
+            raise AssertionError("expected invalid rust_hotpath_read_assemble to fail fast")
+
+        try:
             DBFS(dsn, db_config, runtime_config={"synchronous_commit": "banana"})
         except ValueError as exc:
             message = str(exc)

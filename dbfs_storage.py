@@ -206,6 +206,29 @@ class StorageSupport:
                 return str(candidate)
         return None
 
+    def rust_hotpath_read_assemble_enabled(self):
+        return bool(getattr(self.owner, "rust_hotpath_read_assemble", True))
+
+    def rust_hotpath_read_assemble_bin_path(self):
+        raw_value = os.environ.get("DBFS_RUST_HOTPATH_READ_ASSEMBLE_BIN")
+        candidates = []
+        if raw_value:
+            candidates.append(Path(raw_value))
+        path_candidate = shutil.which("read-assemble")
+        if path_candidate:
+            candidates.append(Path(path_candidate))
+        repo_root = Path(__file__).resolve().parent
+        candidates.extend(
+            [
+                repo_root / "rust_hotpath" / "target" / "debug" / "read-assemble",
+                repo_root / "rust_hotpath" / "target" / "release" / "read-assemble",
+            ]
+        )
+        for candidate in candidates:
+            if candidate.is_file():
+                return str(candidate)
+        return None
+
     def _persist_block_payload(self, payload, used_len, block_size):
         if self.rust_hotpath_persist_pad_enabled():
             helper = self.rust_hotpath_persist_pad_bin_path()
@@ -232,6 +255,31 @@ class StorageSupport:
     def _assemble_blocks(self, file_id, first_block, last_block):
         block_size = self.owner.block_size
         block_map = self._fetch_block_range(file_id, first_block, last_block)
+        if self.rust_hotpath_read_assemble_enabled():
+            helper = self.rust_hotpath_read_assemble_bin_path()
+            if helper is not None:
+                try:
+                    input_data = "\n".join(
+                        f"{block_index}|{block_map.get(block_index, b'').hex()}"
+                        for block_index in range(first_block, last_block + 1)
+                    )
+                    completed = subprocess.run(
+                        [
+                            helper,
+                            str(int(first_block)),
+                            str(int(last_block)),
+                            "0",
+                            str(int((last_block - first_block + 1) * block_size)),
+                            str(int(block_size)),
+                        ],
+                        input=input_data.encode(),
+                        check=True,
+                        capture_output=True,
+                    )
+                    return completed.stdout
+                except Exception:
+                    pass
+
         chunks = []
         for block_index in range(first_block, last_block + 1):
             block = block_map.get(block_index)
@@ -282,6 +330,31 @@ class StorageSupport:
             fetch_last = min(total_blocks - 1, requested_last + read_ahead_blocks)
 
         block_map = self._fetch_block_range(file_id, fetch_first, fetch_last)
+
+        if self.rust_hotpath_read_assemble_enabled():
+            helper = self.rust_hotpath_read_assemble_bin_path()
+            if helper is not None:
+                try:
+                    input_data = "\n".join(
+                        f"{block_index}|{(bytes(state['overlay_blocks'][block_index]) if state is not None and block_index in state['overlay_blocks'] else block_map.get(block_index, b'')).hex()}"
+                        for block_index in range(fetch_first, fetch_last + 1)
+                    )
+                    completed = subprocess.run(
+                        [
+                            helper,
+                            str(int(fetch_first)),
+                            str(int(fetch_last)),
+                            str(int(offset)),
+                            str(int(end_offset)),
+                            str(int(block_size)),
+                        ],
+                        input=input_data.encode(),
+                        check=True,
+                        capture_output=True,
+                    )
+                    return completed.stdout
+                except Exception:
+                    pass
 
         chunks = []
         for block_index in range(fetch_first, fetch_last + 1):

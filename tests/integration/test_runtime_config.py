@@ -23,11 +23,13 @@ def main():
     previous_copy_dedupe = os.environ.get("DBFS_RUST_HOTPATH_COPY_DEDUPE")
     previous_rust_hotpath = os.environ.get("DBFS_RUST_HOTPATH_COPY_PACK")
     previous_persist_pad = os.environ.get("DBFS_RUST_HOTPATH_PERSIST_PAD")
+    previous_read_assemble = os.environ.get("DBFS_RUST_HOTPATH_READ_ASSEMBLE")
     os.environ.pop("DBFS_SYNCHRONOUS_COMMIT", None)
     os.environ.pop("DBFS_RUST_HOTPATH_COPY_PLAN", None)
     os.environ.pop("DBFS_RUST_HOTPATH_COPY_DEDUPE", None)
     os.environ.pop("DBFS_RUST_HOTPATH_COPY_PACK", None)
     os.environ.pop("DBFS_RUST_HOTPATH_PERSIST_PAD", None)
+    os.environ.pop("DBFS_RUST_HOTPATH_READ_ASSEMBLE", None)
     os.environ["DBFS_LOCK_BACKEND"] = "memory"
     fs = None
     try:
@@ -56,6 +58,7 @@ def main():
         "rust_hotpath_copy_dedupe": True,
         "rust_hotpath_copy_pack": True,
         "rust_hotpath_persist_pad": True,
+        "rust_hotpath_read_assemble": True,
         "metadata_cache_ttl_seconds": 1,
         "statfs_cache_ttl_seconds": 2,
         "synchronous_commit": "on",
@@ -169,6 +172,19 @@ def main():
             os.environ.pop("DBFS_RUST_HOTPATH_PERSIST_PAD", None)
         else:
             os.environ["DBFS_RUST_HOTPATH_PERSIST_PAD"] = previous_persist_pad
+
+    os.environ["DBFS_RUST_HOTPATH_READ_ASSEMBLE"] = "1"
+    fs_read_assemble_override = None
+    try:
+        fs_read_assemble_override = DBFS(dsn, db_config, runtime_config=runtime_config)
+        assert fs_read_assemble_override.rust_hotpath_read_assemble is True, fs_read_assemble_override.rust_hotpath_read_assemble
+    finally:
+        if fs_read_assemble_override is not None:
+            fs_read_assemble_override.close()
+        if previous_read_assemble is None:
+            os.environ.pop("DBFS_RUST_HOTPATH_READ_ASSEMBLE", None)
+        else:
+            os.environ["DBFS_RUST_HOTPATH_READ_ASSEMBLE"] = previous_read_assemble
 
     fs.close()
 

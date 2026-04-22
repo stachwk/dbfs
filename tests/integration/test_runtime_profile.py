@@ -23,11 +23,13 @@ def main() -> None:
     original_copy_plan = os.environ.get("DBFS_RUST_HOTPATH_COPY_PLAN")
     original_rust_hotpath = os.environ.get("DBFS_RUST_HOTPATH_COPY_PACK")
     original_persist_pad = os.environ.get("DBFS_RUST_HOTPATH_PERSIST_PAD")
+    original_read_assemble = os.environ.get("DBFS_RUST_HOTPATH_READ_ASSEMBLE")
     os.environ.pop("DBFS_SYNCHRONOUS_COMMIT", None)
     os.environ.pop("DBFS_RUST_HOTPATH_COPY_DEDUPE", None)
     os.environ.pop("DBFS_RUST_HOTPATH_COPY_PLAN", None)
     os.environ.pop("DBFS_RUST_HOTPATH_COPY_PACK", None)
     os.environ.pop("DBFS_RUST_HOTPATH_PERSIST_PAD", None)
+    os.environ.pop("DBFS_RUST_HOTPATH_READ_ASSEMBLE", None)
     fs = None
     try:
         profile_expectations = [
@@ -48,6 +50,7 @@ def main() -> None:
                     "rust_hotpath_copy_plan": True,
                     "rust_hotpath_copy_pack": True,
                     "rust_hotpath_persist_pad": True,
+                    "rust_hotpath_read_assemble": True,
                     "metadata_cache_ttl_seconds": 1,
                     "statfs_cache_ttl_seconds": 1,
                     "lock_poll_interval_seconds": 0.1,
@@ -70,6 +73,7 @@ def main() -> None:
                     "rust_hotpath_copy_plan": True,
                     "rust_hotpath_copy_pack": True,
                     "rust_hotpath_persist_pad": True,
+                    "rust_hotpath_read_assemble": True,
                     "metadata_cache_ttl_seconds": 10,
                     "statfs_cache_ttl_seconds": 10,
                     "lock_poll_interval_seconds": 0.1,
@@ -87,6 +91,7 @@ def main() -> None:
                     "rust_hotpath_copy_plan": True,
                     "rust_hotpath_copy_pack": True,
                     "rust_hotpath_persist_pad": True,
+                    "rust_hotpath_read_assemble": True,
                     "metadata_cache_ttl_seconds": 1,
                     "statfs_cache_ttl_seconds": 1,
                     "lock_poll_interval_seconds": 0.05,
@@ -135,6 +140,10 @@ def main() -> None:
             os.environ.pop("DBFS_RUST_HOTPATH_PERSIST_PAD", None)
         else:
             os.environ["DBFS_RUST_HOTPATH_PERSIST_PAD"] = original_persist_pad
+        if original_read_assemble is None:
+            os.environ.pop("DBFS_RUST_HOTPATH_READ_ASSEMBLE", None)
+        else:
+            os.environ["DBFS_RUST_HOTPATH_READ_ASSEMBLE"] = original_read_assemble
 
 
 if __name__ == "__main__":

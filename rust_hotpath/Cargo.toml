@@ -14,3 +14,7 @@ path = "src/bin/copy-plan.rs"
 [[bin]]
 name = "copy-pack"
 path = "src/bin/copy-pack.rs"
+
+[[bin]]
+name = "read-assemble"
+path = "src/bin/read-assemble.rs"

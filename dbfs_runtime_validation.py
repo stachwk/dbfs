@@ -33,6 +33,7 @@ RUNTIME_BOOL_SPECS = {
     "rust_hotpath_copy_dedupe": True,
     "rust_hotpath_copy_pack": True,
     "rust_hotpath_persist_pad": True,
+    "rust_hotpath_read_assemble": True,
 }
 
 

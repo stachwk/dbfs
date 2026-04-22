@@ -91,6 +91,7 @@ class DBFS(Operations):
         self.rust_hotpath_copy_dedupe = self.resolve_rust_hotpath_copy_dedupe()
         self.rust_hotpath_copy_pack = self.resolve_rust_hotpath_copy_pack()
         self.rust_hotpath_persist_pad = self.resolve_rust_hotpath_persist_pad()
+        self.rust_hotpath_read_assemble = self.resolve_rust_hotpath_read_assemble()
         self.metadata_cache_ttl_seconds = self.resolve_metadata_cache_ttl_seconds()
         self.statfs_cache_ttl_seconds = self.resolve_statfs_cache_ttl_seconds()
         self.lock_backend = self.resolve_lock_backend()
@@ -396,6 +397,12 @@ class DBFS(Operations):
         if raw_value is None or raw_value == "":
             return bool(self.runtime_config_getbool("rust_hotpath_persist_pad", True))
         return self.parse_bool_value(raw_value, "DBFS_RUST_HOTPATH_PERSIST_PAD")
+
+    def resolve_rust_hotpath_read_assemble(self):
+        raw_value = os.environ.get("DBFS_RUST_HOTPATH_READ_ASSEMBLE")
+        if raw_value is None or raw_value == "":
+            return bool(self.runtime_config_getbool("rust_hotpath_read_assemble", True))
+        return self.parse_bool_value(raw_value, "DBFS_RUST_HOTPATH_READ_ASSEMBLE")
 
     def resolve_metadata_cache_ttl_seconds(self):
         raw_value = os.environ.get("DBFS_METADATA_CACHE_TTL_SECONDS")

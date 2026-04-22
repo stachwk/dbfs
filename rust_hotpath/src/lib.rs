@@ -89,9 +89,44 @@ pub fn pad_block_bytes(payload: &[u8], used_len: u64, block_size: u64) -> Vec<u8
     out
 }
 
+pub fn assemble_read_slice(
+    fetch_first: u64,
+    fetch_last: u64,
+    offset: u64,
+    end_offset: u64,
+    block_size: u64,
+    blocks: &[(u64, Vec<u8>)],
+) -> Vec<u8> {
+    let block_size = block_size.max(1) as usize;
+    let fetch_first = fetch_first.min(fetch_last);
+    let start_offset = offset.saturating_sub(fetch_first.saturating_mul(block_size as u64)) as usize;
+    let requested_len = end_offset.saturating_sub(offset) as usize;
+    let total_blocks = fetch_last.saturating_sub(fetch_first).saturating_add(1) as usize;
+    let mut joined = Vec::with_capacity(total_blocks.saturating_mul(block_size));
+
+    let mut by_index = std::collections::BTreeMap::new();
+    for (index, data) in blocks {
+        by_index.insert(*index, data);
+    }
+
+    for block_index in fetch_first..=fetch_last {
+        if let Some(data) = by_index.get(&block_index) {
+            joined.extend_from_slice(data);
+        } else {
+            joined.resize(joined.len() + block_size, 0);
+        }
+    }
+
+    let end_offset_in_raw = start_offset.saturating_add(requested_len).min(joined.len());
+    joined[start_offset.min(joined.len())..end_offset_in_raw].to_vec()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{copy_segments, pack_changed_copy_pairs, pack_changed_ranges, pad_block_bytes};
+    use super::{
+        assemble_read_slice, copy_segments, pack_changed_copy_pairs, pack_changed_ranges,
+        pad_block_bytes,
+    };
 
     #[test]
     fn returns_empty_for_zero_length() {
@@ -147,6 +182,24 @@ mod tests {
         assert_eq!(
             pad_block_bytes(b"abc", 2, 5),
             vec![b'a', b'b', 0, 0, 0]
+        );
+    }
+
+    #[test]
+    fn assembles_requested_read_slice() {
+        let blocks = vec![
+            (2, b"block2".to_vec()),
+            (3, b"block3".to_vec()),
+            (5, b"block5".to_vec()),
+        ];
+        assert_eq!(
+            assemble_read_slice(2, 5, 2 * 6 + 1, 5 * 6 - 2, 6, &blocks),
+            b"lock2block3\x00\x00\x00\x00".to_vec()
+        );
+        let aligned = vec![(1, b"abcdefgh".to_vec())];
+        assert_eq!(
+            assemble_read_slice(1, 1, 9, 12, 8, &aligned),
+            b"bcd".to_vec()
         );
     }
 }
