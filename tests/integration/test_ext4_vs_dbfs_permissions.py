@@ -118,6 +118,13 @@ def main() -> None:
             "renamed_size",
         ]
 
+        assert local_result["file_size"] == len(b"payload\n"), local_result["file_size"]
+        assert dbfs_result["file_size"] == len(b"payload\n"), dbfs_result["file_size"]
+        assert local_result["file_size"] == dbfs_result["file_size"], (
+            local_result["file_size"],
+            dbfs_result["file_size"],
+        )
+
         for key in comparable_keys:
             assert local_result[key] == dbfs_result[key], (key, local_result[key], dbfs_result[key])
 
