@@ -181,6 +181,21 @@ Observed on the current `bulk_write` profile after restoring a stronger read-sid
 The write-path optimization that avoids loading brand-new blocks from PostgreSQL before writing them made the `bulk_write` profile much stronger on copy-heavy ingest and large multi-block writes.
 The profile is still workload-specific, but it now clearly favors the intended ingest/copy path while keeping finalization cost bounded. On this host the bigger `8M` copy batch did not beat the `4M` batch, and the fsync-backed copy run stayed in the same general range rather than producing a clear win, so the current default copy granularity remains a measured choice rather than an unconditional "larger is better" rule.
 
+### Copy Profile Comparison
+
+Observed on the same large `copy_file_range()` benchmark across runtime profiles:
+
+- `bulk_write`
+  - `bytes=67108864`
+  - `elapsed_s=2.482370`
+  - `throughput_mib_s=25.78`
+- `metadata_heavy`
+  - `bytes=67108864`
+  - `elapsed_s=3.903447`
+  - `throughput_mib_s=16.40`
+
+On this host `bulk_write` is materially faster than `metadata_heavy` for large copy-heavy ingest, which matches the intended profile split: `bulk_write` is for ingest and copy throughput, while `metadata_heavy` is for namespace browsing and metadata-heavy workflows.
+
 ### Copy Dedupe / Repeated Copy
 
 Observed on a repeated copy where the destination already contained the same block content:
