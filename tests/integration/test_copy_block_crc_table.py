@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import uuid
+import zlib
 from pathlib import Path
 
 import psycopg2
@@ -100,6 +101,45 @@ def main() -> None:
         if after_first_copy != expected_full_blocks:
             raise AssertionError((after_first_copy, expected_full_blocks))
 
+        with fs.db_connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT _order, crc32 FROM copy_block_crc WHERE id_file = %s ORDER BY _order",
+                (dst_file_id,),
+            )
+            crc_rows_after_first_copy = cur.fetchall()
+        expected_source_crcs = [
+            zlib.crc32(payload[index * block_size : (index + 1) * block_size]) & 0xFFFFFFFF
+            for index in range(expected_full_blocks)
+        ]
+        if [int(row[1]) for row in crc_rows_after_first_copy] != expected_source_crcs:
+            raise AssertionError((crc_rows_after_first_copy, expected_source_crcs))
+
+        mutated_block = bytearray(payload[:block_size])
+        mutated_block[0] ^= 0xFF
+        mutated_payload = bytes(mutated_block) + payload[block_size:]
+        mutated_crc = zlib.crc32(mutated_payload[:block_size]) & 0xFFFFFFFF
+
+        dst_fh = fs.open(dst_path, os.O_WRONLY)
+        try:
+            written = fs.write(dst_path, mutated_payload[:block_size], 0, dst_fh)
+            if written != block_size:
+                raise AssertionError((written, block_size))
+            fs.flush(dst_path, dst_fh)
+            fs.release(dst_path, dst_fh)
+            dst_fh = None
+        finally:
+            if dst_fh is not None:
+                fs.release(dst_path, dst_fh)
+
+        with fs.db_connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT crc32 FROM copy_block_crc WHERE id_file = %s AND _order = 0",
+                (dst_file_id,),
+            )
+            updated_crc = int(cur.fetchone()[0])
+        if updated_crc != mutated_crc:
+            raise AssertionError((updated_crc, mutated_crc))
+
         dst_fh = fs.open(dst_path, os.O_WRONLY)
         try:
             copied = fs.copy_file_range(src_path, None, 0, dst_path, dst_fh, 0, len(payload), 0)
@@ -117,6 +157,15 @@ def main() -> None:
             after_second_copy = int(cur.fetchone()[0])
         if after_second_copy != expected_full_blocks:
             raise AssertionError((after_second_copy, expected_full_blocks))
+
+        with fs.db_connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT _order, crc32 FROM copy_block_crc WHERE id_file = %s ORDER BY _order",
+                (dst_file_id,),
+            )
+            crc_rows_after_second_copy = cur.fetchall()
+        if [int(row[1]) for row in crc_rows_after_second_copy] != expected_source_crcs:
+            raise AssertionError((crc_rows_after_second_copy, expected_source_crcs))
 
         read_fh = fs.open(dst_path, os.O_RDONLY)
         try:
