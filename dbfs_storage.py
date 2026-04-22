@@ -323,7 +323,8 @@ class StorageSupport:
         file_size = int(state["file_size"])
         block_size = self.owner.block_size
         total_blocks = (file_size + block_size - 1) // block_size if file_size > 0 else 0
-        state["dirty_blocks"].update(range(total_blocks))
+        for block_index in range(total_blocks):
+            self._mark_dirty_block(state, block_index, file_size)
 
     def mark_write_range_dirty(self, file_id, start_offset, end_offset):
         if file_id is None or end_offset <= start_offset:
@@ -333,29 +334,16 @@ class StorageSupport:
         block_size = self.owner.block_size
         first_block = max(0, start_offset // block_size)
         last_block = max(0, (end_offset - 1) // block_size)
-        state["dirty_blocks"].update(range(first_block, last_block + 1))
+        file_size = int(state["file_size"])
+        for block_index in range(first_block, last_block + 1):
+            self._mark_dirty_block(state, block_index, file_size)
 
     def dirty_write_buffer_bytes(self, file_id):
         # Liczy tylko logiczne bajty dirty, bez pelnego bufora w RAM
         state = self.get_write_state(file_id)
         if state is None:
             return 0
-
-        dirty_blocks = state["dirty_blocks"]
-        if not dirty_blocks:
-            return 0
-
-        block_size = self.owner.block_size
-        file_size = int(state["file_size"])
-        total = 0
-
-        for block_index in dirty_blocks:
-            block_start = block_index * block_size
-            block_end = min(file_size, block_start + block_size)
-            if block_end > block_start:
-                total += (block_end - block_start)
-
-        return total
+        return int(state.get("dirty_bytes", 0))
 
     def maybe_flush_dirty_write_buffer(self, file_id):
         # Auto-flush przy przekroczeniu progu
@@ -372,6 +360,8 @@ class StorageSupport:
         state = self.get_write_state(file_id)
         if state is not None:
             state["dirty_blocks"].clear()
+            state["dirty_block_bytes"].clear()
+            state["dirty_bytes"] = 0
             state["truncate_pending"] = False
 
     def is_write_buffer_dirty(self, file_id):
@@ -386,7 +376,7 @@ class StorageSupport:
             return
 
         truncate_pending = bool(state.get("truncate_pending", False))
-        dirty_blocks = set(state["dirty_blocks"])
+        dirty_blocks = state["dirty_blocks"]
         if not dirty_blocks and not truncate_pending:
             return
 
@@ -501,6 +491,8 @@ class StorageSupport:
             "file_size": self.get_file_size(file_id),
             "overlay_blocks": {},
             "dirty_blocks": set(),
+            "dirty_block_bytes": {},
+            "dirty_bytes": 0,
             "truncate_pending": False,
         }
         states[file_id] = state
@@ -558,6 +550,35 @@ class StorageSupport:
         self._store_cached_block(file_id, block_index, block)
         return block
 
+    def _dirty_block_size(self, file_size, block_index):
+        block_size = self.owner.block_size
+        block_start = block_index * block_size
+        block_end = min(int(file_size), block_start + block_size)
+        return max(0, block_end - block_start)
+
+    def _mark_dirty_block(self, state, block_index, file_size):
+        dirty_blocks = state["dirty_blocks"]
+        if block_index in dirty_blocks:
+            return
+
+        dirty_blocks.add(block_index)
+        block_bytes = self._dirty_block_size(file_size, block_index)
+        state["dirty_block_bytes"][block_index] = block_bytes
+        state["dirty_bytes"] = int(state.get("dirty_bytes", 0)) + block_bytes
+
+    def _refresh_dirty_block_bytes(self, state, block_index, file_size):
+        dirty_block_bytes = state["dirty_block_bytes"]
+        if block_index not in dirty_block_bytes:
+            return
+
+        old_bytes = dirty_block_bytes[block_index]
+        new_bytes = self._dirty_block_size(file_size, block_index)
+        if new_bytes == old_bytes:
+            return
+
+        dirty_block_bytes[block_index] = new_bytes
+        state["dirty_bytes"] = int(state.get("dirty_bytes", 0)) + (new_bytes - old_bytes)
+
     def ensure_overlay_block(self, file_id, block_index):
         # Laduje tylko jeden blok do overlay
         state = self.ensure_write_state(file_id)
@@ -595,6 +616,7 @@ class StorageSupport:
         file_size_before_write = int(state["file_size"])
         write_length = len(buf)
         end_offset = offset + write_length
+        new_file_size = max(file_size_before_write, end_offset)
         block_size = self.owner.block_size
 
         first_block = offset // block_size
@@ -615,11 +637,17 @@ class StorageSupport:
             chunk_len = write_end_abs - write_start_abs
             block[block_start_rel:block_end_rel] = buf[src_pos:src_pos + chunk_len]
 
-            state["dirty_blocks"].add(block_index)
+            self._mark_dirty_block(state, block_index, new_file_size)
             src_pos += chunk_len
 
         if end_offset > state["file_size"]:
             state["file_size"] = end_offset
+            if file_size_before_write > 0:
+                self._refresh_dirty_block_bytes(
+                    state,
+                    max(0, (file_size_before_write - 1) // block_size),
+                    state["file_size"],
+                )
 
         return {
             "end_offset": end_offset,
@@ -654,7 +682,10 @@ class StorageSupport:
         ]
         for block_index in stale_blocks:
             state["overlay_blocks"].pop(block_index, None)
-            state["dirty_blocks"].discard(block_index)
+            if block_index in state["dirty_blocks"]:
+                state["dirty_blocks"].discard(block_index)
+                removed_bytes = state["dirty_block_bytes"].pop(block_index, 0)
+                state["dirty_bytes"] = max(0, int(state.get("dirty_bytes", 0)) - int(removed_bytes))
 
         # Jesli skracamy do srodka bloku, wyzeruj ogon tego bloku
         if length > 0 and (length % block_size) != 0:
@@ -663,7 +694,8 @@ class StorageSupport:
             valid_len = length - (last_block * block_size)
             if valid_len < block_size:
                 block[valid_len:] = b"\x00" * (block_size - valid_len)
-            state["dirty_blocks"].add(last_block)
+            self._mark_dirty_block(state, last_block, state["file_size"])
+            self._refresh_dirty_block_bytes(state, last_block, state["file_size"])
 
     def _copy_segments(self, off_in, off_out, length, block_size, workers):
         if length <= 0:
