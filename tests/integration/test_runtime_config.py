@@ -59,7 +59,7 @@ def main():
         "copy_dedupe_max_blocks": 0,
         "copy_dedupe_crc_table": False,
         "rust_hotpath_copy_plan": True,
-        "rust_hotpath_copy_dedupe": True,
+        "rust_hotpath_copy_dedupe": False,
         "rust_hotpath_copy_pack": True,
         "rust_hotpath_persist_pad": True,
         "rust_hotpath_read_assemble": True,
@@ -187,10 +187,10 @@ def main():
             os.environ.pop("DBFS_RUST_HOTPATH_COPY_PACK", None)
         else:
             os.environ["DBFS_RUST_HOTPATH_COPY_PACK"] = previous_rust_hotpath
-        if previous_copy_dedupe is None:
+        if previous_rust_copy_dedupe is None:
             os.environ.pop("DBFS_RUST_HOTPATH_COPY_DEDUPE", None)
         else:
-            os.environ["DBFS_RUST_HOTPATH_COPY_DEDUPE"] = previous_copy_dedupe
+            os.environ["DBFS_RUST_HOTPATH_COPY_DEDUPE"] = previous_rust_copy_dedupe
 
     os.environ["DBFS_RUST_HOTPATH_PERSIST_PAD"] = "1"
     fs_pad_override = None

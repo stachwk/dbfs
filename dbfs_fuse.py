@@ -404,7 +404,7 @@ class DBFS(Operations):
     def resolve_rust_hotpath_copy_dedupe(self):
         raw_value = os.environ.get("DBFS_RUST_HOTPATH_COPY_DEDUPE")
         if raw_value is None or raw_value == "":
-            return bool(self.runtime_config_getbool("rust_hotpath_copy_dedupe", True))
+            return bool(self.runtime_config_getbool("rust_hotpath_copy_dedupe", False))
         return self.parse_bool_value(raw_value, "DBFS_RUST_HOTPATH_COPY_DEDUPE")
 
     def resolve_rust_hotpath_copy_pack(self):

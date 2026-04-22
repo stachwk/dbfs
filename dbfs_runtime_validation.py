@@ -32,7 +32,7 @@ RUNTIME_BOOL_SPECS = {
     "copy_dedupe_enabled": False,
     "copy_dedupe_crc_table": False,
     "rust_hotpath_copy_plan": True,
-    "rust_hotpath_copy_dedupe": True,
+    "rust_hotpath_copy_dedupe": False,
     "rust_hotpath_copy_pack": True,
     "rust_hotpath_persist_pad": True,
     "rust_hotpath_read_assemble": True,
