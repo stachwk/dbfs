@@ -70,6 +70,23 @@ Licencja: MIT
 - wsparcie FUSE na hoście
 - `openssl`, jeśli DBFS ma automatycznie generować parę certyfikat/klucz TLS dla PostgreSQL
 
+## Pakiet Pip
+
+DBFS można zainstalować do virtualenv przez pip:
+
+```bash
+make venv
+make pip-install-editable
+```
+
+To instaluje skrypty projektu do aktywnego venv:
+
+- `dbfs-bootstrap`
+- `mkfs.dbfs`
+- `mount.dbfs`
+
+W katalogu źródłowym nadal zostają bezpośrednie skrypty `dbfs_bootstrap.py` i `mkfs.dbfs.py`; pakiet pip instaluje krótsze nazwy poleceń powyżej. Jeśli chcesz instalację bez trybu editable, użyj `make pip-install`. Editable działa przez `make pip-install-editable`, jeśli venv widzi `setuptools`. Metadane pakietu są w `setup.py`.
+
 Wymagania PostgreSQL dla obecnego zestawu funkcji:
 
 - PostgreSQL 9.5 lub nowszy

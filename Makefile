@@ -2,6 +2,7 @@ PYTHON ?= python3
 VENV_DIR ?= .venv
 VENV_PYTHON := $(VENV_DIR)/bin/python
 VENV_PIP := $(VENV_DIR)/bin/pip
+SYSTEM_SITE_PACKAGES := $(shell $(PYTHON) -c 'import site; print(":".join(site.getsitepackages()))')
 COMPOSE ?= docker compose
 COMPOSE_FILE ?= docker-compose.yml
 DBFS_CONFIG_SOURCE ?= dbfs_config.ini
@@ -30,7 +31,7 @@ DBFS_SYNC ?= 0
 DBFS_DIRSYNC ?= 0
 MOUNT_HELPER_DEST ?= /usr/local/sbin/mount.dbfs
 
-.PHONY: help venv deps up down restart logs wait init reset smoke mount mount-user demo unmount db-shell install-config install-config-user install-mount-helper config-show test-integration test-xattr test-df test-locking test-pg-lock-manager test-permissions test-journal test-destroy test-dirhooks test-hardlink test-fallocate test-copy-file-range test-copy-skip-unchanged-blocks-benchmark test-worker-thresholds-block-size test-ioctl test-mknod test-bufio test-lseek test-poll test-access-groups test-inode-model test-ownership-inheritance test-rename-root-conflict test-bmap test-statfs-use-ino test-mount-workflow test-mount-root-permissions test-files test-directories test-metadata test-symlink test-pool-connections test-mount-suite test-atime-noatime test-atime-relatime test-atime-benchmark test-timestamp-touch-once test-read-ahead-sequence test-read-cache-benchmark test-workers-read-parallel test-workers-write-parallel-copy test-runtime-config test-runtime-validation test-metadata-cache test-mkfs-pg-tls test-runtime-profile test-schema-upgrade test-schema-status test-postgresql-requirements test-throughput test-throughput-sync test-large-copy-benchmark test-large-file-multiblock-benchmark test-remount-durability-benchmark test-tree-scale test-flush-release-profile test-truncate-release-profile test-persist-buffer-chunking test-write-flush-threshold test-utimens-noop test-write-noop test-multi-open-unique-handles test-version test-block-read test-connection-recovery test-all test-all-full clean
+.PHONY: help venv deps up down restart logs wait init reset smoke mount mount-user demo unmount db-shell install-config install-config-user install-mount-helper pip-build pip-install pip-install-editable config-show test-integration test-xattr test-df test-locking test-pg-lock-manager test-permissions test-journal test-destroy test-dirhooks test-hardlink test-fallocate test-copy-file-range test-copy-skip-unchanged-blocks-benchmark test-worker-thresholds-block-size test-ioctl test-mknod test-bufio test-lseek test-poll test-access-groups test-inode-model test-ownership-inheritance test-rename-root-conflict test-bmap test-statfs-use-ino test-mount-workflow test-mount-root-permissions test-files test-directories test-metadata test-symlink test-pool-connections test-mount-suite test-atime-noatime test-atime-relatime test-atime-benchmark test-timestamp-touch-once test-read-ahead-sequence test-read-cache-benchmark test-workers-read-parallel test-workers-write-parallel-copy test-runtime-config test-runtime-validation test-metadata-cache test-mkfs-pg-tls test-runtime-profile test-schema-upgrade test-schema-status test-postgresql-requirements test-throughput test-throughput-sync test-large-copy-benchmark test-large-file-multiblock-benchmark test-remount-durability-benchmark test-tree-scale test-flush-release-profile test-truncate-release-profile test-persist-buffer-chunking test-write-flush-threshold test-utimens-noop test-write-noop test-multi-open-unique-handles test-version test-block-read test-connection-recovery test-all test-all-full clean
 
 help:
 	@printf '%s\n' \
@@ -47,6 +48,9 @@ help:
 		'  make install-config - install dbfs_config.ini to /etc/dbfs/dbfs_config.ini' \
 		'  make install-config-user - install dbfs_config.ini to $$HOME/.config/dbfs/dbfs_config.ini without sudo' \
 		'  make install-mount-helper - install mount.dbfs to $(MOUNT_HELPER_DEST)' \
+		'  make pip-build - build a pip wheel into dist/' \
+		'  make pip-install - install the package into the active venv' \
+		'  make pip-install-editable - install the package in editable mode' \
 		'  make config-show - show which file DBFS uses for configuration' \
 		'  make smoke      - quick database connectivity test' \
 		'  make mount      - mount DBFS at $(MOUNTPOINT)' \
@@ -125,9 +129,11 @@ $(VENV_PYTHON):
 	$(PYTHON) -m venv $(VENV_DIR)
 
 venv: $(VENV_PYTHON)
+	$(VENV_PYTHON) -m ensurepip --upgrade
 	$(VENV_PIP) install fusepy psycopg2-binary
 
 deps: $(VENV_PYTHON)
+	$(VENV_PYTHON) -m ensurepip --upgrade
 	$(VENV_PIP) install fusepy psycopg2-binary
 
 up:
@@ -184,6 +190,15 @@ install-config-user:
 install-mount-helper:
 	@printf '%s\n' "Installing mount.dbfs -> $(MOUNT_HELPER_DEST)"
 	sudo install -D -m 0755 mount.dbfs $(MOUNT_HELPER_DEST)
+
+pip-build:
+	PYTHONPATH=$(SYSTEM_SITE_PACKAGES) $(VENV_PYTHON) setup.py bdist_wheel -d dist
+
+pip-install:
+	PYTHONPATH=$(SYSTEM_SITE_PACKAGES) $(VENV_PYTHON) -m pip install --no-build-isolation --no-use-pep517 --no-deps .
+
+pip-install-editable:
+	PYTHONPATH=$(SYSTEM_SITE_PACKAGES) $(VENV_PYTHON) -m pip install --no-build-isolation --no-use-pep517 --no-deps -e .
 
 config-show:
 	$(VENV_PYTHON) -c "from dbfs_config import resolve_config_path; print(resolve_config_path(base_dir='.'))"

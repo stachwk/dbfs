@@ -71,6 +71,23 @@ License: MIT
 - FUSE support on the host
 - `openssl` if you want DBFS to auto-generate a PostgreSQL TLS client cert/key pair
 
+## Pip Packaging
+
+DBFS can be installed into a virtual environment with pip:
+
+```bash
+make venv
+make pip-install-editable
+```
+
+That installs the project scripts into the active venv:
+
+- `dbfs-bootstrap`
+- `mkfs.dbfs`
+- `mount.dbfs`
+
+The source tree still keeps the direct-run scripts `dbfs_bootstrap.py` and `mkfs.dbfs.py`; the pip package installs the shorter command names above. If you want a non-editable install, use `make pip-install`. Editable installs are available via `make pip-install-editable` if your venv can see `setuptools`. The package metadata lives in `setup.py`.
+
 PostgreSQL requirements for the current feature set:
 
 - PostgreSQL 9.5 or newer
