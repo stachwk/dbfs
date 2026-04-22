@@ -26,15 +26,18 @@ fn parse_mask(arg: &str) -> Result<Vec<bool>, String> {
 
 fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().skip(1).collect();
-    if args.len() != 3 {
-        return Err("Usage: copy-pack <off_out> <block_size> <changed_mask>".to_string());
+    if args.len() != 4 {
+        return Err(
+            "Usage: copy-pack <off_out> <total_len> <block_size> <changed_mask>".to_string(),
+        );
     }
 
     let off_out = parse_u64(&args[0], "off_out")?;
-    let block_size = parse_u64(&args[1], "block_size")?;
-    let mask = parse_mask(&args[2])?;
+    let total_len = parse_u64(&args[1], "total_len")?;
+    let block_size = parse_u64(&args[2], "block_size")?;
+    let mask = parse_mask(&args[3])?;
 
-    for (start, end) in pack_changed_ranges(off_out, block_size, &mask) {
+    for (start, end) in pack_changed_ranges(off_out, total_len, block_size, &mask) {
         println!("{},{}", start, end);
     }
 

@@ -87,6 +87,7 @@ class DBFS(Operations):
         self.persist_buffer_chunk_blocks = self.resolve_persist_buffer_chunk_blocks()
         self.copy_skip_unchanged_blocks = self.resolve_copy_skip_unchanged_blocks()
         self.copy_skip_unchanged_blocks_min_blocks = self.resolve_copy_skip_unchanged_blocks_min_blocks()
+        self.rust_hotpath_copy_pack = self.resolve_rust_hotpath_copy_pack()
         self.metadata_cache_ttl_seconds = self.resolve_metadata_cache_ttl_seconds()
         self.statfs_cache_ttl_seconds = self.resolve_statfs_cache_ttl_seconds()
         self.lock_backend = self.resolve_lock_backend()
@@ -368,6 +369,12 @@ class DBFS(Operations):
         if value < 1:
             raise ValueError("DBFS_COPY_SKIP_UNCHANGED_BLOCKS_MIN_BLOCKS must be >= 1")
         return value
+
+    def resolve_rust_hotpath_copy_pack(self):
+        raw_value = os.environ.get("DBFS_RUST_HOTPATH_COPY_PACK")
+        if raw_value is None or raw_value == "":
+            return bool(self.runtime_config_getbool("rust_hotpath_copy_pack", False))
+        return self.parse_bool_value(raw_value, "DBFS_RUST_HOTPATH_COPY_PACK")
 
     def resolve_metadata_cache_ttl_seconds(self):
         raw_value = os.environ.get("DBFS_METADATA_CACHE_TTL_SECONDS")

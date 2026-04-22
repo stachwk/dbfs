@@ -75,6 +75,15 @@ def main() -> None:
             raise AssertionError("expected invalid copy_skip_unchanged_blocks to fail fast")
 
         try:
+            DBFS(dsn, db_config, runtime_config={"rust_hotpath_copy_pack": "maybe"})
+        except ValueError as exc:
+            message = str(exc)
+            if "rust_hotpath_copy_pack" not in message:
+                raise AssertionError(message)
+        else:
+            raise AssertionError("expected invalid rust_hotpath_copy_pack to fail fast")
+
+        try:
             DBFS(dsn, db_config, runtime_config={"synchronous_commit": "banana"})
         except ValueError as exc:
             message = str(exc)

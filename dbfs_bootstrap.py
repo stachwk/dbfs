@@ -155,6 +155,11 @@ def main(argv: list[str] | None = None) -> None:
         fs.statfs_cache_ttl_seconds,
     )
     logging.info(
+        "DBFS Rust hot-path copy-pack=%s helper=%s",
+        fs.rust_hotpath_copy_pack,
+        fs.rust_hotpath_copy_pack_bin_path(),
+    )
+    logging.info(
         "DBFS mount options: use_ino=%s ro=%s default_permissions=%s allow_other=%s entry_timeout=%ss attr_timeout=%ss negative_timeout=%ss lazytime=%s sync=%s dirsync=%s atime_policy=%s",
         mount_kwargs.get("use_ino"),
         mount_kwargs.get("ro"),

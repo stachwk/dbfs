@@ -34,12 +34,14 @@ pub fn copy_segments(
 
 pub fn pack_changed_ranges(
     off_out: u64,
+    total_len: u64,
     block_size: u64,
     changed_mask: &[bool],
 ) -> Vec<(u64, u64)> {
     let block_size = block_size.max(1);
     let mut ranges = Vec::new();
     let mut run_start: Option<u64> = None;
+    let copy_end = off_out.saturating_add(total_len);
 
     for (block_index, changed) in changed_mask.iter().copied().enumerate() {
         let block_start = off_out.saturating_add((block_index as u64).saturating_mul(block_size));
@@ -57,7 +59,7 @@ pub fn pack_changed_ranges(
     }
 
     if let Some(start) = run_start {
-        let end = off_out.saturating_add((changed_mask.len() as u64).saturating_mul(block_size));
+        let end = copy_end.max(off_out);
         ranges.push((start, end));
     }
 
@@ -89,7 +91,12 @@ mod tests {
     #[test]
     fn packs_changed_ranges_into_contiguous_segments() {
         assert_eq!(
-            pack_changed_ranges(100, 4096, &[true, true, false, true, false, false, true]),
+            pack_changed_ranges(
+                100,
+                7 * 4096,
+                4096,
+                &[true, true, false, true, false, false, true]
+            ),
             vec![
                 (100, 100 + 2 * 4096),
                 (100 + 3 * 4096, 100 + 4 * 4096),

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+from pathlib import Path
 import time
 from itertools import chain
 from concurrent.futures import ThreadPoolExecutor
@@ -739,6 +742,70 @@ class StorageSupport:
             current += b"\x00" * (length - len(current))
         return current
 
+    def rust_hotpath_copy_pack_enabled(self):
+        return bool(getattr(self.owner, "rust_hotpath_copy_pack", False))
+
+    def rust_hotpath_copy_pack_bin_path(self):
+        raw_value = os.environ.get("DBFS_RUST_HOTPATH_COPY_PACK_BIN")
+        candidates = []
+        if raw_value:
+            candidates.append(Path(raw_value))
+        repo_root = Path(__file__).resolve().parent
+        candidates.extend(
+            [
+                repo_root / "rust_hotpath" / "target" / "debug" / "copy-pack",
+                repo_root / "rust_hotpath" / "target" / "release" / "copy-pack",
+            ]
+        )
+        for candidate in candidates:
+            if candidate.is_file():
+                return str(candidate)
+        return None
+
+    def _pack_changed_copy_ranges(self, dst_offset, total_len, block_size, changed_mask):
+        if self.rust_hotpath_copy_pack_enabled():
+            helper = self.rust_hotpath_copy_pack_bin_path()
+            if helper is not None:
+                mask_arg = ",".join("1" if changed else "0" for changed in changed_mask)
+                try:
+                    completed = subprocess.run(
+                        [
+                            helper,
+                            str(int(dst_offset)),
+                            str(int(total_len)),
+                            str(int(block_size)),
+                            mask_arg,
+                        ],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                    ranges = []
+                    for line in completed.stdout.splitlines():
+                        if not line.strip():
+                            continue
+                        start, end = line.split(",")
+                        ranges.append((int(start), int(end)))
+                    return ranges
+                except Exception:
+                    pass
+
+        ranges = []
+        run_start = None
+        copy_end = int(dst_offset) + int(total_len)
+        for block_index, changed in enumerate(changed_mask):
+            block_start = int(dst_offset) + int(block_index * block_size)
+            if changed:
+                if run_start is None:
+                    run_start = block_start
+                continue
+            if run_start is not None:
+                ranges.append((run_start, block_start))
+                run_start = None
+        if run_start is not None:
+            ranges.append((run_start, copy_end))
+        return ranges
+
     def _write_copy_payload_if_changed(self, dst_file_id, dst_offset, payload):
         block_size = self.owner.block_size
         state = self.get_write_state(dst_file_id)
@@ -755,30 +822,21 @@ class StorageSupport:
             self.write_into_state(dst_file_id, payload, dst_offset)
             return len(payload)
 
-        bytes_written = 0
-        run_start = None
-        run_payload = bytearray()
-
+        changed_mask = []
         for rel_offset in range(0, len(payload), block_size):
             chunk = payload[rel_offset:rel_offset + block_size]
             dst_chunk_offset = dst_offset + rel_offset
             current = self._read_copy_destination_chunk(dst_file_id, dst_chunk_offset, len(chunk))
+            changed_mask.append(current != chunk)
 
-            if current == chunk:
-                if run_start is not None:
-                    self.write_into_state(dst_file_id, bytes(run_payload), run_start)
-                    bytes_written += len(run_payload)
-                    run_start = None
-                    run_payload = bytearray()
+        bytes_written = 0
+        for run_start, run_end in self._pack_changed_copy_ranges(dst_offset, len(payload), block_size, changed_mask):
+            if run_end <= run_start:
                 continue
-
-            if run_start is None:
-                run_start = dst_chunk_offset
-            run_payload.extend(chunk)
-
-        if run_start is not None and run_payload:
-            self.write_into_state(dst_file_id, bytes(run_payload), run_start)
-            bytes_written += len(run_payload)
+            rel_start = run_start - dst_offset
+            rel_end = run_end - dst_offset
+            self.write_into_state(dst_file_id, payload[rel_start:rel_end], run_start)
+            bytes_written += rel_end - rel_start
 
         return bytes_written
 
