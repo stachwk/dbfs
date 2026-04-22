@@ -2115,7 +2115,7 @@ class StorageSupport:
         block_size = self.owner.block_size
         workers_write = max(1, int(getattr(self.owner, "workers_write", 1) or 1))
         workers_write_min_blocks = max(1, int(getattr(self.owner, "workers_write_min_blocks", 8) or 8))
-        plan = self._block_transfer_plan_rust_ffi(length, block_size, workers_write, workers_write_min_blocks, True)
+        plan = self._write_copy_plan_rust_ffi(length, block_size, workers_write, workers_write_min_blocks)
         if plan is None:
             total_blocks = self._block_transfer_total_blocks_rust_ffi(length, block_size, True)
             if total_blocks is None:
@@ -2133,19 +2133,7 @@ class StorageSupport:
             else:
                 parallel_workers = max(1, min(workers_write, total_blocks))
         else:
-            total_blocks, parallel, parallel_workers = plan
-            dedupe_plan = self._write_copy_dedupe_plan_rust_ffi(length, block_size)
-            if dedupe_plan is None:
-                skip_unchanged_blocks = bool(getattr(self.owner, "copy_dedupe_enabled", False))
-                skip_unchanged_blocks_min_blocks = max(1, int(getattr(self.owner, "copy_dedupe_min_blocks", 16) or 16))
-                skip_unchanged_blocks_max_blocks = max(0, int(getattr(self.owner, "copy_dedupe_max_blocks", 0) or 0))
-                dedupe_enabled = (
-                    skip_unchanged_blocks
-                    and total_blocks >= skip_unchanged_blocks_min_blocks
-                    and (skip_unchanged_blocks_max_blocks <= 0 or total_blocks <= skip_unchanged_blocks_max_blocks)
-                )
-            else:
-                _, dedupe_enabled = dedupe_plan
+            total_blocks, dedupe_enabled, parallel, parallel_workers = plan
             if not parallel:
                 parallel_workers = 1
 
