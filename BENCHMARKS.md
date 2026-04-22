@@ -8,6 +8,7 @@ This file records the current comparison baselines for the main performance-sens
 - Throughput, finalization, read-cache, and atime numbers are treated as baselines, not fixed promises.
 - `make test-throughput` and `make test-flush-release-profile` are the current write-path and finalization entry points.
 - Additional write-oriented baselines now cover large `copy_file_range()` transfers, large multi-block file writes, and remount durability checks.
+- The current `bulk_write` vs `metadata_heavy` large-copy comparison is the baseline for profile selection; the next implementation step should be a Rust POC on the write/copy hot path instead of more Python-side tuning.
 - `test-tree-scale` now seeds a unique root per run and cleans it up afterward, so profile comparisons can be rerun on the same seed without duplicate-key conflicts.
 - When a tuning change matters, the repository should record the before/after numbers here and in `TODO.md`.
 - DBFS assumes transactional PostgreSQL connections with `autocommit` disabled; the practical operating floor is PostgreSQL 9.5+, `read committed`, and `max_connections` above `pool_max_connections + 2`.
