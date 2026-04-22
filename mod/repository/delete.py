@@ -45,7 +45,6 @@ class NamespaceRepositoryDeleteMutations:
                     cur.execute("DELETE FROM data_blocks WHERE id_file = %s", (entry_id,))
                     cur.execute("DELETE FROM files WHERE id_file = %s", (entry_id,))
                     dbfs.clear_write_buffer_dirty(entry_id)
-                    dbfs.write_cache.pop(entry_id, None)
                     dbfs._clear_path_lock_state(("file", entry_id))
                     dbfs.clear_read_cache(entry_id)
                 dbfs.delete_path_xattrs(path, cur=cur)
@@ -123,7 +122,6 @@ class NamespaceRepositoryDeleteMutations:
                             cur.execute("DELETE FROM data_blocks WHERE id_file = %s", (target_file_id,))
                             cur.execute("DELETE FROM files WHERE id_file = %s", (target_file_id,))
                             dbfs.clear_write_buffer_dirty(target_file_id)
-                            dbfs.write_cache.pop(target_file_id, None)
                             dbfs._clear_path_lock_state(("file", target_file_id))
                         dbfs.delete_path_xattrs(new, cur=cur)
                     elif existing_kind == "symlink":

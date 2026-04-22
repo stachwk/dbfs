@@ -191,7 +191,7 @@ class StorageSupport:
         return sequential, streak
 
     def read_file_slice(self, file_id, offset, size):
-        # Czyta dane z overlay lub z PostgreSQL, bez pelnego write_cache
+        # Czyta dane z overlay lub z PostgreSQL, bez dodatkowego stanu write-path
         if size <= 0:
             return b""
 
