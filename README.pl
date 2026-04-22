@@ -218,7 +218,7 @@ make install-config-user
 make mount-user
 ```
 
-`make install-on-root` łączy `install-config`, `pip-install` i `install-mount-helper` w jeden krok dla instalacji typu root-style.
+`make install-on-root` łączy `install-config`, `pip-install`, `install-root-scripts` i `install-mount-helper` w jeden krok dla instalacji typu root-style. To instaluje config, pakiet, polecenia `dbfs-bootstrap`/`mkfs.dbfs` oraz helper mounta.
 
 ## Szybki start
 
