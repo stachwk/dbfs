@@ -1112,6 +1112,16 @@ class StorageSupport:
             self.write_into_state(dst_file_id, payload, dst_offset)
             return len(payload)
 
+        skip_unchanged_blocks = bool(getattr(self.owner, "copy_skip_unchanged_blocks", False))
+        skip_unchanged_blocks_min_blocks = max(1, int(getattr(self.owner, "copy_skip_unchanged_blocks_min_blocks", 16) or 16))
+        skip_unchanged_blocks_max_blocks = max(0, int(getattr(self.owner, "copy_skip_unchanged_blocks_max_blocks", 0) or 0))
+        total_blocks = max(1, (len(payload) + block_size - 1) // block_size)
+        dedupe_enabled = (
+            skip_unchanged_blocks
+            and total_blocks >= skip_unchanged_blocks_min_blocks
+            and (skip_unchanged_blocks_max_blocks <= 0 or total_blocks <= skip_unchanged_blocks_max_blocks)
+        )
+
         changed_mask = []
         use_crc_table = self._copy_skip_unchanged_blocks_crc_table_enabled()
         dirty_blocks = set(state["dirty_blocks"]) if state is not None else set()
@@ -1119,7 +1129,7 @@ class StorageSupport:
             chunk = payload[rel_offset:rel_offset + block_size]
             dst_chunk_offset = dst_offset + rel_offset
             block_index = dst_chunk_offset // block_size
-            if use_crc_table and len(chunk) == block_size and block_index not in dirty_blocks:
+            if dedupe_enabled and use_crc_table and len(chunk) == block_size and block_index not in dirty_blocks:
                 source_crc = zlib.crc32(bytes(chunk)) & 0xFFFFFFFF
                 dest_crc = self._copy_block_crc(dst_file_id, block_index)
                 changed_mask.append(source_crc != dest_crc)
@@ -1154,13 +1164,19 @@ class StorageSupport:
         workers_write_min_blocks = max(1, int(getattr(self.owner, "workers_write_min_blocks", 8) or 8))
         skip_unchanged_blocks = bool(getattr(self.owner, "copy_skip_unchanged_blocks", False))
         skip_unchanged_blocks_min_blocks = max(1, int(getattr(self.owner, "copy_skip_unchanged_blocks_min_blocks", 16) or 16))
+        skip_unchanged_blocks_max_blocks = max(0, int(getattr(self.owner, "copy_skip_unchanged_blocks_max_blocks", 0) or 0))
         total_blocks = max(1, (length + block_size - 1) // block_size)
+        dedupe_enabled = (
+            skip_unchanged_blocks
+            and total_blocks >= skip_unchanged_blocks_min_blocks
+            and (skip_unchanged_blocks_max_blocks <= 0 or total_blocks <= skip_unchanged_blocks_max_blocks)
+        )
 
         if workers_write <= 1 or total_blocks < workers_write_min_blocks:
             chunk = self.read_file_slice(src_file_id, off_in, length)
             if not chunk:
                 return 0
-            if skip_unchanged_blocks and total_blocks >= skip_unchanged_blocks_min_blocks:
+            if dedupe_enabled:
                 self._write_copy_payload_if_changed(dst_file_id, off_out, chunk)
             else:
                 self.write_into_state(dst_file_id, chunk, off_out)
@@ -1180,7 +1196,7 @@ class StorageSupport:
         for (_, dst_offset, _), payload in zip(segments, payloads):
             if not payload:
                 continue
-            if skip_unchanged_blocks and total_blocks >= skip_unchanged_blocks_min_blocks:
+            if dedupe_enabled:
                 self._write_copy_payload_if_changed(dst_file_id, dst_offset, payload)
             else:
                 self.write_into_state(dst_file_id, payload, dst_offset)

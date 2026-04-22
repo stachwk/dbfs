@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: dbfs
-Version: 2.0.2
+Version: 2.0.15
 Summary: DBFS FUSE filesystem backed by PostgreSQL
 Requires-Python: >=3.11
 Description-Content-Type: text/markdown
@@ -331,6 +331,7 @@ It may also include a `[dbfs]` section with:
 - `persist_buffer_chunk_blocks`
 - `copy_skip_unchanged_blocks`
 - `copy_skip_unchanged_blocks_min_blocks`
+- `copy_skip_unchanged_blocks_max_blocks`
 - `metadata_cache_ttl_seconds`
 - `statfs_cache_ttl_seconds`
 - `synchronous_commit`

@@ -87,6 +87,7 @@ class DBFS(Operations):
         self.persist_buffer_chunk_blocks = self.resolve_persist_buffer_chunk_blocks()
         self.copy_skip_unchanged_blocks = self.resolve_copy_skip_unchanged_blocks()
         self.copy_skip_unchanged_blocks_min_blocks = self.resolve_copy_skip_unchanged_blocks_min_blocks()
+        self.copy_skip_unchanged_blocks_max_blocks = self.resolve_copy_skip_unchanged_blocks_max_blocks()
         self.copy_skip_unchanged_blocks_crc_table = self.resolve_copy_skip_unchanged_blocks_crc_table()
         self.rust_hotpath_copy_plan = self.resolve_rust_hotpath_copy_plan()
         self.rust_hotpath_copy_dedupe = self.resolve_rust_hotpath_copy_dedupe()
@@ -373,6 +374,19 @@ class DBFS(Operations):
             return 16
         if value < 1:
             raise ValueError("DBFS_COPY_SKIP_UNCHANGED_BLOCKS_MIN_BLOCKS must be >= 1")
+        return value
+
+    def resolve_copy_skip_unchanged_blocks_max_blocks(self):
+        raw_value = os.environ.get("DBFS_COPY_SKIP_UNCHANGED_BLOCKS_MAX_BLOCKS")
+        if raw_value is None or raw_value == "":
+            value = self.runtime_config_getint("copy_skip_unchanged_blocks_max_blocks", 0)
+            return max(0, int(value) if value is not None else 0)
+        try:
+            value = int(raw_value)
+        except Exception:
+            return 0
+        if value < 0:
+            raise ValueError("DBFS_COPY_SKIP_UNCHANGED_BLOCKS_MAX_BLOCKS must be >= 0")
         return value
 
     def resolve_copy_skip_unchanged_blocks_crc_table(self):

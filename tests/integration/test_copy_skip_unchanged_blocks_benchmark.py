@@ -35,7 +35,24 @@ def _profile_seconds(profile: dict, key: str) -> float:
     return float(stats.get("seconds", 0.0))
 
 
-def _run_copy(fs, src_path, dst_path, src_len, skip_unchanged_blocks):
+def _write_and_sync(fs, path, payload):
+    fh = fs.create(path, 0o644)
+    try:
+        written = fs.write(path, payload, 0, fh)
+        if written != len(payload):
+            raise AssertionError((written, len(payload)))
+        fs.flush(path, fh)
+        fs.release(path, fh)
+        fh = None
+    finally:
+        if fh is not None:
+            try:
+                fs.release(path, fh)
+            except Exception:
+                pass
+
+
+def _copy_and_profile(fs, src_path, dst_path, src_len, skip_unchanged_blocks):
     fs.copy_skip_unchanged_blocks = skip_unchanged_blocks
     fs.copy_skip_unchanged_blocks_min_blocks = 1
     fs._io_profile.clear()
@@ -52,13 +69,17 @@ def _run_copy(fs, src_path, dst_path, src_len, skip_unchanged_blocks):
         elapsed = time.perf_counter() - start
     finally:
         if dst_fh is not None:
-            fs.release(dst_path, dst_fh)
+            try:
+                fs.release(dst_path, dst_fh)
+            except Exception:
+                pass
 
     read_fh = fs.open(dst_path, os.O_RDONLY)
     try:
         read_back = fs.read(dst_path, src_len, 0, read_fh)
     finally:
         fs.release(dst_path, read_fh)
+
     return {
         "elapsed": elapsed,
         "read_back": read_back,
@@ -85,38 +106,15 @@ def main() -> None:
     block_count = int(os.environ.get("COPY_DEDUPE_BLOCK_COUNT", "16"))
     payload = (b"dbfs-copy-dedupe-" * ((block_size * block_count) // 17 + 4))[: block_size * block_count]
 
-    src_fh = None
-    dst_off_fh = None
-    dst_on_fh = None
     try:
         fs.mkdir(dir_path, 0o755)
 
-        src_fh = fs.create(src_path, 0o644)
-        written = fs.write(src_path, payload, 0, src_fh)
-        if written != len(payload):
-            raise AssertionError((written, len(payload)))
-        fs.flush(src_path, src_fh)
-        fs.release(src_path, src_fh)
-        src_fh = None
+        _write_and_sync(fs, src_path, payload)
+        _write_and_sync(fs, dst_off_path, payload)
+        _write_and_sync(fs, dst_on_path, payload)
 
-        dst_off_fh = fs.create(dst_off_path, 0o644)
-        written = fs.write(dst_off_path, payload, 0, dst_off_fh)
-        if written != len(payload):
-            raise AssertionError((written, len(payload)))
-        fs.flush(dst_off_path, dst_off_fh)
-        fs.release(dst_off_path, dst_off_fh)
-        dst_off_fh = None
-
-        dst_on_fh = fs.create(dst_on_path, 0o644)
-        written = fs.write(dst_on_path, payload, 0, dst_on_fh)
-        if written != len(payload):
-            raise AssertionError((written, len(payload)))
-        fs.flush(dst_on_path, dst_on_fh)
-        fs.release(dst_on_path, dst_on_fh)
-        dst_on_fh = None
-
-        off_result = _run_copy(fs, src_path, dst_off_path, len(payload), False)
-        on_result = _run_copy(fs, src_path, dst_on_path, len(payload), True)
+        off_result = _copy_and_profile(fs, src_path, dst_off_path, len(payload), False)
+        on_result = _copy_and_profile(fs, src_path, dst_on_path, len(payload), True)
 
         if off_result["read_back"] != payload:
             raise AssertionError("copy dedupe off payload mismatch")
@@ -138,21 +136,6 @@ def main() -> None:
             f"flush_seconds={on_result['flush_seconds']:.6f} finalization_seconds={on_result['finalization_seconds']:.6f}"
         )
     finally:
-        if dst_off_fh is not None:
-            try:
-                fs.release(dst_off_path, dst_off_fh)
-            except Exception:
-                pass
-        if dst_on_fh is not None:
-            try:
-                fs.release(dst_on_path, dst_on_fh)
-            except Exception:
-                pass
-        if src_fh is not None:
-            try:
-                fs.release(src_path, src_fh)
-            except Exception:
-                pass
         try:
             fs.unlink(dst_off_path)
         except Exception:
