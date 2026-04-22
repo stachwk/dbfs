@@ -138,7 +138,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     logging.info("DBFS PostgreSQL synchronous_commit=%s", fs.synchronous_commit)
     logging.info(
-        "DBFS storage tuning: write_flush_threshold=%s bytes read_cache_blocks=%s read_ahead_blocks=%s sequential_read_ahead_blocks=%s small_file_threshold_blocks=%s workers_read=%s workers_read_min_blocks=%s workers_write=%s workers_write_min_blocks=%s persist_buffer_chunk_blocks=%s copy_skip_unchanged_blocks=%s copy_skip_unchanged_blocks_min_blocks=%s metadata_cache_ttl=%ss statfs_cache_ttl=%ss",
+        "DBFS storage tuning: write_flush_threshold=%s bytes read_cache_blocks=%s read_ahead_blocks=%s sequential_read_ahead_blocks=%s small_file_threshold_blocks=%s workers_read=%s workers_read_min_blocks=%s workers_write=%s workers_write_min_blocks=%s persist_buffer_chunk_blocks=%s copy_dedupe=%s copy_dedupe_min_blocks=%s copy_dedupe_max_blocks=%s copy_dedupe_crc_table=%s metadata_cache_ttl=%ss statfs_cache_ttl=%ss",
         fs.write_flush_threshold_bytes,
         fs.read_cache_max_blocks,
         fs.read_ahead_blocks,
@@ -149,10 +149,37 @@ def main(argv: list[str] | None = None) -> None:
         fs.workers_write,
         fs.workers_write_min_blocks,
         fs.persist_buffer_chunk_blocks,
-        fs.copy_skip_unchanged_blocks,
-        fs.copy_skip_unchanged_blocks_min_blocks,
+        fs.copy_dedupe_enabled,
+        fs.copy_dedupe_min_blocks,
+        fs.copy_dedupe_max_blocks,
+        fs.copy_dedupe_crc_table,
         fs.metadata_cache_ttl_seconds,
         fs.statfs_cache_ttl_seconds,
+    )
+    logging.info(
+        "DBFS Rust hot-path dbfs-copy-plan=%s helper=%s",
+        fs.rust_hotpath_copy_plan,
+        fs.rust_hotpath_copy_plan_bin_path(),
+    )
+    logging.info(
+        "DBFS Rust hot-path dbfs-copy-dedupe=%s helper=%s",
+        fs.rust_hotpath_copy_dedupe,
+        fs.storage.rust_hotpath_copy_dedupe_bin_path(),
+    )
+    logging.info(
+        "DBFS Rust hot-path dbfs-copy-pack=%s helper=%s",
+        fs.rust_hotpath_copy_pack,
+        fs.rust_hotpath_copy_pack_bin_path(),
+    )
+    logging.info(
+        "DBFS Rust hot-path dbfs-persist-pad=%s helper=%s",
+        fs.rust_hotpath_persist_pad,
+        fs.storage.rust_hotpath_persist_pad_bin_path(),
+    )
+    logging.info(
+        "DBFS Rust hot-path dbfs-read-assemble=%s helper=%s",
+        fs.rust_hotpath_read_assemble,
+        fs.storage.rust_hotpath_read_assemble_bin_path(),
     )
     logging.info(
         "DBFS mount options: use_ino=%s ro=%s default_permissions=%s allow_other=%s entry_timeout=%ss attr_timeout=%ss negative_timeout=%ss lazytime=%s sync=%s dirsync=%s atime_policy=%s",

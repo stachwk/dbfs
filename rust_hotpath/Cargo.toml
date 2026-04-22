@@ -6,15 +6,24 @@ edition = "2021"
 [lib]
 name = "dbfs_rust_hotpath"
 path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
 
 [[bin]]
-name = "copy-plan"
+name = "dbfs-copy-plan"
 path = "src/bin/copy-plan.rs"
 
 [[bin]]
-name = "copy-pack"
+name = "dbfs-copy-pack"
 path = "src/bin/copy-pack.rs"
 
 [[bin]]
-name = "read-assemble"
+name = "dbfs-read-assemble"
 path = "src/bin/read-assemble.rs"
+
+[[bin]]
+name = "dbfs-copy-dedupe"
+path = "src/bin/copy-dedupe.rs"
+
+[[bin]]
+name = "dbfs-persist-pad"
+path = "src/bin/persist-pad.rs"

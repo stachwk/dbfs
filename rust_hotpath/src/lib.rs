@@ -1,3 +1,5 @@
+pub mod ffi;
+
 pub fn copy_segments(
     off_in: u64,
     off_out: u64,
@@ -11,7 +13,7 @@ pub fn copy_segments(
 
     let block_size = block_size.max(1);
     let workers = workers.max(1);
-    let total_blocks = ((length + block_size - 1) / block_size).max(1);
+    let total_blocks = 1 + (length - 1) / block_size;
     let worker_count = workers.min(total_blocks).max(1);
     let blocks_per_worker = ((total_blocks + worker_count - 1) / worker_count).max(1);
     let bytes_per_worker = blocks_per_worker.saturating_mul(block_size);
@@ -97,8 +99,11 @@ pub fn assemble_read_slice(
     block_size: u64,
     blocks: &[(u64, Vec<u8>)],
 ) -> Vec<u8> {
+    if fetch_first > fetch_last {
+        return Vec::new();
+    }
+
     let block_size = block_size.max(1) as usize;
-    let fetch_first = fetch_first.min(fetch_last);
     let start_offset = offset.saturating_sub(fetch_first.saturating_mul(block_size as u64)) as usize;
     let requested_len = end_offset.saturating_sub(offset) as usize;
     let total_blocks = fetch_last.saturating_sub(fetch_first).saturating_add(1) as usize;
@@ -143,6 +148,14 @@ mod tests {
         assert_eq!(
             copy_segments(10, 20, 8193, 4096, 4),
             vec![(10, 20, 4096), (4106, 4116, 4096), (8202, 8212, 1)]
+        );
+    }
+
+    #[test]
+    fn handles_extreme_lengths_without_overflow() {
+        assert_eq!(
+            copy_segments(10, 20, u64::MAX, u64::MAX, 1),
+            vec![(10, 20, u64::MAX)]
         );
     }
 
@@ -201,5 +214,11 @@ mod tests {
             assemble_read_slice(1, 1, 9, 12, 8, &aligned),
             b"bcd".to_vec()
         );
+    }
+
+    #[test]
+    fn returns_empty_for_reversed_fetch_range() {
+        let blocks = vec![(3, b"block3".to_vec())];
+        assert!(assemble_read_slice(5, 3, 0, 12, 4, &blocks).is_empty());
     }
 }

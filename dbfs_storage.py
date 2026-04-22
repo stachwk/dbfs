@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import os
 import subprocess
 import shutil
@@ -10,6 +11,29 @@ from itertools import chain
 from concurrent.futures import ThreadPoolExecutor
 
 from psycopg2.extras import execute_values
+
+
+class DbfsCopySegment(ctypes.Structure):
+    _fields_ = [
+        ("src", ctypes.c_uint64),
+        ("dst", ctypes.c_uint64),
+        ("len", ctypes.c_uint64),
+    ]
+
+
+class DbfsRange(ctypes.Structure):
+    _fields_ = [
+        ("start", ctypes.c_uint64),
+        ("end", ctypes.c_uint64),
+    ]
+
+
+class DbfsReadBlock(ctypes.Structure):
+    _fields_ = [
+        ("index", ctypes.c_uint64),
+        ("ptr", ctypes.POINTER(ctypes.c_ubyte)),
+        ("len", ctypes.c_size_t),
+    ]
 
 
 class StorageSupport:
@@ -224,14 +248,14 @@ class StorageSupport:
         candidates = []
         if raw_value:
             candidates.append(Path(raw_value))
-        path_candidate = shutil.which("persist-pad")
+        path_candidate = shutil.which("dbfs-persist-pad")
         if path_candidate:
             candidates.append(Path(path_candidate))
         repo_root = Path(__file__).resolve().parent
         candidates.extend(
             [
-                repo_root / "rust_hotpath" / "target" / "debug" / "persist-pad",
-                repo_root / "rust_hotpath" / "target" / "release" / "persist-pad",
+                repo_root / "rust_hotpath" / "target" / "debug" / "dbfs-persist-pad",
+                repo_root / "rust_hotpath" / "target" / "release" / "dbfs-persist-pad",
             ]
         )
         for candidate in candidates:
@@ -247,14 +271,14 @@ class StorageSupport:
         candidates = []
         if raw_value:
             candidates.append(Path(raw_value))
-        path_candidate = shutil.which("read-assemble")
+        path_candidate = shutil.which("dbfs-read-assemble")
         if path_candidate:
             candidates.append(Path(path_candidate))
         repo_root = Path(__file__).resolve().parent
         candidates.extend(
             [
-                repo_root / "rust_hotpath" / "target" / "debug" / "read-assemble",
-                repo_root / "rust_hotpath" / "target" / "release" / "read-assemble",
+                repo_root / "rust_hotpath" / "target" / "debug" / "dbfs-read-assemble",
+                repo_root / "rust_hotpath" / "target" / "release" / "dbfs-read-assemble",
             ]
         )
         for candidate in candidates:
@@ -262,8 +286,278 @@ class StorageSupport:
                 return str(candidate)
         return None
 
+    def rust_hotpath_lib_path(self):
+        raw_value = os.environ.get("DBFS_RUST_HOTPATH_LIB")
+        candidates = []
+        if raw_value:
+            candidates.append(Path(raw_value))
+        candidates.extend(
+            [
+                Path("/usr/local/lib/libdbfs-2.so"),
+                Path("/usr/local/lib/libdbfs_rust_hotpath.so"),
+                Path(__file__).resolve().parent
+                / "rust_hotpath"
+                / "target"
+                / "debug"
+                / "libdbfs_rust_hotpath.so",
+                Path(__file__).resolve().parent
+                / "rust_hotpath"
+                / "target"
+                / "release"
+                / "libdbfs_rust_hotpath.so",
+            ]
+        )
+        for candidate in candidates:
+            if candidate.is_file():
+                return str(candidate)
+        return None
+
+    def _load_rust_hotpath_lib(self):
+        cached = getattr(self, "_rust_hotpath_lib_handle", None)
+        if cached is not None:
+            return cached
+
+        lib_path = self.rust_hotpath_lib_path()
+        if lib_path is None:
+            return None
+
+        try:
+            lib = ctypes.CDLL(lib_path)
+        except OSError:
+            return None
+
+        lib.dbfs_copy_plan.argtypes = [
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.POINTER(ctypes.POINTER(DbfsCopySegment)),
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        lib.dbfs_copy_plan.restype = ctypes.c_int
+        lib.dbfs_free_copy_segments.argtypes = [
+            ctypes.POINTER(DbfsCopySegment),
+            ctypes.c_size_t,
+        ]
+        lib.dbfs_free_copy_segments.restype = None
+        lib.dbfs_copy_pack.argtypes = [
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.POINTER(ctypes.c_ubyte),
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.POINTER(DbfsRange)),
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        lib.dbfs_copy_pack.restype = ctypes.c_int
+        lib.dbfs_copy_dedupe.argtypes = [
+            ctypes.c_uint64,
+            ctypes.POINTER(ctypes.c_ubyte),
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_ubyte),
+            ctypes.c_size_t,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.POINTER(DbfsRange)),
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        lib.dbfs_copy_dedupe.restype = ctypes.c_int
+        lib.dbfs_persist_pad.argtypes = [
+            ctypes.POINTER(ctypes.c_ubyte),
+            ctypes.c_size_t,
+            ctypes.c_size_t,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_ubyte)),
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        lib.dbfs_persist_pad.restype = ctypes.c_int
+        lib.dbfs_read_assemble.argtypes = [
+            ctypes.POINTER(DbfsReadBlock),
+            ctypes.c_size_t,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_ubyte)),
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        lib.dbfs_read_assemble.restype = ctypes.c_int
+        lib.dbfs_free_ranges.argtypes = [
+            ctypes.POINTER(DbfsRange),
+            ctypes.c_size_t,
+        ]
+        lib.dbfs_free_ranges.restype = None
+        lib.dbfs_free_bytes.argtypes = [
+            ctypes.POINTER(ctypes.c_ubyte),
+            ctypes.c_size_t,
+        ]
+        lib.dbfs_free_bytes.restype = None
+
+        self._rust_hotpath_lib_handle = lib
+        return lib
+
+    def _copy_segments_rust_ffi(self, off_in, off_out, length, block_size, workers):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        out_ptr = ctypes.POINTER(DbfsCopySegment)()
+        out_len = ctypes.c_size_t()
+
+        rc = lib.dbfs_copy_plan(
+            ctypes.c_uint64(int(off_in)),
+            ctypes.c_uint64(int(off_out)),
+            ctypes.c_uint64(int(length)),
+            ctypes.c_uint64(int(block_size)),
+            ctypes.c_uint64(int(workers)),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+        )
+        if rc != 0:
+            return None
+
+        try:
+            return [
+                (int(out_ptr[i].src), int(out_ptr[i].dst), int(out_ptr[i].len))
+                for i in range(out_len.value)
+            ]
+        finally:
+            lib.dbfs_free_copy_segments(out_ptr, out_len)
+
+    def _ffi_ubyte_buffer(self, data):
+        data = bytes(data)
+        if not data:
+            return None, None
+        buffer = ctypes.create_string_buffer(data, len(data))
+        return buffer, ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte))
+
+    def _persist_block_payload_rust_ffi(self, payload, used_len, block_size):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        payload_buf, payload_ptr = self._ffi_ubyte_buffer(bytes(payload[:block_size]))
+        out_ptr = ctypes.POINTER(ctypes.c_ubyte)()
+        out_len = ctypes.c_size_t()
+
+        rc = lib.dbfs_persist_pad(
+            payload_ptr,
+            ctypes.c_size_t(0 if payload_buf is None else len(payload_buf.raw)),
+            ctypes.c_size_t(int(used_len)),
+            ctypes.c_size_t(int(block_size)),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+        )
+        if rc != 0:
+            return None
+
+        try:
+            return ctypes.string_at(out_ptr, out_len.value)
+        finally:
+            lib.dbfs_free_bytes(out_ptr, out_len)
+
+    def _assemble_blocks_rust_ffi(self, file_id, first_block, last_block):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        block_map = self._fetch_block_range(file_id, first_block, last_block)
+        block_buffers = []
+        blocks = []
+        block_size = int(self.owner.block_size)
+        for block_index in range(first_block, last_block + 1):
+            block = bytes(block_map.get(block_index, b"\x00" * block_size))
+            if len(block) < block_size:
+                block = block + (b"\x00" * (block_size - len(block)))
+            buffer, ptr = self._ffi_ubyte_buffer(block)
+            block_buffers.append(buffer)
+            blocks.append(DbfsReadBlock(index=block_index, ptr=ptr, len=len(block)))
+
+        blocks_array = (DbfsReadBlock * len(blocks))(*blocks) if blocks else None
+        out_ptr = ctypes.POINTER(ctypes.c_ubyte)()
+        out_len = ctypes.c_size_t()
+
+        rc = lib.dbfs_read_assemble(
+            blocks_array,
+            ctypes.c_size_t(len(blocks)),
+            ctypes.c_uint64(int(first_block)),
+            ctypes.c_uint64(int(last_block)),
+            ctypes.c_uint64(0),
+            ctypes.c_uint64(int((last_block - first_block + 1) * block_size)),
+            ctypes.c_size_t(block_size),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+        )
+        if rc != 0:
+            return None
+
+        try:
+            return ctypes.string_at(out_ptr, out_len.value)
+        finally:
+            lib.dbfs_free_bytes(out_ptr, out_len)
+
+    def _pack_changed_copy_ranges_rust_ffi(self, dst_offset, total_len, block_size, changed_mask):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        mask_bytes = bytes(1 if changed else 0 for changed in changed_mask)
+        mask_buffer, mask_ptr = self._ffi_ubyte_buffer(mask_bytes)
+        out_ptr = ctypes.POINTER(DbfsRange)()
+        out_len = ctypes.c_size_t()
+
+        rc = lib.dbfs_copy_pack(
+            ctypes.c_uint64(int(dst_offset)),
+            ctypes.c_uint64(int(total_len)),
+            ctypes.c_uint64(int(block_size)),
+            mask_ptr,
+            ctypes.c_size_t(0 if mask_buffer is None else len(mask_buffer.raw)),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+        )
+        if rc != 0:
+            return None
+
+        try:
+            return [(int(out_ptr[i].start), int(out_ptr[i].end)) for i in range(out_len.value)]
+        finally:
+            lib.dbfs_free_ranges(out_ptr, out_len)
+
+    def _copy_dedupe_rust_ffi(self, dst_offset, payload, block_size, current_bytes):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        payload_buffer, payload_ptr = self._ffi_ubyte_buffer(bytes(payload))
+        current_buffer, current_ptr = self._ffi_ubyte_buffer(bytes(current_bytes))
+        out_ptr = ctypes.POINTER(DbfsRange)()
+        out_len = ctypes.c_size_t()
+
+        rc = lib.dbfs_copy_dedupe(
+            ctypes.c_uint64(int(dst_offset)),
+            payload_ptr,
+            ctypes.c_size_t(0 if payload_buffer is None else len(payload_buffer.raw)),
+            current_ptr,
+            ctypes.c_size_t(0 if current_buffer is None else len(current_buffer.raw)),
+            ctypes.c_size_t(int(block_size)),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+        )
+        if rc != 0:
+            return None
+
+        try:
+            return [(int(out_ptr[i].start), int(out_ptr[i].end)) for i in range(out_len.value)]
+        finally:
+            lib.dbfs_free_ranges(out_ptr, out_len)
+
     def _persist_block_payload(self, payload, used_len, block_size):
         if self.rust_hotpath_persist_pad_enabled():
+            ffi_result = self._persist_block_payload_rust_ffi(payload, used_len, block_size)
+            if ffi_result is not None and len(ffi_result) == max(1, int(block_size)):
+                return ffi_result
+
             helper = self.rust_hotpath_persist_pad_bin_path()
             if helper is not None:
                 try:
@@ -338,6 +632,10 @@ class StorageSupport:
         block_size = self.owner.block_size
         block_map = self._fetch_block_range(file_id, first_block, last_block)
         if self.rust_hotpath_read_assemble_enabled():
+            ffi_result = self._assemble_blocks_rust_ffi(file_id, first_block, last_block)
+            if ffi_result is not None:
+                return ffi_result
+
             helper = self.rust_hotpath_read_assemble_bin_path()
             if helper is not None:
                 try:
@@ -932,6 +1230,12 @@ class StorageSupport:
             return []
 
         if self.rust_hotpath_copy_plan_enabled():
+            segments = self._copy_segments_rust_ffi(
+                off_in, off_out, length, block_size, workers
+            )
+            if segments is not None:
+                return segments
+
             helper = self.rust_hotpath_copy_plan_bin_path()
             if helper is not None:
                 try:
@@ -985,14 +1289,14 @@ class StorageSupport:
         candidates = []
         if raw_value:
             candidates.append(Path(raw_value))
-        path_candidate = shutil.which("copy-plan")
+        path_candidate = shutil.which("dbfs-copy-plan")
         if path_candidate:
             candidates.append(Path(path_candidate))
         repo_root = Path(__file__).resolve().parent
         candidates.extend(
             [
-                repo_root / "rust_hotpath" / "target" / "debug" / "copy-plan",
-                repo_root / "rust_hotpath" / "target" / "release" / "copy-plan",
+                repo_root / "rust_hotpath" / "target" / "debug" / "dbfs-copy-plan",
+                repo_root / "rust_hotpath" / "target" / "release" / "dbfs-copy-plan",
             ]
         )
         for candidate in candidates:
@@ -1014,14 +1318,14 @@ class StorageSupport:
         candidates = []
         if raw_value:
             candidates.append(Path(raw_value))
-        path_candidate = shutil.which("copy-pack")
+        path_candidate = shutil.which("dbfs-copy-pack")
         if path_candidate:
             candidates.append(Path(path_candidate))
         repo_root = Path(__file__).resolve().parent
         candidates.extend(
             [
-                repo_root / "rust_hotpath" / "target" / "debug" / "copy-pack",
-                repo_root / "rust_hotpath" / "target" / "release" / "copy-pack",
+                repo_root / "rust_hotpath" / "target" / "debug" / "dbfs-copy-pack",
+                repo_root / "rust_hotpath" / "target" / "release" / "dbfs-copy-pack",
             ]
         )
         for candidate in candidates:
@@ -1037,14 +1341,14 @@ class StorageSupport:
         candidates = []
         if raw_value:
             candidates.append(Path(raw_value))
-        path_candidate = shutil.which("copy-dedupe")
+        path_candidate = shutil.which("dbfs-copy-dedupe")
         if path_candidate:
             candidates.append(Path(path_candidate))
         repo_root = Path(__file__).resolve().parent
         candidates.extend(
             [
-                repo_root / "rust_hotpath" / "target" / "debug" / "copy-dedupe",
-                repo_root / "rust_hotpath" / "target" / "release" / "copy-dedupe",
+                repo_root / "rust_hotpath" / "target" / "debug" / "dbfs-copy-dedupe",
+                repo_root / "rust_hotpath" / "target" / "release" / "dbfs-copy-dedupe",
             ]
         )
         for candidate in candidates:
@@ -1054,6 +1358,12 @@ class StorageSupport:
 
     def _pack_changed_copy_ranges(self, dst_offset, total_len, block_size, changed_mask):
         if self.rust_hotpath_copy_pack_enabled():
+            ffi_result = self._pack_changed_copy_ranges_rust_ffi(
+                dst_offset, total_len, block_size, changed_mask
+            )
+            if ffi_result is not None:
+                return ffi_result
+
             helper = self.rust_hotpath_copy_pack_bin_path()
             if helper is not None:
                 mask_arg = ",".join("1" if changed else "0" for changed in changed_mask)
@@ -1122,9 +1432,77 @@ class StorageSupport:
             and (skip_unchanged_blocks_max_blocks <= 0 or total_blocks <= skip_unchanged_blocks_max_blocks)
         )
 
+        if dedupe_enabled and self.rust_hotpath_copy_dedupe_enabled():
+            ffi_ranges = self._copy_dedupe_rust_ffi(
+                dst_offset,
+                payload,
+                block_size,
+            b"".join(
+                self._read_copy_destination_chunk(
+                    dst_file_id,
+                    dst_offset + rel_offset,
+                    len(payload[rel_offset:rel_offset + block_size]),
+                )
+                for rel_offset in range(0, len(payload), block_size)
+            ),
+            )
+            if ffi_ranges is not None:
+                bytes_written = 0
+                for run_start, run_end in ffi_ranges:
+                    if run_end <= run_start:
+                        continue
+                    rel_start = run_start - dst_offset
+                    rel_end = run_end - dst_offset
+                    self.write_into_state(dst_file_id, payload[rel_start:rel_end], run_start)
+                    bytes_written += rel_end - rel_start
+                return bytes_written
+
+            helper = self.rust_hotpath_copy_dedupe_bin_path()
+            if helper is not None:
+                try:
+                    input_lines = []
+                    for rel_offset in range(0, len(payload), block_size):
+                        chunk = payload[rel_offset:rel_offset + block_size]
+                        dst_chunk_offset = dst_offset + rel_offset
+                        current = self._read_copy_destination_chunk(dst_file_id, dst_chunk_offset, len(chunk))
+                        input_lines.append(f"{bytes(chunk).hex()}|{bytes(current).hex()}")
+
+                    completed = subprocess.run(
+                        [
+                            helper,
+                            str(int(dst_offset)),
+                            str(int(len(payload))),
+                            str(int(block_size)),
+                        ],
+                        input="\n".join(input_lines),
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+
+                    ranges = []
+                    for line in completed.stdout.splitlines():
+                        if not line.strip():
+                            continue
+                        start, end = line.split(",")
+                        ranges.append((int(start), int(end)))
+
+                    bytes_written = 0
+                    for run_start, run_end in ranges:
+                        if run_end <= run_start:
+                            continue
+                        rel_start = run_start - dst_offset
+                        rel_end = run_end - dst_offset
+                        self.write_into_state(dst_file_id, payload[rel_start:rel_end], run_start)
+                        bytes_written += rel_end - rel_start
+
+                    return bytes_written
+                except Exception:
+                    pass
+
         changed_mask = []
         use_crc_table = self._copy_dedupe_crc_table_enabled()
-        dirty_blocks = set(state["dirty_blocks"]) if state is not None else set()
+        dirty_blocks = set(state.get("dirty_blocks", [])) if state is not None else set()
         for rel_offset in range(0, len(payload), block_size):
             chunk = payload[rel_offset:rel_offset + block_size]
             dst_chunk_offset = dst_offset + rel_offset

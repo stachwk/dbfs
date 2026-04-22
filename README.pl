@@ -28,7 +28,7 @@ Projekt skupia się na:
 - Zmiany schematu żyją teraz w `migrations/` z sekwencyjnymi wersjami, jawnym eksportem `mkfs.dbfs.py status` i ścieżką upgrade ze starszych stanów schematu.
 - Obecna wersja DBFS jest zdefiniowna w dbfs_version.py, a `dbfs_bootstrap.py --version` i `mkfs.dbfs.py --version` wypisują tę samą wartość.
 - Prace nad wydajnością są już w kodzie, a aktualne baseline'y benchmarków są zapisane w `BENCHMARKS.md`.
-- Rustowy hot-path POC jest teraz domyślnie włączony dla planera, changed-copy dedupe, changed-run packing, paddingu bloków i składania odczytu. Najnowszy benchmark changed-copy nie pokazał na tym hoście wyraźnego end-to-end zysku, więc fallback w Pythonie nadal zostaje do porównań i ewentualnego wyłączenia.
+- Rustowy hot-path POC jest teraz domyślnie włączony dla planera, changed-copy dedupe, changed-run packing, paddingu bloków i składania odczytu. Zainstalowane binarki mają prefiks `dbfs-` (`dbfs-copy-plan`, `dbfs-copy-dedupe`, `dbfs-copy-pack`, `dbfs-persist-pad` i `dbfs-read-assemble`), a fallback w Pythonie nadal zostaje do porównań i ewentualnego wyłączenia.
 - Lokalny stack Docker Compose preloaduje `pg_stat_statements`, więc analiza zapytań i profilowanie runtime mogą korzystać z trwałych statystyk PostgreSQL.
 - `TODO.md` służy teraz jako log decyzji i notatek, a nie aktywny backlog implementacyjny.
 
@@ -221,7 +221,9 @@ make install-config-user
 make mount-user
 ```
 
-`make install-on-root` łączy `install-config`, `pip-install`, `install-root-scripts`, `install-rust-hotpath` i `install-mount-helper` w jeden krok dla instalacji typu root-style. To instaluje config, pakiet, polecenia `dbfs-bootstrap`/`mkfs.dbfs`, helpery Rust hot-path oraz helper mounta.
+`make install-on-root` łączy `install-config`, `pip-install`, `install-root-scripts`, `install-rust-hotpath` i `install-mount-helper` w jeden krok dla instalacji typu root-style. To instaluje config, pakiet, polecenia `dbfs-bootstrap`/`mkfs.dbfs`, helpery Rust hot-path (`dbfs-copy-plan`, `dbfs-copy-dedupe`, `dbfs-copy-pack`, `dbfs-persist-pad` i `dbfs-read-assemble`) oraz helper mounta.
+
+`make install-on-root-venv` to odpowiednik `make venv` + `make install-on-root`.
 
 ## Szybki start
 

@@ -13,6 +13,7 @@ RUNTIME_NUMERIC_SPECS = {
     "workers_write": (int, 1, 4),
     "workers_write_min_blocks": (int, 1, 8),
     "persist_buffer_chunk_blocks": (int, 1, 128),
+    "copy_dedupe_max_blocks": (int, 0, 0),
     "metadata_cache_ttl_seconds": (float, 0.0, 1.0),
     "statfs_cache_ttl_seconds": (float, 0.0, 2.0),
     "lock_lease_ttl_seconds": (int, 1, 30),
@@ -28,7 +29,13 @@ RUNTIME_ENUM_SPECS = {
 }
 
 RUNTIME_BOOL_SPECS = {
-    "copy_skip_unchanged_blocks": False,
+    "copy_dedupe_enabled": False,
+    "copy_dedupe_crc_table": False,
+    "rust_hotpath_copy_plan": True,
+    "rust_hotpath_copy_dedupe": True,
+    "rust_hotpath_copy_pack": True,
+    "rust_hotpath_persist_pad": True,
+    "rust_hotpath_read_assemble": True,
 }
 
 

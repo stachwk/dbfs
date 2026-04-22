@@ -33,7 +33,7 @@ DBFS_SYNC ?= 0
 DBFS_DIRSYNC ?= 0
 MOUNT_HELPER_DEST ?= /usr/local/sbin/mount.dbfs
 
-.PHONY: help venv deps up down restart logs wait init reset smoke mount mount-user demo unmount db-shell install-config install-config-user install-mount-helper install-root-scripts install-rust-hotpath install-on-root pip-build pip-install pip-install-editable config-show test-integration test-xattr test-df test-locking test-pg-lock-manager test-permissions test-journal test-destroy test-dirhooks test-hardlink test-fallocate test-copy-file-range test-copy-dedupe-benchmark test-copy-block-crc-table test-worker-thresholds-block-size test-rust-hotpath-copy-plan test-rust-hotpath-copy-dedupe test-rust-hotpath-copy-dedupe-benchmark test-rust-hotpath-copy-pack test-rust-hotpath-persist-pad test-rust-hotpath-read-assemble test-ioctl test-mknod test-bufio test-lseek test-poll test-access-groups test-inode-model test-ownership-inheritance test-rename-root-conflict test-bmap test-statfs-use-ino test-mount-workflow test-mount-root-permissions test-mount-wrapper-options test-fuse-context-identity test-files test-directories test-metadata test-symlink test-pool-connections test-mount-suite test-atime-noatime test-atime-relatime test-atime-benchmark test-timestamp-touch-once test-read-ahead-sequence test-read-cache-benchmark test-workers-read-parallel test-workers-write-parallel-copy test-runtime-config test-runtime-validation test-metadata-cache test-mkfs-pg-tls test-runtime-profile test-schema-upgrade test-schema-status test-postgresql-requirements test-throughput test-throughput-sync test-large-copy-benchmark test-large-file-multiblock-benchmark test-remount-durability-benchmark test-tree-scale test-flush-release-profile test-truncate-release-profile test-persist-buffer-chunking test-write-flush-threshold test-utimens-noop test-write-noop test-unlink-after-write test-local-vs-dbfs-permissions test-ext4-vs-dbfs-permissions test-root-owned-permissions test-allow-other-visibility test-multi-open-unique-handles test-version test-block-read test-connection-recovery test-all test-all-full clean
+.PHONY: help venv deps up down restart logs wait init reset smoke mount mount-user demo unmount db-shell install-config install-config-user install-mount-helper install-root-scripts install-rust-hotpath install-on-root install-on-root-venv pip-build pip-install pip-install-editable config-show test-integration test-xattr test-df test-locking test-pg-lock-manager test-permissions test-journal test-destroy test-dirhooks test-hardlink test-fallocate test-copy-file-range test-copy-dedupe-benchmark test-copy-block-crc-table test-worker-thresholds-block-size test-rust-hotpath-copy-plan test-rust-hotpath-copy-dedupe test-rust-hotpath-copy-dedupe-benchmark test-rust-hotpath-copy-pack test-rust-hotpath-persist-pad test-rust-hotpath-read-assemble test-ioctl test-mknod test-bufio test-lseek test-poll test-access-groups test-inode-model test-ownership-inheritance test-rename-root-conflict test-bmap test-statfs-use-ino test-mount-workflow test-mount-root-permissions test-mount-wrapper-options test-fuse-context-identity test-files test-directories test-metadata test-symlink test-pool-connections test-mount-suite test-atime-noatime test-atime-relatime test-atime-benchmark test-timestamp-touch-once test-read-ahead-sequence test-read-cache-benchmark test-workers-read-parallel test-workers-write-parallel-copy test-runtime-config test-runtime-validation test-metadata-cache test-mkfs-pg-tls test-runtime-profile test-schema-upgrade test-schema-status test-postgresql-requirements test-throughput test-throughput-sync test-large-copy-benchmark test-large-file-multiblock-benchmark test-remount-durability-benchmark test-tree-scale test-flush-release-profile test-truncate-release-profile test-persist-buffer-chunking test-write-flush-threshold test-utimens-noop test-write-noop test-unlink-after-write test-local-vs-dbfs-permissions test-ext4-vs-dbfs-permissions test-root-owned-permissions test-allow-other-visibility test-multi-open-unique-handles test-version test-block-read test-connection-recovery test-all test-all-full clean
 
 help:
 	@printf '%s\n' \
@@ -51,8 +51,9 @@ help:
 		'  make install-config-user - install dbfs_config.ini to $$HOME/.config/dbfs/dbfs_config.ini without sudo' \
 		'  make install-mount-helper - install mount.dbfs to $(MOUNT_HELPER_DEST)' \
 		'  make install-root-scripts - install dbfs-bootstrap and mkfs.dbfs to /usr/local/bin' \
-		'  make install-rust-hotpath - build and install copy-plan/copy-dedupe/copy-pack helper binaries' \
+		'  make install-rust-hotpath - build and install dbfs-copy-plan/dbfs-copy-dedupe/dbfs-copy-pack/dbfs-persist-pad/dbfs-read-assemble helper binaries' \
 		'  make install-on-root - install system config, pip package, mount helper, and Rust hot-path helpers' \
+		'  make install-on-root-venv - create .venv, then run the full root-style install' \
 		'  make pip-build - build a pip wheel into dist/' \
 		'  make pip-install - install the package into the active venv' \
 		'  make pip-install-editable - install the package in editable mode' \
@@ -217,16 +218,20 @@ install-root-scripts: pip-install
 
 install-rust-hotpath:
 	@printf '%s\n' "Building Rust hot-path helpers"
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --bin copy-plan --bin copy-dedupe --bin copy-pack --bin persist-pad --bin read-assemble
-	@printf '%s\n' "Installing copy-plan, copy-dedupe, copy-pack, persist-pad and read-assemble -> /usr/local/bin"
-	sudo install -D -m 0755 rust_hotpath/target/debug/copy-plan /usr/local/bin/copy-plan
-	sudo install -D -m 0755 rust_hotpath/target/debug/copy-dedupe /usr/local/bin/copy-dedupe
-	sudo install -D -m 0755 rust_hotpath/target/debug/copy-pack /usr/local/bin/copy-pack
-	sudo install -D -m 0755 rust_hotpath/target/debug/persist-pad /usr/local/bin/persist-pad
-	sudo install -D -m 0755 rust_hotpath/target/debug/read-assemble /usr/local/bin/read-assemble
+	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib --bin dbfs-copy-plan --bin dbfs-copy-dedupe --bin dbfs-copy-pack --bin dbfs-persist-pad --bin dbfs-read-assemble
+	@printf '%s\n' "Installing dbfs-copy-plan, dbfs-copy-dedupe, dbfs-copy-pack, dbfs-persist-pad and dbfs-read-assemble -> /usr/local/bin"
+	sudo install -D -m 0755 rust_hotpath/target/debug/dbfs-copy-plan /usr/local/bin/dbfs-copy-plan
+	sudo install -D -m 0755 rust_hotpath/target/debug/dbfs-copy-dedupe /usr/local/bin/dbfs-copy-dedupe
+	sudo install -D -m 0755 rust_hotpath/target/debug/dbfs-copy-pack /usr/local/bin/dbfs-copy-pack
+	sudo install -D -m 0755 rust_hotpath/target/debug/dbfs-persist-pad /usr/local/bin/dbfs-persist-pad
+	sudo install -D -m 0755 rust_hotpath/target/debug/dbfs-read-assemble /usr/local/bin/dbfs-read-assemble
+	sudo install -D -m 0755 rust_hotpath/target/debug/libdbfs_rust_hotpath.so /usr/local/lib/libdbfs-2.so
 
 install-on-root: install-config install-root-scripts install-rust-hotpath install-mount-helper
 	@printf '%s\n' "DBFS installed for root-style use: config, pip package, mount helper, and Rust hot-path helpers"
+
+install-on-root-venv: venv install-on-root
+	@printf '%s\n' "DBFS root-style install ready in $(VENV_DIR): config, pip package, mount helper, and Rust hot-path helpers"
 
 pip-build:
 	PYTHONPATH=$(SYSTEM_SITE_PACKAGES) $(VENV_PYTHON) setup.py bdist_wheel -d dist
@@ -463,34 +468,35 @@ test-throughput-sync: venv up
 
 test-rust-hotpath-copy-plan:
 	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --bin copy-plan
+	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib --bin dbfs-copy-plan
 	$(VENV_PYTHON) tests/integration/test_rust_hotpath_copy_plan.py
 
 test-rust-hotpath-copy-dedupe:
 	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --bin copy-dedupe
+	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib --bin dbfs-copy-dedupe
 	$(VENV_PYTHON) tests/integration/test_rust_hotpath_copy_dedupe.py
 
 test-rust-hotpath-copy-dedupe-benchmark: init
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --bin copy-dedupe
+	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib --bin dbfs-copy-dedupe
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_rust_hotpath_copy_dedupe_benchmark.py
 
 test-rust-hotpath-copy-pack:
 	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
+	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib --bin dbfs-copy-pack
 	$(VENV_PYTHON) tests/integration/test_rust_hotpath_copy_pack.py
 
 test-rust-hotpath-persist-pad:
 	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --bin persist-pad
+	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib --bin dbfs-persist-pad
 	$(VENV_PYTHON) tests/integration/test_rust_hotpath_persist_pad.py
 
 test-rust-hotpath-read-assemble:
 	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --bin read-assemble
+	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib --bin dbfs-read-assemble
 	$(VENV_PYTHON) tests/integration/test_rust_hotpath_read_assemble.py
 
 test-rust-hotpath-copy-pack-benchmark: init
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --bin copy-pack
+	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib --bin dbfs-copy-pack
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_rust_hotpath_copy_pack_benchmark.py
 
 test-large-copy-benchmark: init

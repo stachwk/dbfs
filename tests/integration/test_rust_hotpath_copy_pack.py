@@ -57,7 +57,7 @@ def run_rust_pack(
             "--manifest-path",
             str(RUST_MANIFEST),
             "--bin",
-            "copy-pack",
+            "dbfs-copy-pack",
             "--",
             str(off_out),
             str(total_len),

@@ -157,27 +157,27 @@ def main(argv: list[str] | None = None) -> None:
         fs.statfs_cache_ttl_seconds,
     )
     logging.info(
-        "DBFS Rust hot-path copy-plan=%s helper=%s",
+        "DBFS Rust hot-path dbfs-copy-plan=%s helper=%s",
         fs.rust_hotpath_copy_plan,
         fs.rust_hotpath_copy_plan_bin_path(),
     )
     logging.info(
-        "DBFS Rust hot-path copy-dedupe=%s helper=%s",
+        "DBFS Rust hot-path dbfs-copy-dedupe=%s helper=%s",
         fs.rust_hotpath_copy_dedupe,
         fs.storage.rust_hotpath_copy_dedupe_bin_path(),
     )
     logging.info(
-        "DBFS Rust hot-path copy-pack=%s helper=%s",
+        "DBFS Rust hot-path dbfs-copy-pack=%s helper=%s",
         fs.rust_hotpath_copy_pack,
         fs.rust_hotpath_copy_pack_bin_path(),
     )
     logging.info(
-        "DBFS Rust hot-path persist-pad=%s helper=%s",
+        "DBFS Rust hot-path dbfs-persist-pad=%s helper=%s",
         fs.rust_hotpath_persist_pad,
         fs.storage.rust_hotpath_persist_pad_bin_path(),
     )
     logging.info(
-        "DBFS Rust hot-path read-assemble=%s helper=%s",
+        "DBFS Rust hot-path dbfs-read-assemble=%s helper=%s",
         fs.rust_hotpath_read_assemble,
         fs.storage.rust_hotpath_read_assemble_bin_path(),
     )

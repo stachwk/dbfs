@@ -34,7 +34,7 @@ def run_rust_pad(payload: bytes, used_len: int, block_size: int) -> bytes:
             "--manifest-path",
             str(RUST_MANIFEST),
             "--bin",
-            "persist-pad",
+            "dbfs-persist-pad",
             "--",
             str(int(used_len)),
             str(int(block_size)),

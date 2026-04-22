@@ -39,7 +39,7 @@ def run_rust_assemble(fetch_first, fetch_last, offset, end_offset, block_size, b
             "--manifest-path",
             str(RUST_MANIFEST),
             "--bin",
-            "read-assemble",
+            "dbfs-read-assemble",
             "--",
             str(int(fetch_first)),
             str(int(fetch_last)),
