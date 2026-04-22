@@ -486,7 +486,7 @@ Co sprawdzają testy:
 `make test-all` zawiera check xattr/SELinux/trusted/ACL oraz złożony mount smoke suite.
 Mount repliki można wymusić przez `--role replica`. Domyślne `--role auto` wykrywa replikę przez `pg_is_in_recovery()` i montuje filesystem jako read-only.
 
-Aktualne baseline'y porównawcze dla throughput, dużego copy, dużych wieloblokowych plików, durability po remount, read cache i zachowania `atime` są zapisane w [BENCHMARKS.md](BENCHMARKS.md).
+Aktualne baseline'y porównawcze dla throughput, dużego copy, dużych wieloblokowych plików, durability po remount, read cache i zachowania `atime` są zapisane w [BENCHMARKS.md](BENCHMARKS.md). Na tym hoście uruchomienie `THROUGHPUT_SYNC=1` pozostało w podobnym zakresie wydajności jak wariant bez `fsync`, a największy batch był minimalnie lepszy, więc `synchronous_commit` zostaje knobem strojenia, a nie domyślną rekomendacją dla wszystkich workloadów.
 
 ## Opcje runtime
 
