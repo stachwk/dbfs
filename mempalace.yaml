@@ -10,6 +10,11 @@ rooms:
   keywords:
   - migrations
   - migrations
+- name: rust_hotpath
+  description: Files from rust_hotpath/
+  keywords:
+  - rust_hotpath
+  - rust_hotpath
 - name: mod
   description: Files from mod/
   keywords:
