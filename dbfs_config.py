@@ -6,6 +6,7 @@ from pathlib import Path
 
 
 SYSTEM_CONFIG_PATH = Path("/etc/dbfs/dbfs_config.ini")
+USER_CONFIG_PATH = Path.home() / ".config" / "dbfs" / "dbfs_config.ini"
 LOCAL_CONFIG_NAMES = ("dbfs_config.ini",)
 ENV_CONFIG_VAR = "DBFS_CONFIG"
 
@@ -27,6 +28,7 @@ def resolve_config_path(file_path: str | os.PathLike[str] | None = None, base_di
             base_dir = explicit_path.parent
 
     candidates.append(SYSTEM_CONFIG_PATH)
+    candidates.append(USER_CONFIG_PATH)
 
     search_root = Path(base_dir).expanduser().resolve() if base_dir is not None else Path.cwd().resolve()
     for name in LOCAL_CONFIG_NAMES:

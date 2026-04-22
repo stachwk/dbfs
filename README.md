@@ -186,7 +186,7 @@ make init
 make mount
 ```
 
-If you want to use the local config file instead of `/etc/dbfs/dbfs_config.ini`, use:
+If you want to use the user-level config file instead of `/etc/dbfs/dbfs_config.ini`, use:
 
 ```bash
 make install-config-user
@@ -197,8 +197,8 @@ make mount-user
 
 1. Configure `/etc/dbfs/dbfs_config.ini` or local `dbfs_config.ini`.
 1. Optionally run `make install-config` to copy `dbfs_config.ini` to `/etc/dbfs/dbfs_config.ini`.
-1. For local development you can run `make install-config-user` to refresh `./dbfs_config.ini` without `sudo`.
-1. Use `make config-show` to see which config file is resolved and `make mount-user` to force the local `./dbfs_config.ini`.
+1. For local development you can run `make install-config-user` to install `dbfs_config.ini` to `~/.config/dbfs/dbfs_config.ini` without `sudo`.
+1. Use `make config-show` to see which config file is resolved and `make mount-user` to force the user-level `~/.config/dbfs/dbfs_config.ini`.
 1. Initialize the schema:
 
    ```bash

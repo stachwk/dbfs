@@ -45,7 +45,7 @@ help:
 		'  make init       - create the DBFS schema in local PostgreSQL with --schema-admin-password' \
 		'  make reset      - down -v / up / wait / init for a clean start' \
 		'  make install-config - install dbfs_config.ini to /etc/dbfs/dbfs_config.ini' \
-		'  make install-config-user - copy dbfs_config.ini locally without sudo' \
+		'  make install-config-user - install dbfs_config.ini to $$HOME/.config/dbfs/dbfs_config.ini without sudo' \
 		'  make install-mount-helper - install mount.dbfs to $(MOUNT_HELPER_DEST)' \
 		'  make config-show - show which file DBFS uses for configuration' \
 		'  make smoke      - quick database connectivity test' \
@@ -178,8 +178,8 @@ install-config:
 	sudo install -D -m 0644 $(DBFS_CONFIG_SOURCE) $(DBFS_CONFIG_DEST)
 
 install-config-user:
-	@printf '%s\n' "Installing $(DBFS_CONFIG_SOURCE) -> ./dbfs_config.ini"
-	cp $(DBFS_CONFIG_SOURCE) ./dbfs_config.ini
+	@printf '%s\n' "Installing $(DBFS_CONFIG_SOURCE) -> $$HOME/.config/dbfs/dbfs_config.ini"
+	install -D -m 0644 $(DBFS_CONFIG_SOURCE) $$HOME/.config/dbfs/dbfs_config.ini
 
 install-mount-helper:
 	@printf '%s\n' "Installing mount.dbfs -> $(MOUNT_HELPER_DEST)"
@@ -205,8 +205,8 @@ mount: venv up
 
 mount-user: venv up
 	mkdir -p $(MOUNTPOINT)
-	@printf '%s\n' "Using DBFS config file: ./dbfs_config.ini"
-	DBFS_CONFIG=./dbfs_config.ini POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) DBFS_ROLE=$(DBFS_ROLE) DBFS_SELINUX=$(DBFS_SELINUX) DBFS_ACL=$(DBFS_ACL) DBFS_LOG_LEVEL=$(DBFS_LOG_LEVEL) DBFS_DEFAULT_PERMISSIONS=$(DBFS_DEFAULT_PERMISSIONS) DBFS_ATIME_POLICY=$(DBFS_ATIME_POLICY) DBFS_LAZYTIME=$(DBFS_LAZYTIME) DBFS_SYNC=$(DBFS_SYNC) DBFS_DIRSYNC=$(DBFS_DIRSYNC) DBFS_SELINUX_CONTEXT=$(DBFS_SELINUX_CONTEXT) DBFS_SELINUX_FSCONTEXT=$(DBFS_SELINUX_FSCONTEXT) DBFS_SELINUX_DEFCONTEXT=$(DBFS_SELINUX_DEFCONTEXT) DBFS_SELINUX_ROOTCONTEXT=$(DBFS_SELINUX_ROOTCONTEXT) $(VENV_PYTHON) dbfs_bootstrap.py --role $(DBFS_ROLE) --selinux $(DBFS_SELINUX) --acl $(DBFS_ACL) --atime-policy $(DBFS_ATIME_POLICY) $(if $(filter 0 false False no,$(DBFS_DEFAULT_PERMISSIONS)),--no-default-permissions,--default-permissions) -f $(MOUNTPOINT)
+	@printf '%s\n' "Using DBFS config file: $$HOME/.config/dbfs/dbfs_config.ini (fallback: ./dbfs_config.ini)"
+	DBFS_CONFIG=$$HOME/.config/dbfs/dbfs_config.ini POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) DBFS_ROLE=$(DBFS_ROLE) DBFS_SELINUX=$(DBFS_SELINUX) DBFS_ACL=$(DBFS_ACL) DBFS_LOG_LEVEL=$(DBFS_LOG_LEVEL) DBFS_DEFAULT_PERMISSIONS=$(DBFS_DEFAULT_PERMISSIONS) DBFS_ATIME_POLICY=$(DBFS_ATIME_POLICY) DBFS_LAZYTIME=$(DBFS_LAZYTIME) DBFS_SYNC=$(DBFS_SYNC) DBFS_DIRSYNC=$(DBFS_DIRSYNC) DBFS_SELINUX_CONTEXT=$(DBFS_SELINUX_CONTEXT) DBFS_SELINUX_FSCONTEXT=$(DBFS_SELINUX_FSCONTEXT) DBFS_SELINUX_DEFCONTEXT=$(DBFS_SELINUX_DEFCONTEXT) DBFS_SELINUX_ROOTCONTEXT=$(DBFS_SELINUX_ROOTCONTEXT) $(VENV_PYTHON) dbfs_bootstrap.py --role $(DBFS_ROLE) --selinux $(DBFS_SELINUX) --acl $(DBFS_ACL) --atime-policy $(DBFS_ATIME_POLICY) $(if $(filter 0 false False no,$(DBFS_DEFAULT_PERMISSIONS)),--no-default-permissions,--default-permissions) -f $(MOUNTPOINT)
 
 demo: init
 	mkdir -p $(MOUNTPOINT)
