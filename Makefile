@@ -33,7 +33,7 @@ DBFS_SYNC ?= 0
 DBFS_DIRSYNC ?= 0
 MOUNT_HELPER_DEST ?= /usr/local/sbin/mount.dbfs
 
-.PHONY: help venv deps up down restart logs wait init reset smoke mount mount-user demo unmount db-shell install-config install-config-user install-mount-helper install-root-scripts install-rust-hotpath install-on-root install-on-root-venv pip-build pip-install pip-install-editable config-show test-integration test-xattr test-df test-locking test-pg-lock-manager test-permissions test-journal test-destroy test-dirhooks test-hardlink test-fallocate test-copy-file-range test-copy-dedupe-benchmark test-copy-block-crc-table test-worker-thresholds-block-size test-rust-hotpath-copy-plan test-rust-hotpath-copy-dedupe test-rust-hotpath-copy-dedupe-benchmark test-rust-hotpath-copy-pack test-rust-hotpath-persist-pad test-rust-hotpath-read-assemble test-ioctl test-mknod test-bufio test-lseek test-poll test-access-groups test-inode-model test-ownership-inheritance test-rename-root-conflict test-bmap test-statfs-use-ino test-mount-workflow test-mount-root-permissions test-mount-wrapper-options test-fuse-context-identity test-files test-directories test-metadata test-symlink test-pool-connections test-mount-suite test-atime-noatime test-atime-relatime test-atime-benchmark test-timestamp-touch-once test-read-ahead-sequence test-read-cache-benchmark test-workers-read-parallel test-workers-write-parallel-copy test-runtime-config test-runtime-validation test-metadata-cache test-mkfs-pg-tls test-runtime-profile test-schema-upgrade test-schema-status test-postgresql-requirements test-throughput test-throughput-sync test-large-copy-benchmark test-large-file-multiblock-benchmark test-remount-durability-benchmark test-tree-scale test-flush-release-profile test-truncate-release-profile test-persist-buffer-chunking test-write-flush-threshold test-utimens-noop test-write-noop test-unlink-after-write test-local-vs-dbfs-permissions test-ext4-vs-dbfs-permissions test-root-owned-permissions test-allow-other-visibility test-multi-open-unique-handles test-version test-block-read test-connection-recovery test-all test-all-full clean
+.PHONY: help venv deps up down restart logs wait init reset smoke mount mount-user demo unmount db-shell install-config install-config-user install-mount-helper install-root-scripts install-rust-hotpath install-on-root install-on-root-venv pip-build pip-install pip-install-editable config-show test-integration test-xattr test-df test-locking test-pg-lock-manager test-permissions test-journal test-destroy test-dirhooks test-hardlink test-fallocate test-copy-file-range test-copy-dedupe-benchmark test-copy-block-crc-table test-worker-thresholds-block-size test-rust-hotpath-copy-plan test-rust-hotpath-crc32 test-rust-hotpath-read-ahead test-rust-hotpath-read-sequence test-rust-hotpath-read-fetch-bounds test-rust-hotpath-missing-ranges test-rust-hotpath-copy-dedupe test-rust-hotpath-copy-dedupe-benchmark test-rust-hotpath-copy-pack test-rust-hotpath-persist-pad test-rust-hotpath-read-assemble test-ioctl test-mknod test-bufio test-lseek test-poll test-access-groups test-inode-model test-ownership-inheritance test-rename-root-conflict test-bmap test-statfs-use-ino test-mount-workflow test-mount-root-permissions test-mount-wrapper-options test-fuse-context-identity test-files test-directories test-metadata test-symlink test-pool-connections test-mount-suite test-atime-noatime test-atime-relatime test-atime-benchmark test-timestamp-touch-once test-read-ahead-sequence test-read-cache-benchmark test-workers-read-parallel test-workers-write-parallel-copy test-runtime-config test-runtime-validation test-metadata-cache test-mkfs-pg-tls test-runtime-profile test-schema-upgrade test-schema-status test-postgresql-requirements test-throughput test-throughput-sync test-large-copy-benchmark test-large-file-multiblock-benchmark test-remount-durability-benchmark test-tree-scale test-flush-release-profile test-truncate-release-profile test-persist-buffer-chunking test-write-flush-threshold test-utimens-noop test-write-noop test-unlink-after-write test-local-vs-dbfs-permissions test-ext4-vs-dbfs-permissions test-root-owned-permissions test-allow-other-visibility test-multi-open-unique-handles test-version test-block-read test-connection-recovery test-all test-all-full clean
 
 help:
 	@printf '%s\n' \
@@ -131,6 +131,10 @@ help:
 		'  make test-rust-hotpath-copy-pack - compare the Rust changed-run packer against Python' \
 		'  make test-rust-hotpath-persist-pad - compare the Rust persist padding helper against Python' \
 		'  make test-rust-hotpath-read-assemble - compare the Rust read assembly helper against Python' \
+		'  make test-rust-hotpath-read-ahead - compare the Rust read-ahead formula against Python' \
+		'  make test-rust-hotpath-read-sequence - compare the Rust read-sequence helper against Python' \
+		'  make test-rust-hotpath-read-fetch-bounds - compare the Rust read fetch planner against Python' \
+		'  make test-rust-hotpath-missing-ranges - compare the Rust missing-range helper against Python' \
 		'  make test-rust-hotpath-copy-pack-benchmark - benchmark Rust packer vs Python fallback' \
 		'  make test-large-copy-benchmark - benchmark large copy_file_range transfers' \
 		'  make test-large-file-multiblock-benchmark - benchmark large multi-block file writes' \
@@ -279,7 +283,7 @@ unmount:
 		umount $(MOUNTPOINT); \
 	fi
 
-test-integration: reset test-flush-release-profile test-persist-buffer-chunking test-write-flush-threshold test-utimens-noop test-write-noop test-unlink-after-write test-local-vs-dbfs-permissions test-copy-block-crc-table test-multi-open-unique-handles test-workers-read-parallel test-workers-write-parallel-copy test-worker-thresholds-block-size test-rust-hotpath-copy-plan test-rust-hotpath-copy-dedupe test-rust-hotpath-copy-dedupe-benchmark test-rust-hotpath-copy-pack test-rust-hotpath-copy-pack-benchmark test-rust-hotpath-persist-pad test-rust-hotpath-read-assemble test-version test-timestamp-touch-once test-read-ahead-sequence test-read-cache-benchmark test-runtime-config test-runtime-validation test-metadata-cache test-mkfs-pg-tls test-runtime-profile test-schema-upgrade test-schema-status test-postgresql-requirements test-block-read test-pg-lock-manager test-mount-root-permissions test-mount-wrapper-options test-connection-recovery
+test-integration: reset test-flush-release-profile test-persist-buffer-chunking test-write-flush-threshold test-utimens-noop test-write-noop test-unlink-after-write test-local-vs-dbfs-permissions test-copy-block-crc-table test-multi-open-unique-handles test-workers-read-parallel test-workers-write-parallel-copy test-worker-thresholds-block-size test-rust-hotpath-copy-plan test-rust-hotpath-crc32 test-rust-hotpath-read-ahead test-rust-hotpath-read-sequence test-rust-hotpath-read-fetch-bounds test-rust-hotpath-missing-ranges test-rust-hotpath-copy-dedupe test-rust-hotpath-copy-dedupe-benchmark test-rust-hotpath-copy-pack test-rust-hotpath-copy-pack-benchmark test-rust-hotpath-persist-pad test-rust-hotpath-read-assemble test-version test-timestamp-touch-once test-read-ahead-sequence test-read-cache-benchmark test-runtime-config test-runtime-validation test-metadata-cache test-mkfs-pg-tls test-runtime-profile test-schema-upgrade test-schema-status test-postgresql-requirements test-block-read test-pg-lock-manager test-mount-root-permissions test-mount-wrapper-options test-connection-recovery
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_mkdir_create_write_read.py
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_mkdir_parent_missing.py
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_truncate_rename.py
@@ -471,6 +475,31 @@ test-rust-hotpath-copy-plan:
 	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib --bin dbfs-copy-plan
 	$(VENV_PYTHON) tests/integration/test_rust_hotpath_copy_plan.py
 
+test-rust-hotpath-crc32:
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
+	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
+	$(VENV_PYTHON) tests/integration/test_rust_hotpath_crc32.py
+
+test-rust-hotpath-read-ahead:
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
+	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
+	$(VENV_PYTHON) tests/integration/test_rust_hotpath_read_ahead.py
+
+test-rust-hotpath-read-sequence:
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
+	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
+	$(VENV_PYTHON) tests/integration/test_rust_hotpath_read_sequence.py
+
+test-rust-hotpath-read-fetch-bounds:
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
+	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
+	$(VENV_PYTHON) tests/integration/test_rust_hotpath_read_fetch_bounds.py
+
+test-rust-hotpath-missing-ranges:
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
+	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
+	$(VENV_PYTHON) tests/integration/test_rust_hotpath_missing_ranges.py
+
 test-rust-hotpath-copy-dedupe:
 	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
 	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib --bin dbfs-copy-dedupe
@@ -559,7 +588,7 @@ test-mount-suite: venv
 	$(MAKE) reset
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) VENV_PYTHON=$(VENV_PYTHON) DBFS_SELINUX=$(DBFS_SELINUX) DBFS_ACL=$(DBFS_ACL) DBFS_DEFAULT_PERMISSIONS=$(DBFS_DEFAULT_PERMISSIONS) DBFS_ATIME_POLICY=$(DBFS_ATIME_POLICY) DBFS_ROLE=$(DBFS_ROLE) DBFS_LAZYTIME=$(DBFS_LAZYTIME) DBFS_SYNC=$(DBFS_SYNC) DBFS_DIRSYNC=$(DBFS_DIRSYNC) DBFS_SELINUX_CONTEXT=$(DBFS_SELINUX_CONTEXT) DBFS_SELINUX_FSCONTEXT=$(DBFS_SELINUX_FSCONTEXT) DBFS_SELINUX_DEFCONTEXT=$(DBFS_SELINUX_DEFCONTEXT) DBFS_SELINUX_ROOTCONTEXT=$(DBFS_SELINUX_ROOTCONTEXT) $(VENV_PYTHON) tests/integration/test_mount_suite.py
 
-test-all: smoke test-integration test-mount-suite test-xattr test-locking test-permissions test-journal test-destroy test-dirhooks test-hardlink test-fallocate test-copy-file-range test-ioctl test-mknod test-bufio test-lseek test-poll test-access-groups test-inode-model test-ownership-inheritance test-rename-root-conflict test-bmap test-pool-connections test-timestamp-touch-once test-read-ahead-sequence test-read-cache-benchmark test-workers-read-parallel test-workers-write-parallel-copy test-worker-thresholds-block-size test-rust-hotpath-copy-plan test-rust-hotpath-copy-dedupe test-rust-hotpath-copy-pack test-rust-hotpath-persist-pad test-rust-hotpath-read-assemble test-runtime-config test-runtime-validation test-metadata-cache test-mkfs-pg-tls test-runtime-profile test-schema-upgrade test-postgresql-requirements test-connection-recovery test-multi-open-unique-handles
+test-all: smoke test-integration test-mount-suite test-xattr test-locking test-permissions test-journal test-destroy test-dirhooks test-hardlink test-fallocate test-copy-file-range test-ioctl test-mknod test-bufio test-lseek test-poll test-access-groups test-inode-model test-ownership-inheritance test-rename-root-conflict test-bmap test-pool-connections test-timestamp-touch-once test-read-ahead-sequence test-read-cache-benchmark test-workers-read-parallel test-workers-write-parallel-copy test-worker-thresholds-block-size test-rust-hotpath-copy-plan test-rust-hotpath-crc32 test-rust-hotpath-read-ahead test-rust-hotpath-read-sequence test-rust-hotpath-read-fetch-bounds test-rust-hotpath-missing-ranges test-rust-hotpath-copy-dedupe test-rust-hotpath-copy-pack test-rust-hotpath-persist-pad test-rust-hotpath-read-assemble test-runtime-config test-runtime-validation test-metadata-cache test-mkfs-pg-tls test-runtime-profile test-schema-upgrade test-postgresql-requirements test-connection-recovery test-multi-open-unique-handles
 
 test-all-full: test-all test-files test-directories test-metadata test-symlink test-mount-workflow test-statfs-use-ino test-atime-noatime test-atime-relatime test-throughput test-throughput-sync
 

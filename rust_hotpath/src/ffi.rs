@@ -1,7 +1,10 @@
 use std::panic;
 use std::slice;
 
-use crate::{assemble_read_slice, copy_segments, pack_changed_ranges, pad_block_bytes};
+use crate::{
+    assemble_read_slice, contiguous_ranges, copy_segments, crc32_bytes, pack_changed_ranges,
+    pad_block_bytes, read_ahead_blocks, read_fetch_bounds,
+};
 
 #[repr(C)]
 #[derive(Debug, PartialEq, Eq)]
@@ -24,6 +27,20 @@ pub struct DbfsReadBlock {
     pub index: u64,
     pub ptr: *const u8,
     pub len: usize,
+}
+
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct DbfsReadSequenceStepResult {
+    pub sequential: u8,
+    pub streak: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct DbfsReadBounds {
+    pub fetch_first: u64,
+    pub fetch_last: u64,
 }
 
 unsafe fn slice_from_raw<'a>(ptr: *const u8, len: usize) -> Option<&'a [u8]> {
@@ -235,6 +252,128 @@ pub extern "C" fn dbfs_read_assemble(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn dbfs_crc32(input_ptr: *const u8, input_len: usize) -> u32 {
+    unsafe {
+        match slice_from_raw(input_ptr, input_len) {
+            Some(slice) => crc32_bytes(slice),
+            None => 0,
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_read_sequence_step(
+    has_previous: u8,
+    previous_last_end: u64,
+    offset: u64,
+    previous_streak: u64,
+) -> DbfsReadSequenceStepResult {
+    let sequential = has_previous != 0 && previous_last_end == offset;
+    let streak = if sequential {
+        previous_streak.saturating_add(1)
+    } else {
+        0
+    };
+
+    DbfsReadSequenceStepResult {
+        sequential: sequential as u8,
+        streak,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_read_ahead_blocks(
+    read_ahead_blocks_value: u64,
+    sequential_read_ahead_blocks_value: u64,
+    streak: u64,
+    read_cache_limit_blocks: u64,
+    sequential: u8,
+) -> u64 {
+    read_ahead_blocks(
+        read_ahead_blocks_value,
+        sequential_read_ahead_blocks_value,
+        streak,
+        read_cache_limit_blocks,
+        sequential != 0,
+    )
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_read_fetch_bounds(
+    total_blocks: u64,
+    requested_first: u64,
+    requested_last: u64,
+    read_ahead_blocks_value: u64,
+    sequential_read_ahead_blocks_value: u64,
+    streak: u64,
+    read_cache_limit_blocks: u64,
+    sequential: u8,
+    small_file_threshold_blocks: u64,
+    out_ptr: *mut DbfsReadBounds,
+) -> i32 {
+    let result = panic::catch_unwind(|| {
+        let bounds = match read_fetch_bounds(
+            total_blocks,
+            requested_first,
+            requested_last,
+            read_ahead_blocks_value,
+            sequential_read_ahead_blocks_value,
+            streak,
+            read_cache_limit_blocks,
+            sequential != 0,
+            small_file_threshold_blocks,
+        ) {
+            Some((fetch_first, fetch_last)) => DbfsReadBounds {
+                fetch_first,
+                fetch_last,
+            },
+            None => return 1,
+        };
+
+        if out_ptr.is_null() {
+            return 1;
+        }
+        unsafe {
+            *out_ptr = bounds;
+        }
+        0
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_contiguous_missing_ranges(
+    missing_ptr: *const u64,
+    missing_len: usize,
+    out_ptr: *mut *mut DbfsRange,
+    out_len: *mut usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if missing_len == 0 {
+            return write_boxed_output(Vec::<DbfsRange>::new(), out_ptr, out_len);
+        }
+        if missing_ptr.is_null() {
+            return 1;
+        }
+        let missing = slice::from_raw_parts(missing_ptr, missing_len);
+        let ranges = contiguous_ranges(missing)
+            .into_iter()
+            .map(|(start, end)| DbfsRange { start, end })
+            .collect::<Vec<_>>();
+        write_boxed_output(ranges, out_ptr, out_len)
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn dbfs_free_copy_segments(ptr: *mut DbfsCopySegment, len: usize) {
     if ptr.is_null() || len == 0 {
         return;
@@ -270,9 +409,10 @@ pub extern "C" fn dbfs_free_bytes(ptr: *mut u8, len: usize) {
 #[cfg(test)]
 mod tests {
     use super::{
-        dbfs_copy_dedupe, dbfs_copy_pack, dbfs_copy_plan, dbfs_free_bytes,
-        dbfs_free_copy_segments, dbfs_free_ranges, dbfs_persist_pad, dbfs_read_assemble,
-        DbfsCopySegment, DbfsRange, DbfsReadBlock,
+        dbfs_contiguous_missing_ranges, dbfs_copy_dedupe, dbfs_copy_pack, dbfs_copy_plan,
+        dbfs_crc32, dbfs_free_bytes, dbfs_free_copy_segments, dbfs_free_ranges,
+        dbfs_persist_pad, dbfs_read_assemble, dbfs_read_ahead_blocks, dbfs_read_fetch_bounds,
+        dbfs_read_sequence_step, DbfsCopySegment, DbfsRange, DbfsReadBlock, DbfsReadBounds,
     };
 
     #[test]
@@ -397,5 +537,84 @@ mod tests {
         assert_eq!(ranges[0].start, 0);
         assert_eq!(ranges[0].end, 4);
         dbfs_free_ranges(out_ptr, out_len);
+    }
+
+    #[test]
+    fn exports_crc32() {
+        assert_eq!(dbfs_crc32(b"123456789".as_ptr(), 9), 0xCBF4_3926);
+        assert_eq!(dbfs_crc32(std::ptr::null(), 0), 0);
+    }
+
+    #[test]
+    fn exports_read_sequence_step() {
+        let next = dbfs_read_sequence_step(1, 128, 128, 3);
+        assert_eq!(next.sequential, 1);
+        assert_eq!(next.streak, 4);
+
+        let reset = dbfs_read_sequence_step(1, 128, 64, 3);
+        assert_eq!(reset.sequential, 0);
+        assert_eq!(reset.streak, 0);
+
+        let empty = dbfs_read_sequence_step(0, 0, 0, 99);
+        assert_eq!(empty.sequential, 0);
+        assert_eq!(empty.streak, 0);
+    }
+
+    #[test]
+    fn exports_read_ahead_blocks() {
+        assert_eq!(dbfs_read_ahead_blocks(2, 8, 0, 256, 0), 2);
+        assert_eq!(dbfs_read_ahead_blocks(2, 8, 1, 256, 1), 8);
+        assert_eq!(dbfs_read_ahead_blocks(2, 8, 3, 10, 1), 9);
+        assert_eq!(dbfs_read_ahead_blocks(16, 8, 4, 4, 1), 3);
+    }
+
+    #[test]
+    fn exports_contiguous_missing_ranges() {
+        let missing = [2u64, 3, 4, 7, 8, 10];
+        let mut out_ptr: *mut DbfsRange = std::ptr::null_mut();
+        let mut out_len: usize = 0;
+
+        let status = dbfs_contiguous_missing_ranges(
+            missing.as_ptr(),
+            missing.len(),
+            &mut out_ptr,
+            &mut out_len,
+        );
+        assert_eq!(status, 0);
+        let ranges = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(
+            ranges,
+            &[
+                DbfsRange { start: 2, end: 4 },
+                DbfsRange { start: 7, end: 8 },
+                DbfsRange { start: 10, end: 10 },
+            ]
+        );
+        dbfs_free_ranges(out_ptr, out_len);
+    }
+
+    #[test]
+    fn exports_read_fetch_bounds() {
+        let mut out = DbfsReadBounds {
+            fetch_first: 0,
+            fetch_last: 0,
+        };
+
+        assert_eq!(
+            dbfs_read_fetch_bounds(0, 0, 0, 2, 8, 0, 256, 0, 8, &mut out),
+            1
+        );
+        assert_eq!(
+            dbfs_read_fetch_bounds(4, 0, 0, 2, 8, 0, 256, 0, 8, &mut out),
+            0
+        );
+        assert_eq!(out.fetch_first, 0);
+        assert_eq!(out.fetch_last, 3);
+        assert_eq!(
+            dbfs_read_fetch_bounds(32, 2, 3, 2, 8, 1, 256, 1, 8, &mut out),
+            0
+        );
+        assert_eq!(out.fetch_first, 2);
+        assert_eq!(out.fetch_last, 11);
     }
 }

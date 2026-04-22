@@ -1,4 +1,36 @@
+use std::sync::OnceLock;
+
 pub mod ffi;
+
+fn crc32_table() -> &'static [u32; 256] {
+    static TABLE: OnceLock<[u32; 256]> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut table = [0u32; 256];
+        let poly = 0xEDB8_8320u32;
+        let mut i = 0u32;
+        while i < 256 {
+            let mut crc = i;
+            let mut bit = 0;
+            while bit < 8 {
+                crc = if crc & 1 != 0 { (crc >> 1) ^ poly } else { crc >> 1 };
+                bit += 1;
+            }
+            table[i as usize] = crc;
+            i += 1;
+        }
+        table
+    })
+}
+
+pub fn crc32_bytes(data: &[u8]) -> u32 {
+    let mut crc = 0xFFFF_FFFFu32;
+    let table = crc32_table();
+    for &byte in data {
+        let idx = ((crc ^ u32::from(byte)) & 0xFF) as usize;
+        crc = (crc >> 8) ^ table[idx];
+    }
+    !crc
+}
 
 pub fn copy_segments(
     off_in: u64,
@@ -78,6 +110,77 @@ pub fn pack_changed_copy_pairs(
     pack_changed_ranges(off_out, total_len, block_size, &changed_mask)
 }
 
+pub fn contiguous_ranges(values: &[u64]) -> Vec<(u64, u64)> {
+    if values.is_empty() {
+        return Vec::new();
+    }
+
+    let mut ranges = Vec::new();
+    let mut start = values[0];
+    let mut end = values[0];
+    for &value in &values[1..] {
+        if value == end.saturating_add(1) {
+            end = value;
+            continue;
+        }
+        ranges.push((start, end));
+        start = value;
+        end = value;
+    }
+    ranges.push((start, end));
+    ranges
+}
+
+pub fn read_ahead_blocks(
+    read_ahead_blocks: u64,
+    sequential_read_ahead_blocks: u64,
+    streak: u64,
+    read_cache_limit_blocks: u64,
+    sequential: bool,
+) -> u64 {
+    let mut effective = read_ahead_blocks;
+    if sequential {
+        let dynamic_ahead = sequential_read_ahead_blocks.saturating_mul(streak.max(1));
+        effective = effective.max(dynamic_ahead);
+    }
+
+    let max_allowed = read_cache_limit_blocks.saturating_sub(1);
+    effective.min(max_allowed)
+}
+
+pub fn read_fetch_bounds(
+    total_blocks: u64,
+    requested_first: u64,
+    requested_last: u64,
+    read_ahead_blocks_value: u64,
+    sequential_read_ahead_blocks_value: u64,
+    streak: u64,
+    read_cache_limit_blocks: u64,
+    sequential: bool,
+    small_file_threshold_blocks: u64,
+) -> Option<(u64, u64)> {
+    if total_blocks == 0 {
+        return None;
+    }
+
+    if total_blocks <= small_file_threshold_blocks {
+        return Some((0, total_blocks.saturating_sub(1)));
+    }
+
+    let read_ahead = read_ahead_blocks(
+        read_ahead_blocks_value,
+        sequential_read_ahead_blocks_value,
+        streak,
+        read_cache_limit_blocks,
+        sequential,
+    );
+    let fetch_first = requested_first;
+    let fetch_last = requested_last
+        .saturating_add(read_ahead)
+        .min(total_blocks.saturating_sub(1));
+    Some((fetch_first, fetch_last))
+}
+
 pub fn pad_block_bytes(payload: &[u8], used_len: u64, block_size: u64) -> Vec<u8> {
     let block_size = block_size.max(1) as usize;
     let used_len = used_len.min(block_size as u64) as usize;
@@ -130,7 +233,7 @@ pub fn assemble_read_slice(
 mod tests {
     use super::{
         assemble_read_slice, copy_segments, pack_changed_copy_pairs, pack_changed_ranges,
-        pad_block_bytes,
+        pad_block_bytes, read_ahead_blocks, read_fetch_bounds,
     };
 
     #[test]
@@ -214,6 +317,15 @@ mod tests {
             assemble_read_slice(1, 1, 9, 12, 8, &aligned),
             b"bcd".to_vec()
         );
+    }
+
+    #[test]
+    fn plans_read_fetch_bounds() {
+        assert_eq!(read_fetch_bounds(0, 0, 0, 2, 8, 0, 256, false, 8), None);
+        assert_eq!(read_fetch_bounds(4, 0, 0, 2, 8, 0, 256, false, 8), Some((0, 3)));
+        assert_eq!(read_fetch_bounds(32, 2, 3, 2, 8, 1, 256, true, 8), Some((2, 11)));
+        assert_eq!(read_fetch_bounds(32, 2, 3, 16, 8, 4, 4, true, 8), Some((2, 6)));
+        assert_eq!(read_ahead_blocks(2, 8, 3, 10, true), 9);
     }
 
     #[test]

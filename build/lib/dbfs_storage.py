@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import ctypes
+import binascii
 import os
 import subprocess
 import shutil
-import zlib
 from pathlib import Path
 import time
 from itertools import chain
@@ -33,6 +33,20 @@ class DbfsReadBlock(ctypes.Structure):
         ("index", ctypes.c_uint64),
         ("ptr", ctypes.POINTER(ctypes.c_ubyte)),
         ("len", ctypes.c_size_t),
+    ]
+
+
+class DbfsReadSequenceStepResult(ctypes.Structure):
+    _fields_ = [
+        ("sequential", ctypes.c_ubyte),
+        ("streak", ctypes.c_uint64),
+    ]
+
+
+class DbfsReadBounds(ctypes.Structure):
+    _fields_ = [
+        ("fetch_first", ctypes.c_uint64),
+        ("fetch_last", ctypes.c_uint64),
     ]
 
 
@@ -103,6 +117,10 @@ class StorageSupport:
     def _missing_block_ranges(self, missing):
         if not missing:
             return []
+
+        stepped = self._missing_block_ranges_rust_ffi(missing)
+        if stepped is not None:
+            return stepped
 
         ranges = []
         range_start = missing[0]
@@ -213,7 +231,10 @@ class StorageSupport:
         stale_rows = []
         for file_id, block_index, data, used_len in block_rows:
             if used_len >= block_size:
-                crc_rows.append((file_id, block_index, zlib.crc32(bytes(data)) & 0xFFFFFFFF))
+                crc_value = self._crc32_rust_ffi(data)
+                if crc_value is None:
+                    crc_value = binascii.crc32(bytes(data)) & 0xFFFFFFFF
+                crc_rows.append((file_id, block_index, crc_value))
             else:
                 stale_rows.append((file_id, block_index))
 
@@ -393,9 +414,129 @@ class StorageSupport:
             ctypes.c_size_t,
         ]
         lib.dbfs_free_bytes.restype = None
+        lib.dbfs_crc32.argtypes = [
+            ctypes.POINTER(ctypes.c_ubyte),
+            ctypes.c_size_t,
+        ]
+        lib.dbfs_crc32.restype = ctypes.c_uint32
+        lib.dbfs_read_sequence_step.argtypes = [
+            ctypes.c_ubyte,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+        ]
+        lib.dbfs_read_sequence_step.restype = DbfsReadSequenceStepResult
+        lib.dbfs_read_ahead_blocks.argtypes = [
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_ubyte,
+        ]
+        lib.dbfs_read_ahead_blocks.restype = ctypes.c_uint64
+        lib.dbfs_read_fetch_bounds.argtypes = [
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_ubyte,
+            ctypes.c_uint64,
+            ctypes.POINTER(DbfsReadBounds),
+        ]
+        lib.dbfs_read_fetch_bounds.restype = ctypes.c_int
+        lib.dbfs_contiguous_missing_ranges.argtypes = [
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.POINTER(DbfsRange)),
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        lib.dbfs_contiguous_missing_ranges.restype = ctypes.c_int
 
         self._rust_hotpath_lib_handle = lib
         return lib
+
+    def _read_sequence_step_rust_ffi(self, previous, offset):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        has_previous = 1 if previous else 0
+        previous_last_end = int(previous.get("last_end", 0)) if previous else 0
+        previous_streak = int(previous.get("streak", 0)) if previous else 0
+        result = lib.dbfs_read_sequence_step(
+            ctypes.c_ubyte(has_previous),
+            ctypes.c_uint64(previous_last_end),
+            ctypes.c_uint64(int(offset)),
+            ctypes.c_uint64(previous_streak),
+        )
+        return bool(result.sequential), int(result.streak)
+
+    def _read_ahead_blocks_rust_ffi(self, read_ahead_blocks, sequential_read_ahead_blocks, streak, read_cache_limit_blocks, sequential):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        return int(
+            lib.dbfs_read_ahead_blocks(
+                ctypes.c_uint64(int(read_ahead_blocks)),
+                ctypes.c_uint64(int(sequential_read_ahead_blocks)),
+                ctypes.c_uint64(int(streak)),
+                ctypes.c_uint64(int(read_cache_limit_blocks)),
+                ctypes.c_ubyte(1 if sequential else 0),
+            )
+        )
+
+    def _read_fetch_bounds_rust_ffi(self, total_blocks, requested_first, requested_last, sequential, streak):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        out = DbfsReadBounds()
+        rc = lib.dbfs_read_fetch_bounds(
+            ctypes.c_uint64(int(total_blocks)),
+            ctypes.c_uint64(int(requested_first)),
+            ctypes.c_uint64(int(requested_last)),
+            ctypes.c_uint64(int(self.read_ahead_blocks())),
+            ctypes.c_uint64(int(self.sequential_read_ahead_blocks())),
+            ctypes.c_uint64(int(streak)),
+            ctypes.c_uint64(int(self.read_cache_limit_blocks())),
+            ctypes.c_ubyte(1 if sequential else 0),
+            ctypes.c_uint64(int(self.small_file_threshold_blocks())),
+            ctypes.byref(out),
+        )
+        if rc != 0:
+            return None
+        return int(out.fetch_first), int(out.fetch_last)
+
+    def _missing_block_ranges_rust_ffi(self, missing):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        missing = [int(block_index) for block_index in missing]
+        if not missing:
+            return []
+
+        missing_array = (ctypes.c_uint64 * len(missing))(*missing)
+        out_ptr = ctypes.POINTER(DbfsRange)()
+        out_len = ctypes.c_size_t()
+
+        rc = lib.dbfs_contiguous_missing_ranges(
+            missing_array,
+            ctypes.c_size_t(len(missing)),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+        )
+        if rc != 0:
+            return None
+
+        try:
+            return [(int(out_ptr[i].start), int(out_ptr[i].end)) for i in range(out_len.value)]
+        finally:
+            lib.dbfs_free_ranges(out_ptr, out_len)
 
     def _copy_segments_rust_ffi(self, off_in, off_out, length, block_size, workers):
         lib = self._load_rust_hotpath_lib()
@@ -431,6 +572,18 @@ class StorageSupport:
             return None, None
         buffer = ctypes.create_string_buffer(data, len(data))
         return buffer, ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte))
+
+    def _crc32_rust_ffi(self, data):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        data = bytes(data)
+        if not data:
+            return 0
+
+        buffer = ctypes.create_string_buffer(data, len(data))
+        return int(lib.dbfs_crc32(ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte)), len(data)))
 
     def _persist_block_payload_rust_ffi(self, payload, used_len, block_size):
         lib = self._load_rust_hotpath_lib()
@@ -605,7 +758,9 @@ class StorageSupport:
                 continue
 
         current = self._read_copy_destination_chunk(file_id, block_index * self.owner.block_size, self.owner.block_size)
-        crc_value = zlib.crc32(bytes(current)) & 0xFFFFFFFF
+        crc_value = self._crc32_rust_ffi(current)
+        if crc_value is None:
+            crc_value = binascii.crc32(bytes(current)) & 0xFFFFFFFF
         conn = None
         for attempt in range(2):
             try:
@@ -671,9 +826,13 @@ class StorageSupport:
     def _record_read_sequence(self, file_id, offset, end_offset):
         with self.owner._read_sequence_guard:
             previous = self.owner._read_sequence_state.get(file_id)
-            sequential = bool(previous and previous.get("last_end") == offset)
-            streak = (int(previous.get("streak", 0)) + 1) if sequential and previous else 0
-            self.owner._read_sequence_state[file_id] = {"last_offset": offset, "last_end": end_offset, "streak": streak}
+            stepped = self._read_sequence_step_rust_ffi(previous, offset)
+            if stepped is None:
+                sequential = bool(previous and previous.get("last_end") == offset)
+                streak = (int(previous.get("streak", 0)) + 1) if sequential and previous else 0
+            else:
+                sequential, streak = stepped
+            self.owner._read_sequence_state[file_id] = {"last_end": end_offset, "streak": streak}
         return sequential, streak
 
     def read_file_slice(self, file_id, offset, size):
@@ -697,17 +856,31 @@ class StorageSupport:
         requested_last = max(requested_first, (end_offset - 1) // block_size)
         sequential, streak = self._record_read_sequence(file_id, offset, end_offset)
 
-        if total_blocks <= self.small_file_threshold_blocks():
-            fetch_first = 0
-            fetch_last = total_blocks - 1
+        stepped = self._read_fetch_bounds_rust_ffi(total_blocks, requested_first, requested_last, sequential, streak)
+        if stepped is None:
+            if total_blocks <= self.small_file_threshold_blocks():
+                fetch_first = 0
+                fetch_last = total_blocks - 1
+            else:
+                fetch_first = requested_first
+                read_ahead_blocks = self.read_ahead_blocks()
+                stepped_read_ahead = self._read_ahead_blocks_rust_ffi(
+                    read_ahead_blocks,
+                    self.sequential_read_ahead_blocks(),
+                    streak,
+                    self.read_cache_limit_blocks(),
+                    sequential,
+                )
+                if stepped_read_ahead is not None:
+                    read_ahead_blocks = stepped_read_ahead
+                else:
+                    if sequential:
+                        dynamic_ahead = self.sequential_read_ahead_blocks() * max(1, streak)
+                        read_ahead_blocks = max(read_ahead_blocks, dynamic_ahead)
+                    read_ahead_blocks = min(read_ahead_blocks, max(0, self.read_cache_limit_blocks() - 1))
+                fetch_last = min(total_blocks - 1, requested_last + read_ahead_blocks)
         else:
-            fetch_first = requested_first
-            read_ahead_blocks = self.read_ahead_blocks()
-            if sequential:
-                dynamic_ahead = self.sequential_read_ahead_blocks() * max(1, streak)
-                read_ahead_blocks = max(read_ahead_blocks, dynamic_ahead)
-            read_ahead_blocks = min(read_ahead_blocks, max(0, self.read_cache_limit_blocks() - 1))
-            fetch_last = min(total_blocks - 1, requested_last + read_ahead_blocks)
+            fetch_first, fetch_last = stepped
 
         block_map = self._fetch_block_range(file_id, fetch_first, fetch_last)
 
@@ -1508,7 +1681,9 @@ class StorageSupport:
             dst_chunk_offset = dst_offset + rel_offset
             block_index = dst_chunk_offset // block_size
             if dedupe_enabled and use_crc_table and len(chunk) == block_size and block_index not in dirty_blocks:
-                source_crc = zlib.crc32(bytes(chunk)) & 0xFFFFFFFF
+                source_crc = self._crc32_rust_ffi(chunk)
+                if source_crc is None:
+                    source_crc = binascii.crc32(bytes(chunk)) & 0xFFFFFFFF
                 dest_crc = self._copy_block_crc(dst_file_id, block_index)
                 changed_mask.append(source_crc != dest_crc)
             else:

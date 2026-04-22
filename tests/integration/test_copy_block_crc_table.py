@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import sys
 import uuid
-import zlib
 from pathlib import Path
 
 import psycopg2
@@ -24,6 +23,8 @@ def main() -> None:
     runtime_config = load_dbfs_runtime_config(ROOT)
     fs = DBFS(dsn, db_config, runtime_config=runtime_config)
     fs.profile_io = True
+    crc_helper = fs.storage
+    assert crc_helper._load_rust_hotpath_lib() is not None, "expected built Rust hot-path library"
 
     if fs.backend.schema_version() != SCHEMA_VERSION:
         raise AssertionError((fs.backend.schema_version(), SCHEMA_VERSION))
@@ -108,16 +109,20 @@ def main() -> None:
             )
             crc_rows_after_first_copy = cur.fetchall()
         expected_source_crcs = [
-            zlib.crc32(payload[index * block_size : (index + 1) * block_size]) & 0xFFFFFFFF
+            crc_helper._crc32_rust_ffi(payload[index * block_size : (index + 1) * block_size])
             for index in range(expected_full_blocks)
         ]
+        if any(value is None for value in expected_source_crcs):
+            raise AssertionError(expected_source_crcs)
         if [int(row[1]) for row in crc_rows_after_first_copy] != expected_source_crcs:
             raise AssertionError((crc_rows_after_first_copy, expected_source_crcs))
 
         mutated_block = bytearray(payload[:block_size])
         mutated_block[0] ^= 0xFF
         mutated_payload = bytes(mutated_block) + payload[block_size:]
-        mutated_crc = zlib.crc32(mutated_payload[:block_size]) & 0xFFFFFFFF
+        mutated_crc = crc_helper._crc32_rust_ffi(mutated_payload[:block_size])
+        if mutated_crc is None:
+            raise AssertionError("expected Rust CRC32 to be available")
 
         dst_fh = fs.open(dst_path, os.O_WRONLY)
         try:
