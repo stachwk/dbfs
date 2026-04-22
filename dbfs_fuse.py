@@ -85,10 +85,10 @@ class DBFS(Operations):
         self.workers_write = self.resolve_workers_write()
         self.workers_write_min_blocks = self.resolve_workers_write_min_blocks()
         self.persist_buffer_chunk_blocks = self.resolve_persist_buffer_chunk_blocks()
-        self.copy_skip_unchanged_blocks = self.resolve_copy_skip_unchanged_blocks()
-        self.copy_skip_unchanged_blocks_min_blocks = self.resolve_copy_skip_unchanged_blocks_min_blocks()
-        self.copy_skip_unchanged_blocks_max_blocks = self.resolve_copy_skip_unchanged_blocks_max_blocks()
-        self.copy_skip_unchanged_blocks_crc_table = self.resolve_copy_skip_unchanged_blocks_crc_table()
+        self.copy_dedupe_enabled = self.resolve_copy_dedupe_enabled()
+        self.copy_dedupe_min_blocks = self.resolve_copy_dedupe_min_blocks()
+        self.copy_dedupe_max_blocks = self.resolve_copy_dedupe_max_blocks()
+        self.copy_dedupe_crc_table = self.resolve_copy_dedupe_crc_table()
         self.rust_hotpath_copy_plan = self.resolve_rust_hotpath_copy_plan()
         self.rust_hotpath_copy_dedupe = self.resolve_rust_hotpath_copy_dedupe()
         self.rust_hotpath_copy_pack = self.resolve_rust_hotpath_copy_pack()
@@ -357,43 +357,43 @@ class DBFS(Operations):
             raise ValueError("DBFS_PERSIST_BUFFER_CHUNK_BLOCKS must be >= 1")
         return value
 
-    def resolve_copy_skip_unchanged_blocks(self):
-        raw_value = os.environ.get("DBFS_COPY_SKIP_UNCHANGED_BLOCKS")
+    def resolve_copy_dedupe_enabled(self):
+        raw_value = os.environ.get("DBFS_COPY_DEDUPE_ENABLED")
         if raw_value is None or raw_value == "":
-            return bool(self.runtime_config_getbool("copy_skip_unchanged_blocks", False))
-        return self.parse_bool_value(raw_value, "DBFS_COPY_SKIP_UNCHANGED_BLOCKS")
+            return bool(self.runtime_config_getbool("copy_dedupe_enabled", False))
+        return self.parse_bool_value(raw_value, "DBFS_COPY_DEDUPE_ENABLED")
 
-    def resolve_copy_skip_unchanged_blocks_min_blocks(self):
-        raw_value = os.environ.get("DBFS_COPY_SKIP_UNCHANGED_BLOCKS_MIN_BLOCKS")
+    def resolve_copy_dedupe_min_blocks(self):
+        raw_value = os.environ.get("DBFS_COPY_DEDUPE_MIN_BLOCKS")
         if raw_value is None or raw_value == "":
-            value = self.runtime_config_getint("copy_skip_unchanged_blocks_min_blocks", 16)
+            value = self.runtime_config_getint("copy_dedupe_min_blocks", 16)
             return max(1, int(value) if value is not None else 16)
         try:
             value = int(raw_value)
         except Exception:
             return 16
         if value < 1:
-            raise ValueError("DBFS_COPY_SKIP_UNCHANGED_BLOCKS_MIN_BLOCKS must be >= 1")
+            raise ValueError("DBFS_COPY_DEDUPE_MIN_BLOCKS must be >= 1")
         return value
 
-    def resolve_copy_skip_unchanged_blocks_max_blocks(self):
-        raw_value = os.environ.get("DBFS_COPY_SKIP_UNCHANGED_BLOCKS_MAX_BLOCKS")
+    def resolve_copy_dedupe_max_blocks(self):
+        raw_value = os.environ.get("DBFS_COPY_DEDUPE_MAX_BLOCKS")
         if raw_value is None or raw_value == "":
-            value = self.runtime_config_getint("copy_skip_unchanged_blocks_max_blocks", 0)
+            value = self.runtime_config_getint("copy_dedupe_max_blocks", 0)
             return max(0, int(value) if value is not None else 0)
         try:
             value = int(raw_value)
         except Exception:
             return 0
         if value < 0:
-            raise ValueError("DBFS_COPY_SKIP_UNCHANGED_BLOCKS_MAX_BLOCKS must be >= 0")
+            raise ValueError("DBFS_COPY_DEDUPE_MAX_BLOCKS must be >= 0")
         return value
 
-    def resolve_copy_skip_unchanged_blocks_crc_table(self):
-        raw_value = os.environ.get("DBFS_COPY_SKIP_UNCHANGED_BLOCKS_CRC_TABLE")
+    def resolve_copy_dedupe_crc_table(self):
+        raw_value = os.environ.get("DBFS_COPY_DEDUPE_CRC_TABLE")
         if raw_value is None or raw_value == "":
-            return bool(self.runtime_config_getbool("copy_skip_unchanged_blocks_crc_table", False))
-        return self.parse_bool_value(raw_value, "DBFS_COPY_SKIP_UNCHANGED_BLOCKS_CRC_TABLE")
+            return bool(self.runtime_config_getbool("copy_dedupe_crc_table", False))
+        return self.parse_bool_value(raw_value, "DBFS_COPY_DEDUPE_CRC_TABLE")
 
     def resolve_rust_hotpath_copy_plan(self):
         raw_value = os.environ.get("DBFS_RUST_HOTPATH_COPY_PLAN")

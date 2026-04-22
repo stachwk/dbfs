@@ -285,8 +285,8 @@ class StorageSupport:
             return memoryview(payload)[:block_size]
         return bytes(payload[:used_len]) + (b"\x00" * (block_size - used_len))
 
-    def _copy_skip_unchanged_blocks_crc_table_enabled(self):
-        return bool(getattr(self.owner, "copy_skip_unchanged_blocks_crc_table", False))
+    def _copy_dedupe_crc_table_enabled(self):
+        return bool(getattr(self.owner, "copy_dedupe_crc_table", False))
 
     def _copy_block_crc(self, file_id, block_index):
         conn = None
@@ -1112,9 +1112,9 @@ class StorageSupport:
             self.write_into_state(dst_file_id, payload, dst_offset)
             return len(payload)
 
-        skip_unchanged_blocks = bool(getattr(self.owner, "copy_skip_unchanged_blocks", False))
-        skip_unchanged_blocks_min_blocks = max(1, int(getattr(self.owner, "copy_skip_unchanged_blocks_min_blocks", 16) or 16))
-        skip_unchanged_blocks_max_blocks = max(0, int(getattr(self.owner, "copy_skip_unchanged_blocks_max_blocks", 0) or 0))
+        skip_unchanged_blocks = bool(getattr(self.owner, "copy_dedupe_enabled", False))
+        skip_unchanged_blocks_min_blocks = max(1, int(getattr(self.owner, "copy_dedupe_min_blocks", 16) or 16))
+        skip_unchanged_blocks_max_blocks = max(0, int(getattr(self.owner, "copy_dedupe_max_blocks", 0) or 0))
         total_blocks = max(1, (len(payload) + block_size - 1) // block_size)
         dedupe_enabled = (
             skip_unchanged_blocks
@@ -1123,7 +1123,7 @@ class StorageSupport:
         )
 
         changed_mask = []
-        use_crc_table = self._copy_skip_unchanged_blocks_crc_table_enabled()
+        use_crc_table = self._copy_dedupe_crc_table_enabled()
         dirty_blocks = set(state["dirty_blocks"]) if state is not None else set()
         for rel_offset in range(0, len(payload), block_size):
             chunk = payload[rel_offset:rel_offset + block_size]
@@ -1162,9 +1162,9 @@ class StorageSupport:
         block_size = self.owner.block_size
         workers_write = max(1, int(getattr(self.owner, "workers_write", 1) or 1))
         workers_write_min_blocks = max(1, int(getattr(self.owner, "workers_write_min_blocks", 8) or 8))
-        skip_unchanged_blocks = bool(getattr(self.owner, "copy_skip_unchanged_blocks", False))
-        skip_unchanged_blocks_min_blocks = max(1, int(getattr(self.owner, "copy_skip_unchanged_blocks_min_blocks", 16) or 16))
-        skip_unchanged_blocks_max_blocks = max(0, int(getattr(self.owner, "copy_skip_unchanged_blocks_max_blocks", 0) or 0))
+        skip_unchanged_blocks = bool(getattr(self.owner, "copy_dedupe_enabled", False))
+        skip_unchanged_blocks_min_blocks = max(1, int(getattr(self.owner, "copy_dedupe_min_blocks", 16) or 16))
+        skip_unchanged_blocks_max_blocks = max(0, int(getattr(self.owner, "copy_dedupe_max_blocks", 0) or 0))
         total_blocks = max(1, (length + block_size - 1) // block_size)
         dedupe_enabled = (
             skip_unchanged_blocks

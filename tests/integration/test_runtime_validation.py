@@ -66,31 +66,31 @@ def main() -> None:
             raise AssertionError("expected invalid persist_buffer_chunk_blocks to fail fast")
 
         try:
-            DBFS(dsn, db_config, runtime_config={"copy_skip_unchanged_blocks": "maybe"})
+            DBFS(dsn, db_config, runtime_config={"copy_dedupe_enabled": "maybe"})
         except ValueError as exc:
             message = str(exc)
-            if "copy_skip_unchanged_blocks" not in message:
+            if "copy_dedupe_enabled" not in message:
                 raise AssertionError(message)
         else:
-            raise AssertionError("expected invalid copy_skip_unchanged_blocks to fail fast")
+            raise AssertionError("expected invalid copy_dedupe_enabled to fail fast")
 
         try:
-            DBFS(dsn, db_config, runtime_config={"copy_skip_unchanged_blocks_max_blocks": "-1"})
+            DBFS(dsn, db_config, runtime_config={"copy_dedupe_max_blocks": "-1"})
         except ValueError as exc:
             message = str(exc)
-            if "copy_skip_unchanged_blocks_max_blocks" not in message:
+            if "copy_dedupe_max_blocks" not in message:
                 raise AssertionError(message)
         else:
-            raise AssertionError("expected invalid copy_skip_unchanged_blocks_max_blocks to fail fast")
+            raise AssertionError("expected invalid copy_dedupe_max_blocks to fail fast")
 
         try:
-            DBFS(dsn, db_config, runtime_config={"copy_skip_unchanged_blocks_crc_table": "maybe"})
+            DBFS(dsn, db_config, runtime_config={"copy_dedupe_crc_table": "maybe"})
         except ValueError as exc:
             message = str(exc)
-            if "copy_skip_unchanged_blocks_crc_table" not in message:
+            if "copy_dedupe_crc_table" not in message:
                 raise AssertionError(message)
         else:
-            raise AssertionError("expected invalid copy_skip_unchanged_blocks_crc_table to fail fast")
+            raise AssertionError("expected invalid copy_dedupe_crc_table to fail fast")
 
         try:
             DBFS(dsn, db_config, runtime_config={"rust_hotpath_copy_pack": "maybe"})

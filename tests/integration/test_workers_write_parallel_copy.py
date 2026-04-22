@@ -106,8 +106,8 @@ def main() -> None:
         assert len(calls) >= 2, calls
         assert len(thread_ids) >= 2, thread_ids
 
-        fs.copy_skip_unchanged_blocks = True
-        fs.copy_skip_unchanged_blocks_min_blocks = 1
+        fs.copy_dedupe_enabled = True
+        fs.copy_dedupe_min_blocks = 1
         fs.storage.write_into_state = wrapped_write_into_state
 
         calls.clear()

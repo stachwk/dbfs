@@ -24,7 +24,7 @@ def main() -> None:
 
     fs.workers_write = 2
     fs.workers_write_min_blocks = 2
-    fs.copy_skip_unchanged_blocks = False
+    fs.copy_dedupe_enabled = False
 
     suffix = uuid.uuid4().hex[:8]
     dir_path = f"/threshold-workers-{suffix}"

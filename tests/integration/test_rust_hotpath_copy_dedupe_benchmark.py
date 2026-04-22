@@ -51,8 +51,8 @@ def _make_mixed_destination(source_payload: bytes, block_size: int) -> bytes:
 
 
 def _run_copy(fs, src_path, dst_path, src_len, rust_hotpath_copy_dedupe):
-    fs.copy_skip_unchanged_blocks = True
-    fs.copy_skip_unchanged_blocks_min_blocks = 1
+    fs.copy_dedupe_enabled = True
+    fs.copy_dedupe_min_blocks = 1
     fs.rust_hotpath_copy_dedupe = rust_hotpath_copy_dedupe
     fs.rust_hotpath_copy_pack = False
     fs.rust_hotpath_copy_plan = False

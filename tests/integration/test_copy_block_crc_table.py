@@ -65,9 +65,9 @@ def main() -> None:
         finally:
             fs.release(dst_path, read_fh)
 
-        fs.copy_skip_unchanged_blocks = True
-        fs.copy_skip_unchanged_blocks_min_blocks = 1
-        fs.copy_skip_unchanged_blocks_crc_table = True
+        fs.copy_dedupe_enabled = True
+        fs.copy_dedupe_min_blocks = 1
+        fs.copy_dedupe_crc_table = True
         fs.rust_hotpath_copy_pack = False
         fs.rust_hotpath_copy_dedupe = False
         fs._io_profile.clear()

@@ -52,9 +52,9 @@ def _write_and_sync(fs, path, payload):
                 pass
 
 
-def _copy_and_profile(fs, src_path, dst_path, src_len, skip_unchanged_blocks):
-    fs.copy_skip_unchanged_blocks = skip_unchanged_blocks
-    fs.copy_skip_unchanged_blocks_min_blocks = 1
+def _copy_and_profile(fs, src_path, dst_path, src_len, dedupe_enabled):
+    fs.copy_dedupe_enabled = dedupe_enabled
+    fs.copy_dedupe_min_blocks = 1
     fs._io_profile.clear()
 
     dst_fh = fs.open(dst_path, os.O_WRONLY)
@@ -124,13 +124,13 @@ def main() -> None:
         throughput_off = (len(payload) / 1024 / 1024) / off_result["elapsed"] if off_result["elapsed"] > 0 else 0.0
         throughput_on = (len(payload) / 1024 / 1024) / on_result["elapsed"] if on_result["elapsed"] > 0 else 0.0
         print(
-            "OK copy-skip-unchanged-blocks/off "
+            "OK copy-dedupe/off "
             f"bytes={len(payload)} elapsed_s={off_result['elapsed']:.6f} throughput_mib_s={throughput_off:.2f} "
             f"write_seconds={off_result['write_seconds']:.6f} persist_seconds={off_result['persist_seconds']:.6f} "
             f"flush_seconds={off_result['flush_seconds']:.6f} finalization_seconds={off_result['finalization_seconds']:.6f}"
         )
         print(
-            "OK copy-skip-unchanged-blocks/on "
+            "OK copy-dedupe/on "
             f"bytes={len(payload)} elapsed_s={on_result['elapsed']:.6f} throughput_mib_s={throughput_on:.2f} "
             f"write_seconds={on_result['write_seconds']:.6f} persist_seconds={on_result['persist_seconds']:.6f} "
             f"flush_seconds={on_result['flush_seconds']:.6f} finalization_seconds={on_result['finalization_seconds']:.6f}"

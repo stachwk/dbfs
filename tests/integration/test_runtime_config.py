@@ -18,11 +18,11 @@ def main():
     runtime_config = load_dbfs_runtime_config(ROOT)
     previous_lock_backend = os.environ.get("DBFS_LOCK_BACKEND")
     previous_sync_commit = os.environ.get("DBFS_SYNCHRONOUS_COMMIT")
-    previous_copy_skip = os.environ.get("DBFS_COPY_SKIP_UNCHANGED_BLOCKS")
-    previous_copy_max_blocks = os.environ.get("DBFS_COPY_SKIP_UNCHANGED_BLOCKS_MAX_BLOCKS")
-    previous_copy_crc_table = os.environ.get("DBFS_COPY_SKIP_UNCHANGED_BLOCKS_CRC_TABLE")
+    previous_copy_dedupe_enabled = os.environ.get("DBFS_COPY_DEDUPE_ENABLED")
+    previous_copy_max_blocks = os.environ.get("DBFS_COPY_DEDUPE_MAX_BLOCKS")
+    previous_copy_crc_table = os.environ.get("DBFS_COPY_DEDUPE_CRC_TABLE")
     previous_copy_plan = os.environ.get("DBFS_RUST_HOTPATH_COPY_PLAN")
-    previous_copy_dedupe = os.environ.get("DBFS_RUST_HOTPATH_COPY_DEDUPE")
+    previous_rust_copy_dedupe = os.environ.get("DBFS_RUST_HOTPATH_COPY_DEDUPE")
     previous_rust_hotpath = os.environ.get("DBFS_RUST_HOTPATH_COPY_PACK")
     previous_persist_pad = os.environ.get("DBFS_RUST_HOTPATH_PERSIST_PAD")
     previous_read_assemble = os.environ.get("DBFS_RUST_HOTPATH_READ_ASSEMBLE")
@@ -54,10 +54,10 @@ def main():
         "workers_write": 4,
         "workers_write_min_blocks": 8,
         "persist_buffer_chunk_blocks": 128,
-        "copy_skip_unchanged_blocks": False,
-        "copy_skip_unchanged_blocks_min_blocks": 16,
-        "copy_skip_unchanged_blocks_max_blocks": 0,
-        "copy_skip_unchanged_blocks_crc_table": False,
+        "copy_dedupe_enabled": False,
+        "copy_dedupe_min_blocks": 16,
+        "copy_dedupe_max_blocks": 0,
+        "copy_dedupe_crc_table": False,
         "rust_hotpath_copy_plan": True,
         "rust_hotpath_copy_dedupe": True,
         "rust_hotpath_copy_pack": True,
@@ -80,10 +80,10 @@ def main():
     assert fs.workers_write == expected["workers_write"], fs.workers_write
     assert fs.workers_write_min_blocks == expected["workers_write_min_blocks"], fs.workers_write_min_blocks
     assert fs.persist_buffer_chunk_blocks == expected["persist_buffer_chunk_blocks"], fs.persist_buffer_chunk_blocks
-    assert fs.copy_skip_unchanged_blocks == expected["copy_skip_unchanged_blocks"], fs.copy_skip_unchanged_blocks
-    assert fs.copy_skip_unchanged_blocks_min_blocks == expected["copy_skip_unchanged_blocks_min_blocks"], fs.copy_skip_unchanged_blocks_min_blocks
-    assert fs.copy_skip_unchanged_blocks_max_blocks == expected["copy_skip_unchanged_blocks_max_blocks"], fs.copy_skip_unchanged_blocks_max_blocks
-    assert fs.copy_skip_unchanged_blocks_crc_table == expected["copy_skip_unchanged_blocks_crc_table"], fs.copy_skip_unchanged_blocks_crc_table
+    assert fs.copy_dedupe_enabled == expected["copy_dedupe_enabled"], fs.copy_dedupe_enabled
+    assert fs.copy_dedupe_min_blocks == expected["copy_dedupe_min_blocks"], fs.copy_dedupe_min_blocks
+    assert fs.copy_dedupe_max_blocks == expected["copy_dedupe_max_blocks"], fs.copy_dedupe_max_blocks
+    assert fs.copy_dedupe_crc_table == expected["copy_dedupe_crc_table"], fs.copy_dedupe_crc_table
     assert fs.metadata_cache_ttl_seconds == expected["metadata_cache_ttl_seconds"], fs.metadata_cache_ttl_seconds
     assert fs.statfs_cache_ttl_seconds == expected["statfs_cache_ttl_seconds"], fs.statfs_cache_ttl_seconds
     assert fs.synchronous_commit == expected["synchronous_commit"], fs.synchronous_commit
@@ -110,44 +110,44 @@ def main():
         else:
             os.environ["DBFS_SYNCHRONOUS_COMMIT"] = previous_sync_commit
 
-    os.environ["DBFS_COPY_SKIP_UNCHANGED_BLOCKS"] = "1"
+    os.environ["DBFS_COPY_DEDUPE_ENABLED"] = "1"
     fs_copy_override = None
     try:
         fs_copy_override = DBFS(dsn, db_config, runtime_config=runtime_config)
-        assert fs_copy_override.copy_skip_unchanged_blocks is True, fs_copy_override.copy_skip_unchanged_blocks
+        assert fs_copy_override.copy_dedupe_enabled is True, fs_copy_override.copy_dedupe_enabled
     finally:
         if fs_copy_override is not None:
             fs_copy_override.close()
-        if previous_copy_skip is None:
-            os.environ.pop("DBFS_COPY_SKIP_UNCHANGED_BLOCKS", None)
+        if previous_copy_dedupe_enabled is None:
+            os.environ.pop("DBFS_COPY_DEDUPE_ENABLED", None)
         else:
-            os.environ["DBFS_COPY_SKIP_UNCHANGED_BLOCKS"] = previous_copy_skip
+            os.environ["DBFS_COPY_DEDUPE_ENABLED"] = previous_copy_dedupe_enabled
 
-    os.environ["DBFS_COPY_SKIP_UNCHANGED_BLOCKS_MAX_BLOCKS"] = "32"
+    os.environ["DBFS_COPY_DEDUPE_MAX_BLOCKS"] = "32"
     fs_copy_max_override = None
     try:
         fs_copy_max_override = DBFS(dsn, db_config, runtime_config=runtime_config)
-        assert fs_copy_max_override.copy_skip_unchanged_blocks_max_blocks == 32, fs_copy_max_override.copy_skip_unchanged_blocks_max_blocks
+        assert fs_copy_max_override.copy_dedupe_max_blocks == 32, fs_copy_max_override.copy_dedupe_max_blocks
     finally:
         if fs_copy_max_override is not None:
             fs_copy_max_override.close()
         if previous_copy_max_blocks is None:
-            os.environ.pop("DBFS_COPY_SKIP_UNCHANGED_BLOCKS_MAX_BLOCKS", None)
+            os.environ.pop("DBFS_COPY_DEDUPE_MAX_BLOCKS", None)
         else:
-            os.environ["DBFS_COPY_SKIP_UNCHANGED_BLOCKS_MAX_BLOCKS"] = previous_copy_max_blocks
+            os.environ["DBFS_COPY_DEDUPE_MAX_BLOCKS"] = previous_copy_max_blocks
 
-    os.environ["DBFS_COPY_SKIP_UNCHANGED_BLOCKS_CRC_TABLE"] = "1"
+    os.environ["DBFS_COPY_DEDUPE_CRC_TABLE"] = "1"
     fs_copy_crc_override = None
     try:
         fs_copy_crc_override = DBFS(dsn, db_config, runtime_config=runtime_config)
-        assert fs_copy_crc_override.copy_skip_unchanged_blocks_crc_table is True, fs_copy_crc_override.copy_skip_unchanged_blocks_crc_table
+        assert fs_copy_crc_override.copy_dedupe_crc_table is True, fs_copy_crc_override.copy_dedupe_crc_table
     finally:
         if fs_copy_crc_override is not None:
             fs_copy_crc_override.close()
         if previous_copy_crc_table is None:
-            os.environ.pop("DBFS_COPY_SKIP_UNCHANGED_BLOCKS_CRC_TABLE", None)
+            os.environ.pop("DBFS_COPY_DEDUPE_CRC_TABLE", None)
         else:
-            os.environ["DBFS_COPY_SKIP_UNCHANGED_BLOCKS_CRC_TABLE"] = previous_copy_crc_table
+            os.environ["DBFS_COPY_DEDUPE_CRC_TABLE"] = previous_copy_crc_table
 
     os.environ["DBFS_RUST_HOTPATH_COPY_PLAN"] = "1"
     fs_plan_override = None
@@ -170,10 +170,10 @@ def main():
     finally:
         if fs_dedupe_override is not None:
             fs_dedupe_override.close()
-        if previous_copy_dedupe is None:
+        if previous_rust_copy_dedupe is None:
             os.environ.pop("DBFS_RUST_HOTPATH_COPY_DEDUPE", None)
         else:
-            os.environ["DBFS_RUST_HOTPATH_COPY_DEDUPE"] = previous_copy_dedupe
+            os.environ["DBFS_RUST_HOTPATH_COPY_DEDUPE"] = previous_rust_copy_dedupe
 
     os.environ["DBFS_RUST_HOTPATH_COPY_PACK"] = "1"
     fs_rust_override = None
