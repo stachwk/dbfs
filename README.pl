@@ -218,10 +218,13 @@ make install-config-user
 make mount-user
 ```
 
+`make install-on-root` łączy `install-config`, `pip-install` i `install-mount-helper` w jeden krok dla instalacji typu root-style.
+
 ## Szybki start
 
 1. Skonfiguruj `/etc/dbfs/dbfs_config.ini` albo lokalny `dbfs_config.ini`.
 1. Opcjonalnie uruchom `make install-config`, żeby skopiować `dbfs_config.ini` do `/etc/dbfs/dbfs_config.ini`.
+1. Dla instalacji typu root-style uruchom `make install-on-root`, żeby zainstalować config, pakiet pip i helper mounta jednym krokiem.
 1. Dla lokalnego developmentu możesz uruchomić `make install-config-user`, żeby zainstalować `dbfs_config.ini` do `~/.config/dbfs/dbfs_config.ini` bez `sudo`.
 1. `make config-show` pokazuje, którego pliku konfiguracyjnego DBFS użyje, a `make mount-user` wymusza user-level `~/.config/dbfs/dbfs_config.ini`.
 1. Zainicjalizuj schemat:
