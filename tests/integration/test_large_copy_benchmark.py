@@ -39,6 +39,7 @@ def main() -> None:
     dst_path = f"{dir_path}/dst.bin"
     block_size = _parse_bytes(os.environ.get("LARGE_COPY_BLOCK_SIZE", "4M"))
     block_count = int(os.environ.get("LARGE_COPY_BLOCK_COUNT", "16"))
+    sync_mode = os.environ.get("LARGE_COPY_SYNC", "0").strip().lower() not in {"0", "false", "no", "off"}
     payload = (b"dbfs-large-copy-" * ((block_size * block_count) // 16 + 4))[: block_size * block_count]
 
     src_fh = None
@@ -58,6 +59,8 @@ def main() -> None:
         copied = fs.copy_file_range(src_path, None, 0, dst_path, dst_fh, 0, len(payload), 0)
         if copied != len(payload):
             raise AssertionError((copied, len(payload)))
+        if sync_mode:
+            fs.fsync(dst_path, True, dst_fh)
         fs.flush(dst_path, dst_fh)
         fs.release(dst_path, dst_fh)
         dst_fh = None

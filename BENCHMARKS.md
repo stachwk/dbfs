@@ -148,6 +148,18 @@ Observed on the current `bulk_write` profile after restoring a stronger read-sid
   - `bytes=67108864`
   - `elapsed_s=2.726928`
   - `throughput_mib_s=23.47`
+- large sequential copy, fsync-backed, 4M batch
+  - `bytes=67108864`
+  - `elapsed_s=2.564408`
+  - `throughput_mib_s=24.96`
+- large sequential copy, fsync-backed, 8M batch
+  - `bytes=67108864`
+  - `elapsed_s=2.781986`
+  - `throughput_mib_s=23.01`
+- large sequential copy, fsync-backed, 16M batch
+  - `bytes=67108864`
+  - `elapsed_s=2.560397`
+  - `throughput_mib_s=25.00`
 - large sequential copy
   - `bytes=67108864`
   - `elapsed_s=2.491982`
@@ -167,7 +179,7 @@ Observed on the current `bulk_write` profile after restoring a stronger read-sid
   - `finalization_seconds=0.012537`
 
 The write-path optimization that avoids loading brand-new blocks from PostgreSQL before writing them made the `bulk_write` profile much stronger on copy-heavy ingest and large multi-block writes.
-The profile is still workload-specific, but it now clearly favors the intended ingest/copy path while keeping finalization cost bounded. On this host the bigger `8M` copy batch did not beat the `4M` batch, so the current default copy granularity remains a measured choice rather than an unconditional "larger is better" rule.
+The profile is still workload-specific, but it now clearly favors the intended ingest/copy path while keeping finalization cost bounded. On this host the bigger `8M` copy batch did not beat the `4M` batch, and the fsync-backed copy run stayed in the same general range rather than producing a clear win, so the current default copy granularity remains a measured choice rather than an unconditional "larger is better" rule.
 
 ### Copy Dedupe / Repeated Copy
 
