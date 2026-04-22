@@ -137,6 +137,29 @@ The short version is that `THROUGHPUT_SYNC=1` is worth keeping as a durability-v
 
 Worker parallelism is still block-oriented, so `block_size` changes when a workload crosses the thresholds for `workers_read` or `workers_write`. It does not translate directly into "N bytes per thread"; it only changes how many blocks a given transfer is split into before the worker thresholds are applied.
 
+### Rust Copy Dedupe Benchmark
+
+Observed on a repeated changed-copy workload with the Rust dedupe helper opt-in:
+
+- Python fallback
+  - `bytes=67108864`
+  - `elapsed_s=55.920010`
+  - `throughput_mib_s=1.14`
+  - `write_seconds=0.000000`
+  - `persist_seconds=0.757722`
+  - `flush_seconds=0.758866`
+  - `finalization_seconds=1.516588`
+- Rust helper
+  - `bytes=67108864`
+  - `elapsed_s=74.018375`
+  - `throughput_mib_s=0.86`
+  - `write_seconds=0.000000`
+  - `persist_seconds=1.712512`
+  - `flush_seconds=1.713539`
+  - `finalization_seconds=3.426051`
+
+On this host the Rust dedupe helper did not produce an end-to-end win. The internal changed-copy packing was not enough to offset the total runtime cost, so `rust_hotpath_copy_dedupe` remains an experimental opt-in rather than a default path.
+
 ### Bulk Write Profile Comparison
 
 Observed on the current `bulk_write` profile after restoring a stronger read-side:
