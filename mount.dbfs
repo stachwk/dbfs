@@ -10,6 +10,7 @@ SELINUX="${DBFS_SELINUX:-off}"
 ACL="${DBFS_ACL:-off}"
 ATIME_POLICY="${DBFS_ATIME_POLICY:-default}"
 DEFAULT_PERMISSIONS="${DBFS_DEFAULT_PERMISSIONS:-1}"
+ALLOW_OTHER="${DBFS_ALLOW_OTHER:-0}"
 LOG_LEVEL="${DBFS_LOG_LEVEL:-}"
 DEBUG="${DBFS_DEBUG:-0}"
 CONFIG_FILE="${DBFS_CONFIG:-}"
@@ -51,6 +52,12 @@ translate_option() {
       ;;
     no_default_permissions|no-default-permissions)
       DEFAULT_PERMISSIONS=0
+      ;;
+    allow_other|allow-other)
+      ALLOW_OTHER=1
+      ;;
+    no_allow_other|no-allow-other)
+      ALLOW_OTHER=0
       ;;
     debug)
       DEBUG=1
@@ -125,6 +132,7 @@ export DBFS_SELINUX="${SELINUX}"
 export DBFS_ACL="${ACL}"
 export DBFS_ATIME_POLICY="${ATIME_POLICY}"
 export DBFS_DEFAULT_PERMISSIONS="${DEFAULT_PERMISSIONS}"
+export DBFS_ALLOW_OTHER="${ALLOW_OTHER}"
 if [[ -n "${LOG_LEVEL}" ]]; then
   export DBFS_LOG_LEVEL="${LOG_LEVEL}"
 fi
