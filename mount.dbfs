@@ -21,7 +21,7 @@ Usage:
   mount.dbfs [source] <mountpoint> [mount-options]
 
 DBFS-specific options can be passed via -o, for example:
-  mount.dbfs /mnt/dbfs -o role=auto,profile=bulk_write,selinux=off,acl=off,default_permissions
+  mount.dbfs /mnt/dbfs -o role=auto,selinux=off,acl=off,default_permissions
 
 If you want to override the config file, use:
   DBFS_CONFIG=/path/to/dbfs_config.ini mount.dbfs /mnt/dbfs

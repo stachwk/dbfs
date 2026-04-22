@@ -91,10 +91,10 @@ Zainstalowany `mount.dbfs` najpierw wybiera `.venv/bin/dbfs-bootstrap` z bieżą
 Przykład:
 
 ```bash
-DBFS_PROFILE=bulk_write mount.dbfs /mnt/dbfs
-dbfs-bootstrap --profile bulk_write -f /mnt/dbfs
-mount.dbfs /mnt/dbfs -o profile=bulk_write
+mount.dbfs /mnt/dbfs
 ```
+
+Jeśli chcesz nazwany profil runtime, ustaw `DBFS_PROFILE` jawnie albo podaj `--profile` / `-o profile=...` wtedy, gdy naprawdę potrzebujesz strojenia pod konkretny workload.
 
 Wymagania PostgreSQL dla obecnego zestawu funkcji:
 

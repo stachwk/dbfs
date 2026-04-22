@@ -92,10 +92,10 @@ The installed `mount.dbfs` wrapper prefers `.venv/bin/dbfs-bootstrap` from the c
 Example:
 
 ```bash
-DBFS_PROFILE=bulk_write mount.dbfs /mnt/dbfs
-dbfs-bootstrap --profile bulk_write -f /mnt/dbfs
-mount.dbfs /mnt/dbfs -o profile=bulk_write
+mount.dbfs /mnt/dbfs
 ```
+
+If you want a named runtime profile, set `DBFS_PROFILE` explicitly or pass `--profile` / `-o profile=...` when you really need a tuned preset.
 
 PostgreSQL requirements for the current feature set:
 
