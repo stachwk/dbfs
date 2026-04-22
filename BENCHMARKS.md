@@ -118,6 +118,19 @@ Observed on the current throughput profile:
 
 The effect is workload-sensitive: `off` helped some batch sizes and slightly hurt another, so the knob remains explicit rather than being forced globally.
 
+#### Fsync-Backed Throughput
+
+Observed on the current throughput profile with `THROUGHPUT_SYNC=1`:
+
+- `4M x8`
+  - `33554432 bytes in 1.636s (19.55 MiB/s)`
+- `8M x4`
+  - `33554432 bytes in 1.522s (21.02 MiB/s)`
+- `16M x2`
+  - `33554432 bytes in 1.458s (21.95 MiB/s)`
+
+On this run, the fsync-backed write path stayed in the same general range as the non-fsync batch sizes, with `16M x2` slightly ahead of the smaller batches.
+
 `copy_skip_unchanged_blocks` should follow the same rule: keep it off for ordinary ingest and one-shot copies, and only enable it for rsync-like workloads or repeated copy-heavy syncs where destination blocks are often already identical. The extra destination reads can easily outweigh the saved writes if the file contents are usually changing anyway.
 
 Worker parallelism is still block-oriented, so `block_size` changes when a workload crosses the thresholds for `workers_read` or `workers_write`. It does not translate directly into "N bytes per thread"; it only changes how many blocks a given transfer is split into before the worker thresholds are applied.
