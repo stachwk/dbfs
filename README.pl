@@ -16,6 +16,8 @@ Projekt skupia się na:
 - Główne operacje FUSE są zaimplementowane i pokryte testami integracyjnymi.
 - `make test-all` przechodzi, a `make test-all-full` jest dostępne jako szerszy zestaw.
 - Odczyty korzystają teraz z blokowego ładowania z małym cache i read-ahead zamiast pełnego ładowania pliku przy każdym dostępie.
+- Test porównujący uprawnienia jest świadomie local-filesystem-vs-DBFS, a nie tylko ext4-vs-DBFS; porównuje hostowy zapisywalny local filesystem z DBFS i sprawdza zgodność semantyki dla mode, ownership, access checków, sticky-bit unlink/rmdir oraz plików należących do root.
+- Widoczność `allow_other` zależy od hosta: dedykowany test robi skip, jeśli host nie wystawia mounta dla `nobody`, więc jest to test diagnostyczny, a nie uniwersalna gwarancja pass/fail.
 - Warstwa lookup/namespace została wydzielona do `dbfs_namespace.py`, a logika repository jest teraz w `mod/repository/` jako wrapper oraz `lookup.py`, `attrs_listing.py`, `create.py`, `delete.py` i `mutations.py`, więc główny moduł FUSE nie trzyma już bezpośrednio logiki rozwiązywania ścieżek, ID ani CRUD dla namespace. Rozwiązywanie katalogów używa teraz cache'owanych rekursywnych CTE, a rozwiązywanie wpisów jest zebrane tak, by zmniejszyć liczbę round-tripów do namespace.
 - Warstwa metadanych/zapytań oraz krótkie cache TTL zostały wydzielone do `dbfs_metadata.py`, logika dopisywania do journala żyje teraz w `dbfs_journal.py`, polityka uprawnień/własności została wydzielona do `dbfs_permissions.py`, a walidacja mount/runtime żyje teraz w `dbfs_runtime_validation.py`, więc główny moduł FUSE nie trzyma już bezpośrednio tych warstw helperów.
 - SELinux działa jako xattr z runtime gating; pełna polityka mount-label jest celowo poza zakresem.

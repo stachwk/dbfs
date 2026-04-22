@@ -16,6 +16,8 @@ The project focuses on:
 - Core FUSE operations are implemented and covered by integration tests.
 - `make test-all` passes, and `make test-all-full` is available for wider coverage.
 - Reads use block-range loading with a small read cache and read-ahead instead of loading whole files on every access.
+- The permissions comparison test is intentionally local-filesystem-vs-DBFS, not ext4-only; it compares the host's writable local filesystem against DBFS and asserts matching semantics for mode, ownership, access checks, sticky-bit unlink/rmdir, and root-owned files.
+- `allow_other` visibility is host-dependent: the dedicated test skips when the host does not expose the mount to `nobody`, so it is a diagnostic coverage check rather than a universal pass/fail guarantee.
 - Lookup and namespace resolution have been split into `dbfs_namespace.py`, while the repository logic now lives under `mod/repository/` as a wrapper plus `lookup.py`, `attrs_listing.py`, `create.py`, `delete.py`, and `mutations.py`.
 - The main FUSE module no longer owns direct path/ID resolution, namespace CRUD, or the query layer for `getattr()` / `readdir()`; those flows delegate through explicit repository wrappers.
 - Metadata/query helpers and short-TTL caches have been split into `dbfs_metadata.py`, journal append logic lives in `dbfs_journal.py`, permission/ownership policy lives in `dbfs_permissions.py`, and mount/runtime validation lives in `dbfs_runtime_validation.py`.
