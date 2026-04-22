@@ -19,6 +19,7 @@ def main():
     previous_lock_backend = os.environ.get("DBFS_LOCK_BACKEND")
     previous_sync_commit = os.environ.get("DBFS_SYNCHRONOUS_COMMIT")
     previous_copy_skip = os.environ.get("DBFS_COPY_SKIP_UNCHANGED_BLOCKS")
+    previous_copy_crc_table = os.environ.get("DBFS_COPY_SKIP_UNCHANGED_BLOCKS_CRC_TABLE")
     previous_copy_plan = os.environ.get("DBFS_RUST_HOTPATH_COPY_PLAN")
     previous_copy_dedupe = os.environ.get("DBFS_RUST_HOTPATH_COPY_DEDUPE")
     previous_rust_hotpath = os.environ.get("DBFS_RUST_HOTPATH_COPY_PACK")
@@ -54,6 +55,7 @@ def main():
         "persist_buffer_chunk_blocks": 128,
         "copy_skip_unchanged_blocks": False,
         "copy_skip_unchanged_blocks_min_blocks": 16,
+        "copy_skip_unchanged_blocks_crc_table": False,
         "rust_hotpath_copy_plan": True,
         "rust_hotpath_copy_dedupe": True,
         "rust_hotpath_copy_pack": True,
@@ -78,6 +80,7 @@ def main():
     assert fs.persist_buffer_chunk_blocks == expected["persist_buffer_chunk_blocks"], fs.persist_buffer_chunk_blocks
     assert fs.copy_skip_unchanged_blocks == expected["copy_skip_unchanged_blocks"], fs.copy_skip_unchanged_blocks
     assert fs.copy_skip_unchanged_blocks_min_blocks == expected["copy_skip_unchanged_blocks_min_blocks"], fs.copy_skip_unchanged_blocks_min_blocks
+    assert fs.copy_skip_unchanged_blocks_crc_table == expected["copy_skip_unchanged_blocks_crc_table"], fs.copy_skip_unchanged_blocks_crc_table
     assert fs.metadata_cache_ttl_seconds == expected["metadata_cache_ttl_seconds"], fs.metadata_cache_ttl_seconds
     assert fs.statfs_cache_ttl_seconds == expected["statfs_cache_ttl_seconds"], fs.statfs_cache_ttl_seconds
     assert fs.synchronous_commit == expected["synchronous_commit"], fs.synchronous_commit
@@ -116,6 +119,19 @@ def main():
             os.environ.pop("DBFS_COPY_SKIP_UNCHANGED_BLOCKS", None)
         else:
             os.environ["DBFS_COPY_SKIP_UNCHANGED_BLOCKS"] = previous_copy_skip
+
+    os.environ["DBFS_COPY_SKIP_UNCHANGED_BLOCKS_CRC_TABLE"] = "1"
+    fs_copy_crc_override = None
+    try:
+        fs_copy_crc_override = DBFS(dsn, db_config, runtime_config=runtime_config)
+        assert fs_copy_crc_override.copy_skip_unchanged_blocks_crc_table is True, fs_copy_crc_override.copy_skip_unchanged_blocks_crc_table
+    finally:
+        if fs_copy_crc_override is not None:
+            fs_copy_crc_override.close()
+        if previous_copy_crc_table is None:
+            os.environ.pop("DBFS_COPY_SKIP_UNCHANGED_BLOCKS_CRC_TABLE", None)
+        else:
+            os.environ["DBFS_COPY_SKIP_UNCHANGED_BLOCKS_CRC_TABLE"] = previous_copy_crc_table
 
     os.environ["DBFS_RUST_HOTPATH_COPY_PLAN"] = "1"
     fs_plan_override = None

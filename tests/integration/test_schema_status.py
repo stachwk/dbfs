@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
 
 from dbfs_backend import load_dsn_from_config
 from dbfs_schema import SCHEMA_ADMIN_TABLE
+from dbfs_schema import SCHEMA_VERSION
 from dbfs_schema import SCHEMA_VERSION_TABLE
 
 
@@ -49,9 +50,9 @@ def main() -> None:
 
     run_mkfs("init", env, extra_args=schema_args)
     status_after_init = run_mkfs("status", env).stdout
-    if "Schema version: 3" not in status_after_init:
+    if "Schema version: 4" not in status_after_init:
         raise AssertionError(status_after_init)
-    if "Latest migration version: 3" not in status_after_init:
+    if "Latest migration version: 4" not in status_after_init:
         raise AssertionError(status_after_init)
     if "Schema admin secret: present" not in status_after_init:
         raise AssertionError(status_after_init)
@@ -65,6 +66,8 @@ def main() -> None:
         raise AssertionError(status_after_init)
     if "0003: 0003_schema_version_sql.sql" not in status_after_init:
         raise AssertionError(status_after_init)
+    if "0004: 0004_copy_block_crc.sql" not in status_after_init:
+        raise AssertionError(status_after_init)
 
     with psycopg2.connect(**db_config) as conn, conn.cursor() as cur:
         cur.execute(f"DELETE FROM {SCHEMA_VERSION_TABLE}")
@@ -77,7 +80,7 @@ def main() -> None:
         raise AssertionError(status_without_version)
     if "DBFS ready: no" not in status_without_version:
         raise AssertionError(status_without_version)
-    if "Pending migrations: 0001, 0002, 0003" not in status_without_version:
+    if "Pending migrations: 0001, 0002, 0003, 0004" not in status_without_version:
         raise AssertionError(status_without_version)
 
     with psycopg2.connect(**db_config) as conn, conn.cursor() as cur:
@@ -103,7 +106,7 @@ def main() -> None:
             """,
             row,
         )
-        cur.execute(f"INSERT INTO {SCHEMA_VERSION_TABLE} (version, applied_at) VALUES (%s, NOW())", (3,))
+        cur.execute(f"INSERT INTO {SCHEMA_VERSION_TABLE} (version, applied_at) VALUES (%s, NOW())", (SCHEMA_VERSION,))
         conn.commit()
 
     print("OK schema-status")

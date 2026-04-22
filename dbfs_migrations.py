@@ -7,6 +7,7 @@ MIGRATION_DESCRIPTIONS = {
     1: "Base schema and initial DBFS tables",
     2: "Schema admin secret table",
     3: "Schema version tracking table",
+    4: "Copy block CRC cache table",
 }
 
 

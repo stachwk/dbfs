@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import subprocess
 import shutil
+import zlib
 from pathlib import Path
 import time
 from itertools import chain
@@ -183,6 +184,38 @@ class StorageSupport:
             page_size=chunk_size,
         )
 
+    def _persist_copy_block_crc_rows(self, cur, block_rows, block_size):
+        crc_rows = []
+        stale_rows = []
+        for file_id, block_index, data, used_len in block_rows:
+            if used_len >= block_size:
+                crc_rows.append((file_id, block_index, zlib.crc32(bytes(data)) & 0xFFFFFFFF))
+            else:
+                stale_rows.append((file_id, block_index))
+
+        if crc_rows:
+            chunk_size = max(1, int(getattr(self.owner, "persist_buffer_chunk_blocks", self.PERSIST_BUFFER_CHUNK_BLOCKS) or self.PERSIST_BUFFER_CHUNK_BLOCKS))
+            execute_values(
+                cur,
+                """
+                INSERT INTO copy_block_crc (id_file, _order, crc32)
+                VALUES %s
+                ON CONFLICT (id_file, _order)
+                DO UPDATE SET crc32 = EXCLUDED.crc32, updated_at = NOW()
+                """,
+                crc_rows,
+                page_size=chunk_size,
+            )
+
+        for file_id, block_index in stale_rows:
+            cur.execute(
+                """
+                DELETE FROM copy_block_crc
+                WHERE id_file = %s AND _order = %s
+                """,
+                (file_id, block_index),
+            )
+
     def rust_hotpath_persist_pad_enabled(self):
         return bool(getattr(self.owner, "rust_hotpath_persist_pad", True))
 
@@ -251,6 +284,55 @@ class StorageSupport:
         if used_len >= block_size:
             return memoryview(payload)[:block_size]
         return bytes(payload[:used_len]) + (b"\x00" * (block_size - used_len))
+
+    def _copy_skip_unchanged_blocks_crc_table_enabled(self):
+        return bool(getattr(self.owner, "copy_skip_unchanged_blocks_crc_table", False))
+
+    def _copy_block_crc(self, file_id, block_index):
+        conn = None
+        for attempt in range(2):
+            try:
+                with self.owner.db_connection() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT crc32
+                        FROM copy_block_crc
+                        WHERE id_file = %s AND _order = %s
+                        """,
+                        (file_id, block_index),
+                    )
+                    result = cur.fetchone()
+                    if result is not None:
+                        return int(result[0])
+            except Exception as exc:
+                if not self.owner.backend.is_transient_connection_error(exc) or attempt >= 1:
+                    raise
+                self.owner.backend.discard_connection(conn)
+                continue
+
+        current = self._read_copy_destination_chunk(file_id, block_index * self.owner.block_size, self.owner.block_size)
+        crc_value = zlib.crc32(bytes(current)) & 0xFFFFFFFF
+        conn = None
+        for attempt in range(2):
+            try:
+                with self.owner.db_connection() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO copy_block_crc (id_file, _order, crc32)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT (id_file, _order)
+                        DO UPDATE SET crc32 = EXCLUDED.crc32, updated_at = NOW()
+                        """,
+                        (file_id, block_index, crc_value),
+                    )
+                    conn.commit()
+                    return crc_value
+            except Exception as exc:
+                if not self.owner.backend.is_transient_connection_error(exc) or attempt >= 1:
+                    raise
+                self.owner.backend.discard_connection(conn)
+                continue
+        return crc_value
 
     def _assemble_blocks(self, file_id, first_block, last_block):
         block_size = self.owner.block_size
@@ -532,6 +614,13 @@ class StorageSupport:
                                 """,
                                 (file_id,),
                             )
+                            cur.execute(
+                                """
+                                DELETE FROM copy_block_crc
+                                WHERE id_file = %s
+                                """,
+                                (file_id,),
+                            )
                         else:
                             cur.execute(
                                 """
@@ -540,31 +629,41 @@ class StorageSupport:
                                 """,
                                 (file_id, total_blocks),
                             )
+                            cur.execute(
+                                """
+                                DELETE FROM copy_block_crc
+                                WHERE id_file = %s AND _order >= %s
+                                """,
+                                (file_id, total_blocks),
+                            )
 
                     if not truncate_only:
                         overlay_blocks = state["overlay_blocks"]
                         ordered_dirty_blocks = sorted(dirty_blocks)
+                        block_rows = []
+                        for block_index in ordered_dirty_blocks:
+                            if block_index >= total_blocks:
+                                # Blok poza EOF nie powinien byc upsertowany
+                                continue
 
-                        def block_rows():
-                            nonlocal blocks_written
-                            for block_index in ordered_dirty_blocks:
-                                if block_index >= total_blocks:
-                                    # Blok poza EOF nie powinien byc upsertowany
-                                    continue
+                            payload = overlay_blocks.get(block_index)
+                            if payload is None:
+                                continue
 
-                                payload = overlay_blocks.get(block_index)
-                                if payload is None:
-                                    continue
+                            block_start = block_index * block_size
+                            block_end = min(file_size, block_start + block_size)
+                            used_len = max(0, block_end - block_start)
 
-                                block_start = block_index * block_size
-                                block_end = min(file_size, block_start + block_size)
-                                used_len = max(0, block_end - block_start)
+                            data = self._persist_block_payload(payload, used_len, block_size)
+                            block_rows.append((file_id, block_index, data, used_len))
+                            blocks_written += 1
 
-                                data = self._persist_block_payload(payload, used_len, block_size)
-                                blocks_written += 1
-                                yield (file_id, block_index, data)
-
-                        self._persist_block_chunks(cur, block_rows())
+                        if block_rows:
+                            self._persist_block_chunks(
+                                cur,
+                                ((file_id, block_index, data) for file_id, block_index, data, _ in block_rows),
+                            )
+                            self._persist_copy_block_crc_rows(cur, block_rows, block_size)
 
                     cur.execute(
                         """
@@ -1014,47 +1113,21 @@ class StorageSupport:
             return len(payload)
 
         changed_mask = []
-        dedupe_pairs = []
+        use_crc_table = self._copy_skip_unchanged_blocks_crc_table_enabled()
+        dirty_blocks = set(state["dirty_blocks"]) if state is not None else set()
         for rel_offset in range(0, len(payload), block_size):
             chunk = payload[rel_offset:rel_offset + block_size]
             dst_chunk_offset = dst_offset + rel_offset
-            current = self._read_copy_destination_chunk(dst_file_id, dst_chunk_offset, len(chunk))
-            changed_mask.append(current != chunk)
-            if self.rust_hotpath_copy_dedupe_enabled():
-                dedupe_pairs.append((chunk, current))
-
-        if self.rust_hotpath_copy_dedupe_enabled():
-            helper = self.rust_hotpath_copy_dedupe_bin_path()
-            if helper is not None and dedupe_pairs:
-                try:
-                    input_data = "\n".join(
-                        f"{payload_chunk.hex()}|{current_chunk.hex()}"
-                        for payload_chunk, current_chunk in dedupe_pairs
-                    )
-                    completed = subprocess.run(
-                        [
-                            helper,
-                            str(int(dst_offset)),
-                            str(int(len(payload))),
-                            str(int(block_size)),
-                        ],
-                        input=input_data,
-                        check=True,
-                        capture_output=True,
-                        text=True,
-                    )
-                    ranges = []
-                    for line in completed.stdout.splitlines():
-                        if not line.strip():
-                            continue
-                        start, end = line.split(",")
-                        ranges.append((int(start), int(end)))
-                except Exception:
-                    ranges = self._pack_changed_copy_ranges(dst_offset, len(payload), block_size, changed_mask)
+            block_index = dst_chunk_offset // block_size
+            if use_crc_table and len(chunk) == block_size and block_index not in dirty_blocks:
+                source_crc = zlib.crc32(bytes(chunk)) & 0xFFFFFFFF
+                dest_crc = self._copy_block_crc(dst_file_id, block_index)
+                changed_mask.append(source_crc != dest_crc)
             else:
-                ranges = self._pack_changed_copy_ranges(dst_offset, len(payload), block_size, changed_mask)
-        else:
-            ranges = self._pack_changed_copy_ranges(dst_offset, len(payload), block_size, changed_mask)
+                current = self._read_copy_destination_chunk(dst_file_id, dst_chunk_offset, len(chunk))
+                changed_mask.append(current != chunk)
+
+        ranges = self._pack_changed_copy_ranges(dst_offset, len(payload), block_size, changed_mask)
 
         bytes_written = 0
         for run_start, run_end in ranges:

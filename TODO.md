@@ -9,7 +9,6 @@ This document records the small set of open follow-ups plus completed work, clos
 - Keep the long-term direction visible: userspace FUSE + PostgreSQL backend + a native Rust storage/hot-path engine, with Python staying as the orchestration layer until the native core is ready.
 - Keep the Python-orchestrator / Rust-hot-path split as a standing direction, not as an active rewrite backlog.
 - Treat the current copy profile comparison as a frozen baseline; continue the narrow Rust POC for the write/copy hot path, with planner, changed-copy dedupe, changed-run packing, persist padding, and read assembly enabled by default while Python remains the fallback, rather than another round of Python tuning.
-- When block-equality checks are enabled during file updates, consider a dedicated CRC table used only for that mode to track block CRCs instead of reusing the general-purpose path; if the table has no CRC rows yet when copying starts, have the storage engine populate them on the fly from the database side.
 - When schema changes actually hit a limit or compatibility failure, add a concrete migration file plus a regression test instead of widening the schema bootstrap path ad hoc.
 
 ## Target Architecture
@@ -85,6 +84,7 @@ Why this matters:
 - [x] Move xattrs from path-based storage to inode-based storage in `dbfs_xattr_store.py` so rename no longer has to rewrite xattr keys.
 - [x] Extract lock state and lock conflict handling into `dbfs_locking.py` so advisory lock policy no longer lives in the filesystem core.
 - [x] Extract data block loading, write cache management, dirty tracking, and buffer persistence into `dbfs_storage.py` so the write path is no longer embedded in the filesystem core.
+- [x] Add an optional PostgreSQL-side CRC cache for unchanged-block copy detection. The cache is populated lazily on demand and refreshed during block persistence, so repeated copy-heavy workloads can reuse stored CRCs instead of rereading full destination blocks every time.
 - [x] Remove the in-class write-buffer persistence implementation from `dbfs_fuse.py` so `dbfs_storage.py` is the single source of truth for data block persistence.
 - [x] Move the read path to block-range loading with a small block cache and read-ahead so `read()` no longer has to load whole files on every access.
 - [x] Benchmark the current write path on mounted DBFS and record the baseline for large sequential writes. The live baseline is tracked in [`BENCHMARKS.md`](BENCHMARKS.md) and the profile entry points are `make test-throughput` and `make test-throughput-sync`.
