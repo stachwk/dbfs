@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DBFS_PY="${ROOT}/dbfs_bootstrap.py"
 
 ROLE="${DBFS_ROLE:-auto}"
+PROFILE="${DBFS_PROFILE:-}"
 SELINUX="${DBFS_SELINUX:-off}"
 ACL="${DBFS_ACL:-off}"
 ATIME_POLICY="${DBFS_ATIME_POLICY:-default}"
@@ -20,7 +21,7 @@ Usage:
   mount.dbfs [source] <mountpoint> [mount-options]
 
 DBFS-specific options can be passed via -o, for example:
-  mount.dbfs /mnt/dbfs -o role=auto,selinux=off,acl=off,default_permissions
+  mount.dbfs /mnt/dbfs -o role=auto,profile=bulk_write,selinux=off,acl=off,default_permissions
 
 If you want to override the config file, use:
   DBFS_CONFIG=/path/to/dbfs_config.ini mount.dbfs /mnt/dbfs
@@ -32,6 +33,9 @@ translate_option() {
   case "${opt}" in
     role=*)
       ROLE="${opt#role=}"
+      ;;
+    profile=*)
+      PROFILE="${opt#profile=}"
       ;;
     selinux=*)
       SELINUX="${opt#selinux=}"
@@ -114,6 +118,9 @@ fi
 MOUNTPOINT="${POSITIONAL[-1]}"
 
 export DBFS_ROLE="${ROLE}"
+if [[ -n "${PROFILE}" ]]; then
+  export DBFS_PROFILE="${PROFILE}"
+fi
 export DBFS_SELINUX="${SELINUX}"
 export DBFS_ACL="${ACL}"
 export DBFS_ATIME_POLICY="${ATIME_POLICY}"
@@ -128,4 +135,9 @@ if [[ "${DEBUG}" != "0" ]]; then
   export DBFS_DEBUG="1"
 fi
 
-exec "${ROOT}/.venv/bin/python" "${DBFS_PY}" -f "${MOUNTPOINT}"
+DBFS_ARGS=("-f" "${MOUNTPOINT}")
+if [[ -n "${PROFILE}" ]]; then
+  DBFS_ARGS+=("--profile" "${PROFILE}")
+fi
+
+exec "${ROOT}/.venv/bin/python" "${DBFS_PY}" "${DBFS_ARGS[@]}"

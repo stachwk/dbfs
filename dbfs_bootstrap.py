@@ -87,6 +87,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("DBFS_ROLE", "auto"),
         help="Select FS role; auto detects replica via pg_is_in_recovery().",
     )
+    parser.add_argument(
+        "--profile",
+        default=os.environ.get("DBFS_PROFILE"),
+        help="Select a named DBFS runtime profile such as bulk_write or metadata_heavy.",
+    )
     return parser
 
 
@@ -96,6 +101,9 @@ def main(argv: list[str] | None = None) -> None:
 
     log_level_name = args.log_level or ("DEBUG" if args.debug else None)
     configure_logging(log_level_name)
+
+    if args.profile:
+        os.environ["DBFS_PROFILE"] = args.profile
 
     config_path = resolve_config_path(base_dir=os.path.dirname(os.path.abspath(__file__)))
     logging.info("Using DBFS config file: %s", config_path)
