@@ -87,7 +87,7 @@ That installs the project scripts into the active venv:
 - `mount.dbfs`
 
 The source tree still keeps the direct-run scripts `dbfs_bootstrap.py` and `mkfs.dbfs.py`; the pip package installs the shorter command names above. If you want a non-editable install, use `make pip-install`. Editable installs are available via `make pip-install-editable` if your venv can see `setuptools`. The package metadata lives in `setup.py`.
-The installed `mount.dbfs` wrapper prefers `.venv/bin/dbfs-bootstrap` from the current project directory, then `dbfs-bootstrap` from `PATH`. If neither is available, it exits with a clear setup hint instead of guessing a Python interpreter.
+The installed `mount.dbfs` wrapper prefers `.venv/bin/dbfs-bootstrap` from the current project directory, then `dbfs-bootstrap` from `PATH`. If `DBFS_CONFIG` is not set and a local `./dbfs_config.ini` exists in the current directory, the wrapper exports that file automatically. If neither bootstrapper nor a usable config file is available, it exits with a clear setup hint instead of guessing a Python interpreter.
 
 Example:
 

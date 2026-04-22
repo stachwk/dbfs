@@ -130,6 +130,8 @@ if [[ -n "${LOG_LEVEL}" ]]; then
 fi
 if [[ -n "${CONFIG_FILE}" ]]; then
   export DBFS_CONFIG="${CONFIG_FILE}"
+elif [[ -z "${DBFS_CONFIG:-}" && -f "${PWD}/dbfs_config.ini" ]]; then
+  export DBFS_CONFIG="${PWD}/dbfs_config.ini"
 fi
 if [[ "${DEBUG}" != "0" ]]; then
   export DBFS_DEBUG="1"

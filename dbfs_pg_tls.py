@@ -16,8 +16,8 @@ def _config_value(mapping: Mapping[str, Any], key: str, default: str = "") -> st
 def _resolve_path(value: str | os.PathLike[str], config_dir: Path | None) -> Path:
     path = Path(value).expanduser()
     if not path.is_absolute() and config_dir is not None:
-        return (config_dir / path).resolve()
-    return path.resolve() if path.exists() else path
+        return config_dir / path
+    return path
 
 
 def generate_client_tls_pair(material_dir: str | os.PathLike[str], common_name: str = "dbfs", days: int = 365) -> tuple[Path, Path]:

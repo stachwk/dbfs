@@ -86,7 +86,7 @@ To instaluje skrypty projektu do aktywnego venv:
 - `mount.dbfs`
 
 W katalogu źródłowym nadal zostają bezpośrednie skrypty `dbfs_bootstrap.py` i `mkfs.dbfs.py`; pakiet pip instaluje krótsze nazwy poleceń powyżej. Jeśli chcesz instalację bez trybu editable, użyj `make pip-install`. Editable działa przez `make pip-install-editable`, jeśli venv widzi `setuptools`. Metadane pakietu są w `setup.py`.
-Zainstalowany `mount.dbfs` najpierw wybiera `.venv/bin/dbfs-bootstrap` z bieżącego projektu, potem `dbfs-bootstrap` z `PATH`. Jeśli nie znajdzie żadnego poprawnego bootstrappera, kończy się jasnym komunikatem zamiast zgadywać interpreter Pythona.
+Zainstalowany `mount.dbfs` najpierw wybiera `.venv/bin/dbfs-bootstrap` z bieżącego projektu, potem `dbfs-bootstrap` z `PATH`. Jeśli `DBFS_CONFIG` nie jest ustawione, a w bieżącym katalogu istnieje lokalny `./dbfs_config.ini`, wrapper eksportuje go automatycznie. Jeśli nie znajdzie żadnego poprawnego bootstrappera ani sensownego pliku konfiguracyjnego, kończy się jasnym komunikatem zamiast zgadywać interpreter Pythona.
 
 Przykład:
 

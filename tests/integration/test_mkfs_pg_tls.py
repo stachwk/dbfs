@@ -8,12 +8,14 @@ import sys
 import tempfile
 import secrets
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from dbfs_backend import load_dsn_from_config
+from dbfs_pg_tls import resolve_pg_connection_params
 
 MKFS_PATH = Path(ROOT) / "mkfs.dbfs.py"
 MKFS_SPEC = importlib.util.spec_from_file_location("mkfs_dbfs", MKFS_PATH)
@@ -45,6 +47,23 @@ def main():
         )
         connection_params, _ = load_dsn_from_config(tls_config)
         assert connection_params["sslmode"] == "require", connection_params
+
+        with patch("pathlib.Path.exists", side_effect=PermissionError("denied")):
+            params = resolve_pg_connection_params(
+                {
+                    "host": "127.0.0.1",
+                    "port": "5432",
+                    "dbname": "dbfsdbname",
+                    "user": "dbfsuser",
+                    "password": "cichosza",
+                    "sslmode": "require",
+                    "sslcert": ".dbfs/tls/client.crt",
+                    "sslkey": ".dbfs/tls/client.key",
+                },
+                config_dir=tmp_path,
+            )
+        assert params["sslcert"] == str(tmp_path / ".dbfs/tls/client.crt"), params
+        assert params["sslkey"] == str(tmp_path / ".dbfs/tls/client.key"), params
 
         schema_config = tmp_path / "dbfs_schema_config.ini"
         schema_config.write_text(
