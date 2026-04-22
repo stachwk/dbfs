@@ -487,7 +487,7 @@ What the tests cover:
 `make test-all` includes the xattr/SELinux/trusted/ACL check and the consolidated mount suite.
 Replica mounts can be forced with `--role replica`. Default `--role auto` detects replicas via `pg_is_in_recovery()` and mounts them read-only.
 
-The current comparison baselines for throughput, large copy, large multi-block files, remount durability, read cache, and atime behavior live in [BENCHMARKS.md](BENCHMARKS.md). On the current host the `THROUGHPUT_SYNC=1` run stayed in the same general throughput range as the non-sync batch sizes, with the largest batch slightly ahead, so `synchronous_commit` remains a tuning knob rather than a blanket recommendation. The large-copy comparison between `bulk_write` and `metadata_heavy` is now a frozen baseline; the next implementation step is a narrow Rust POC on the write/copy hot path, now started in `rust_hotpath/`, rather than more Python tuning.
+The current comparison baselines for throughput, large copy, large multi-block files, remount durability, read cache, and atime behavior live in [BENCHMARKS.md](BENCHMARKS.md). On the current host the `THROUGHPUT_SYNC=1` run stayed in the same general throughput range as the non-sync batch sizes, with the largest batch slightly ahead, so `synchronous_commit` remains a tuning knob rather than a blanket recommendation. The large-copy comparison between `bulk_write` and `metadata_heavy` is now a frozen baseline; the Rust POC in `rust_hotpath/` now covers both the copy planner and the changed-run packer, and the next implementation step should keep moving that write/copy hot path into Rust rather than doing more Python tuning.
 
 ## Runtime Options
 

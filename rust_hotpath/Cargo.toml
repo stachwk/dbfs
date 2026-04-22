@@ -10,3 +10,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "copy-plan"
 path = "src/bin/copy-plan.rs"
+
+[[bin]]
+name = "copy-pack"
+path = "src/bin/copy-pack.rs"

@@ -15,6 +15,11 @@ rooms:
   keywords:
   - rust_hotpath
   - rust_hotpath
+- name: dbfs.egg_info
+  description: Files from dbfs.egg-info/
+  keywords:
+  - dbfs.egg_info
+  - dbfs.egg-info
 - name: mod
   description: Files from mod/
   keywords:
