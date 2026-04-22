@@ -130,6 +130,7 @@ Observed on the current throughput profile with `THROUGHPUT_SYNC=1`:
   - `33554432 bytes in 1.458s (21.95 MiB/s)`
 
 On this run, the fsync-backed write path stayed in the same general range as the non-fsync batch sizes, with `16M x2` slightly ahead of the smaller batches.
+The short version is that `THROUGHPUT_SYNC=1` is worth keeping as a durability-vs-throughput comparison knob, but it is not a universal win over the non-sync baseline.
 
 `copy_skip_unchanged_blocks` should follow the same rule: keep it off for ordinary ingest and one-shot copies, and only enable it for rsync-like workloads or repeated copy-heavy syncs where destination blocks are often already identical. The extra destination reads can easily outweigh the saved writes if the file contents are usually changing anyway.
 
