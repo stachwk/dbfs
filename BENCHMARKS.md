@@ -220,6 +220,29 @@ Observed on a repeated copy where the destination already contained the same blo
 
 This run shows that the dedupe path is only worth enabling for cases where avoiding rewritten destination blocks matters more than the extra comparison cost. For identical destination copies on this host, the comparison overhead is much higher than a normal replay of the write path, so the knob should stay off by default and be reserved for repeated sync-style workloads with a clear skip win.
 
+### Rust Packer Opt-In Benchmark
+
+Observed on a changed-copy workload with mixed unchanged and changed blocks:
+
+- Python fallback (`rust_hotpath_copy_pack=false`)
+  - `bytes=67108864`
+  - `elapsed_s=55.584490`
+  - `throughput_mib_s=1.15`
+  - `write_seconds=0.000000`
+  - `persist_seconds=1.198202`
+  - `flush_seconds=1.201681`
+  - `finalization_seconds=2.399884`
+- Rust packer opt-in (`rust_hotpath_copy_pack=true`)
+  - `bytes=67108864`
+  - `elapsed_s=55.978419`
+  - `throughput_mib_s=1.14`
+  - `write_seconds=0.000000`
+  - `persist_seconds=1.157677`
+  - `flush_seconds=1.158987`
+  - `finalization_seconds=2.316664`
+
+This benchmark did not show a meaningful end-to-end win for the Rust packer opt-in on this host. The Rust path was slightly better on the internal persist/flush accounting, but the overall elapsed time stayed effectively flat, so the Rust packer should remain an experimental opt-in rather than a default change.
+
 ### PostgreSQL Session Cost
 
 Measured on a pooled DBFS backend:

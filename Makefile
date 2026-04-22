@@ -124,6 +124,7 @@ help:
 		'  make test-throughput-sync - benchmark DBFS writes with conv=fsync' \
 		'  make test-rust-hotpath-copy-plan - compare the Rust copy planner against Python' \
 		'  make test-rust-hotpath-copy-pack - compare the Rust changed-run packer against Python' \
+		'  make test-rust-hotpath-copy-pack-benchmark - benchmark Rust packer opt-in vs Python fallback' \
 		'  make test-large-copy-benchmark - benchmark large copy_file_range transfers' \
 		'  make test-large-file-multiblock-benchmark - benchmark large multi-block file writes' \
 		'  make test-remount-durability-benchmark - benchmark data survival across remounts' \
@@ -257,7 +258,7 @@ unmount:
 		umount $(MOUNTPOINT); \
 	fi
 
-test-integration: reset test-flush-release-profile test-persist-buffer-chunking test-write-flush-threshold test-utimens-noop test-write-noop test-unlink-after-write test-local-vs-dbfs-permissions test-multi-open-unique-handles test-workers-read-parallel test-workers-write-parallel-copy test-worker-thresholds-block-size test-rust-hotpath-copy-plan test-rust-hotpath-copy-pack test-version test-timestamp-touch-once test-read-ahead-sequence test-read-cache-benchmark test-runtime-config test-runtime-validation test-metadata-cache test-mkfs-pg-tls test-runtime-profile test-schema-upgrade test-schema-status test-postgresql-requirements test-block-read test-pg-lock-manager test-mount-root-permissions test-mount-wrapper-options test-connection-recovery
+test-integration: reset test-flush-release-profile test-persist-buffer-chunking test-write-flush-threshold test-utimens-noop test-write-noop test-unlink-after-write test-local-vs-dbfs-permissions test-multi-open-unique-handles test-workers-read-parallel test-workers-write-parallel-copy test-worker-thresholds-block-size test-rust-hotpath-copy-plan test-rust-hotpath-copy-pack test-rust-hotpath-copy-pack-benchmark test-version test-timestamp-touch-once test-read-ahead-sequence test-read-cache-benchmark test-runtime-config test-runtime-validation test-metadata-cache test-mkfs-pg-tls test-runtime-profile test-schema-upgrade test-schema-status test-postgresql-requirements test-block-read test-pg-lock-manager test-mount-root-permissions test-mount-wrapper-options test-connection-recovery
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_mkdir_create_write_read.py
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_mkdir_parent_missing.py
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_truncate_rename.py
@@ -448,6 +449,10 @@ test-rust-hotpath-copy-plan:
 test-rust-hotpath-copy-pack:
 	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
 	$(VENV_PYTHON) tests/integration/test_rust_hotpath_copy_pack.py
+
+test-rust-hotpath-copy-pack-benchmark: init
+	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --bin copy-pack
+	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_rust_hotpath_copy_pack_benchmark.py
 
 test-large-copy-benchmark: init
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_large_copy_benchmark.py

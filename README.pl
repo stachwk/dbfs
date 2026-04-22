@@ -28,6 +28,7 @@ Projekt skupia się na:
 - Zmiany schematu żyją teraz w `migrations/` z sekwencyjnymi wersjami, jawnym eksportem `mkfs.dbfs.py status` i ścieżką upgrade ze starszych stanów schematu.
 - Obecna wersja DBFS jest zdefiniowna w dbfs_version.py, a `dbfs_bootstrap.py --version` i `mkfs.dbfs.py --version` wypisują tę samą wartość.
 - Prace nad wydajnością są już w kodzie, a aktualne baseline'y benchmarków są zapisane w `BENCHMARKS.md`.
+- Rustowy hot-path POC ma teraz runtime opt-in packer, ale najnowszy benchmark changed-copy nie pokazał na tym hoście wyraźnego end-to-end zysku, więc opcja pozostaje eksperymentalna i wyłączona domyślnie.
 - Lokalny stack Docker Compose preloaduje `pg_stat_statements`, więc analiza zapytań i profilowanie runtime mogą korzystać z trwałych statystyk PostgreSQL.
 - `TODO.md` służy teraz jako log decyzji i notatek, a nie aktywny backlog implementacyjny.
 
