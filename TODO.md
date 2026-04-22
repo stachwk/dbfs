@@ -9,6 +9,7 @@ This document records the small set of open follow-ups plus completed work, clos
 - Keep the long-term direction visible: userspace FUSE + PostgreSQL backend + a native Rust storage/hot-path engine, with Python staying as the orchestration layer until the native core is ready.
 - Keep the Python-orchestrator / Rust-hot-path split as a standing direction, not as an active rewrite backlog.
 - Treat the current copy profile comparison as a frozen baseline; continue the narrow Rust POC for the write/copy hot path, with planner, changed-copy dedupe, changed-run packing, persist padding, and read assembly enabled by default while Python remains the fallback, rather than another round of Python tuning.
+- When block-equality checks are enabled during file updates, consider a dedicated CRC table used only for that mode to track block CRCs instead of reusing the general-purpose path.
 - When schema changes actually hit a limit or compatibility failure, add a concrete migration file plus a regression test instead of widening the schema bootstrap path ad hoc.
 
 ## Target Architecture
