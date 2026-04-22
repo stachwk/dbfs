@@ -88,6 +88,14 @@ To instaluje skrypty projektu do aktywnego venv:
 W katalogu źródłowym nadal zostają bezpośrednie skrypty `dbfs_bootstrap.py` i `mkfs.dbfs.py`; pakiet pip instaluje krótsze nazwy poleceń powyżej. Jeśli chcesz instalację bez trybu editable, użyj `make pip-install`. Editable działa przez `make pip-install-editable`, jeśli venv widzi `setuptools`. Metadane pakietu są w `setup.py`.
 Zainstalowany `mount.dbfs` najpierw wybiera `dbfs-bootstrap` z `PATH`, a fallback do skryptu z katalogu źródłowego działa tylko przy uruchamianiu z repo.
 
+Przykład:
+
+```bash
+DBFS_PROFILE=bulk_write mount.dbfs /mnt/dbfs
+dbfs-bootstrap --profile bulk_write -f /mnt/dbfs
+mount.dbfs /mnt/dbfs -o profile=bulk_write
+```
+
 Wymagania PostgreSQL dla obecnego zestawu funkcji:
 
 - PostgreSQL 9.5 lub nowszy
