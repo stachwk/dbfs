@@ -1991,7 +1991,7 @@ class StorageSupport:
             self.write_into_state(dst_file_id, payload, dst_offset)
             return len(payload)
 
-        plan = self._write_copy_dedupe_plan_rust_ffi(len(payload), block_size)
+        plan = self._write_copy_plan_rust_ffi(len(payload), block_size, 1, 1)
         if plan is None:
             skip_unchanged_blocks = bool(getattr(self.owner, "copy_dedupe_enabled", False))
             skip_unchanged_blocks_min_blocks = max(1, int(getattr(self.owner, "copy_dedupe_min_blocks", 16) or 16))
@@ -2003,7 +2003,7 @@ class StorageSupport:
                 and (skip_unchanged_blocks_max_blocks <= 0 or total_blocks <= skip_unchanged_blocks_max_blocks)
             )
         else:
-            total_blocks, dedupe_enabled = plan
+            total_blocks, dedupe_enabled, _, _ = plan
 
         if dedupe_enabled and self.rust_hotpath_copy_dedupe_enabled():
             ffi_ranges = self._copy_dedupe_rust_ffi(
