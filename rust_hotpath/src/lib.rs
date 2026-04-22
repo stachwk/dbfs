@@ -76,9 +76,22 @@ pub fn pack_changed_copy_pairs(
     pack_changed_ranges(off_out, total_len, block_size, &changed_mask)
 }
 
+pub fn pad_block_bytes(payload: &[u8], used_len: u64, block_size: u64) -> Vec<u8> {
+    let block_size = block_size.max(1) as usize;
+    let used_len = used_len.min(block_size as u64) as usize;
+    let copy_len = payload.len().min(used_len);
+
+    let mut out = Vec::with_capacity(block_size);
+    out.extend_from_slice(&payload[..copy_len]);
+    if out.len() < block_size {
+        out.resize(block_size, 0);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{copy_segments, pack_changed_copy_pairs, pack_changed_ranges};
+    use super::{copy_segments, pack_changed_copy_pairs, pack_changed_ranges, pad_block_bytes};
 
     #[test]
     fn returns_empty_for_zero_length() {
@@ -126,6 +139,14 @@ mod tests {
         assert_eq!(
             pack_changed_copy_pairs(100, 4 * 4096, 4096, &pairs),
             vec![(100 + 1 * 4096, 100 + 3 * 4096)]
+        );
+    }
+
+    #[test]
+    fn pads_block_bytes_with_zeros() {
+        assert_eq!(
+            pad_block_bytes(b"abc", 2, 5),
+            vec![b'a', b'b', 0, 0, 0]
         );
     }
 }

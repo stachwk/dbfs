@@ -102,6 +102,15 @@ def main() -> None:
             raise AssertionError("expected invalid rust_hotpath_copy_dedupe to fail fast")
 
         try:
+            DBFS(dsn, db_config, runtime_config={"rust_hotpath_persist_pad": "maybe"})
+        except ValueError as exc:
+            message = str(exc)
+            if "rust_hotpath_persist_pad" not in message:
+                raise AssertionError(message)
+        else:
+            raise AssertionError("expected invalid rust_hotpath_persist_pad to fail fast")
+
+        try:
             DBFS(dsn, db_config, runtime_config={"synchronous_commit": "banana"})
         except ValueError as exc:
             message = str(exc)

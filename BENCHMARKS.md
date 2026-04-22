@@ -8,7 +8,7 @@ This file records the current comparison baselines for the main performance-sens
 - Throughput, finalization, read-cache, and atime numbers are treated as baselines, not fixed promises.
 - `make test-throughput` and `make test-flush-release-profile` are the current write-path and finalization entry points.
 - Additional write-oriented baselines now cover large `copy_file_range()` transfers, large multi-block file writes, and remount durability checks.
-- The current `bulk_write` vs `metadata_heavy` large-copy comparison is the baseline for profile selection; the Rust POC on the write/copy hot path now lives in `rust_hotpath/`, covers the copy planner, changed-copy dedupe, and changed-run packing, and the helpers can be enabled at runtime when comparing against the Python fallback.
+- The current `bulk_write` vs `metadata_heavy` large-copy comparison is the baseline for profile selection; the Rust POC on the write/copy hot path now lives in `rust_hotpath/`, covers the copy planner, changed-copy dedupe, changed-run packing, and persist padding, and the helpers are enabled by default while the Python fallback remains available for comparison.
 - `test-tree-scale` now seeds a unique root per run and cleans it up afterward, so profile comparisons can be rerun on the same seed without duplicate-key conflicts.
 - When a tuning change matters, the repository should record the before/after numbers here and in `TODO.md`.
 - DBFS assumes transactional PostgreSQL connections with `autocommit` disabled; the practical operating floor is PostgreSQL 9.5+, `read committed`, and `max_connections` above `pool_max_connections + 2`.
@@ -139,7 +139,7 @@ Worker parallelism is still block-oriented, so `block_size` changes when a workl
 
 ### Rust Copy Dedupe Benchmark
 
-Observed on a repeated changed-copy workload with the Rust dedupe helper opt-in:
+Observed on a repeated changed-copy workload with the Rust dedupe helper enabled by default:
 
 - Python fallback
   - `bytes=67108864`
@@ -158,7 +158,7 @@ Observed on a repeated changed-copy workload with the Rust dedupe helper opt-in:
   - `flush_seconds=1.713539`
   - `finalization_seconds=3.426051`
 
-On this host the Rust dedupe helper did not produce an end-to-end win. The internal changed-copy packing was not enough to offset the total runtime cost, so `rust_hotpath_copy_dedupe` remains an experimental opt-in rather than a default path.
+On this host the Rust dedupe helper did not produce an end-to-end win. The internal changed-copy packing was not enough to offset the total runtime cost, so the Python fallback remains the comparison point even though the Rust helper is enabled by default.
 
 ### Bulk Write Profile Comparison
 
@@ -241,9 +241,9 @@ Observed on a repeated copy where the destination already contained the same blo
   - `flush_seconds=0.000000`
   - `finalization_seconds=0.000000`
 
-This run shows that the dedupe path is only worth enabling for cases where avoiding rewritten destination blocks matters more than the extra comparison cost. For identical destination copies on this host, the comparison overhead is much higher than a normal replay of the write path, so the knob should stay off by default and be reserved for repeated sync-style workloads with a clear skip win.
+This run shows that the dedupe path is only worth enabling for cases where avoiding rewritten destination blocks matters more than the extra comparison cost. For identical destination copies on this host, the comparison overhead is much higher than a normal replay of the write path, so the Python fallback remains the better comparison point even though the Rust helper is enabled by default.
 
-### Rust Packer Opt-In Benchmark
+### Rust Packer Benchmark
 
 Observed on a changed-copy workload with mixed unchanged and changed blocks:
 
@@ -255,7 +255,7 @@ Observed on a changed-copy workload with mixed unchanged and changed blocks:
   - `persist_seconds=1.198202`
   - `flush_seconds=1.201681`
   - `finalization_seconds=2.399884`
-- Rust packer opt-in (`rust_hotpath_copy_pack=true`)
+- Rust packer enabled by default (`rust_hotpath_copy_pack=true`)
   - `bytes=67108864`
   - `elapsed_s=55.978419`
   - `throughput_mib_s=1.14`
@@ -264,7 +264,7 @@ Observed on a changed-copy workload with mixed unchanged and changed blocks:
   - `flush_seconds=1.158987`
   - `finalization_seconds=2.316664`
 
-This benchmark did not show a meaningful end-to-end win for the Rust packer opt-in on this host. The Rust path was slightly better on the internal persist/flush accounting, but the overall elapsed time stayed effectively flat, so the Rust packer should remain an experimental opt-in rather than a default change.
+This benchmark did not show a meaningful end-to-end win for the Rust packer on this host. The Rust path was slightly better on the internal persist/flush accounting, but the overall elapsed time stayed effectively flat, so the Python fallback remains the comparison point even though the Rust packer is enabled by default.
 
 ### PostgreSQL Session Cost
 

@@ -22,10 +22,12 @@ def main():
     previous_copy_plan = os.environ.get("DBFS_RUST_HOTPATH_COPY_PLAN")
     previous_copy_dedupe = os.environ.get("DBFS_RUST_HOTPATH_COPY_DEDUPE")
     previous_rust_hotpath = os.environ.get("DBFS_RUST_HOTPATH_COPY_PACK")
+    previous_persist_pad = os.environ.get("DBFS_RUST_HOTPATH_PERSIST_PAD")
     os.environ.pop("DBFS_SYNCHRONOUS_COMMIT", None)
     os.environ.pop("DBFS_RUST_HOTPATH_COPY_PLAN", None)
     os.environ.pop("DBFS_RUST_HOTPATH_COPY_DEDUPE", None)
     os.environ.pop("DBFS_RUST_HOTPATH_COPY_PACK", None)
+    os.environ.pop("DBFS_RUST_HOTPATH_PERSIST_PAD", None)
     os.environ["DBFS_LOCK_BACKEND"] = "memory"
     fs = None
     try:
@@ -50,9 +52,10 @@ def main():
         "persist_buffer_chunk_blocks": 128,
         "copy_skip_unchanged_blocks": False,
         "copy_skip_unchanged_blocks_min_blocks": 16,
-        "rust_hotpath_copy_plan": False,
-        "rust_hotpath_copy_dedupe": False,
-        "rust_hotpath_copy_pack": False,
+        "rust_hotpath_copy_plan": True,
+        "rust_hotpath_copy_dedupe": True,
+        "rust_hotpath_copy_pack": True,
+        "rust_hotpath_persist_pad": True,
         "metadata_cache_ttl_seconds": 1,
         "statfs_cache_ttl_seconds": 2,
         "synchronous_commit": "on",
@@ -153,6 +156,19 @@ def main():
             os.environ.pop("DBFS_RUST_HOTPATH_COPY_DEDUPE", None)
         else:
             os.environ["DBFS_RUST_HOTPATH_COPY_DEDUPE"] = previous_copy_dedupe
+
+    os.environ["DBFS_RUST_HOTPATH_PERSIST_PAD"] = "1"
+    fs_pad_override = None
+    try:
+        fs_pad_override = DBFS(dsn, db_config, runtime_config=runtime_config)
+        assert fs_pad_override.rust_hotpath_persist_pad is True, fs_pad_override.rust_hotpath_persist_pad
+    finally:
+        if fs_pad_override is not None:
+            fs_pad_override.close()
+        if previous_persist_pad is None:
+            os.environ.pop("DBFS_RUST_HOTPATH_PERSIST_PAD", None)
+        else:
+            os.environ["DBFS_RUST_HOTPATH_PERSIST_PAD"] = previous_persist_pad
 
     fs.close()
 

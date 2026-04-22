@@ -22,10 +22,12 @@ def main() -> None:
     original_copy_dedupe = os.environ.get("DBFS_RUST_HOTPATH_COPY_DEDUPE")
     original_copy_plan = os.environ.get("DBFS_RUST_HOTPATH_COPY_PLAN")
     original_rust_hotpath = os.environ.get("DBFS_RUST_HOTPATH_COPY_PACK")
+    original_persist_pad = os.environ.get("DBFS_RUST_HOTPATH_PERSIST_PAD")
     os.environ.pop("DBFS_SYNCHRONOUS_COMMIT", None)
     os.environ.pop("DBFS_RUST_HOTPATH_COPY_DEDUPE", None)
     os.environ.pop("DBFS_RUST_HOTPATH_COPY_PLAN", None)
     os.environ.pop("DBFS_RUST_HOTPATH_COPY_PACK", None)
+    os.environ.pop("DBFS_RUST_HOTPATH_PERSIST_PAD", None)
     fs = None
     try:
         profile_expectations = [
@@ -42,9 +44,10 @@ def main() -> None:
                     "workers_write": 8,
                     "workers_write_min_blocks": 16,
                     "persist_buffer_chunk_blocks": 512,
-                    "rust_hotpath_copy_dedupe": False,
-                    "rust_hotpath_copy_plan": False,
-                    "rust_hotpath_copy_pack": False,
+                    "rust_hotpath_copy_dedupe": True,
+                    "rust_hotpath_copy_plan": True,
+                    "rust_hotpath_copy_pack": True,
+                    "rust_hotpath_persist_pad": True,
                     "metadata_cache_ttl_seconds": 1,
                     "statfs_cache_ttl_seconds": 1,
                     "lock_poll_interval_seconds": 0.1,
@@ -63,9 +66,10 @@ def main() -> None:
                     "workers_write": 2,
                     "workers_write_min_blocks": 16,
                     "persist_buffer_chunk_blocks": 64,
-                    "rust_hotpath_copy_dedupe": False,
-                    "rust_hotpath_copy_plan": False,
-                    "rust_hotpath_copy_pack": False,
+                    "rust_hotpath_copy_dedupe": True,
+                    "rust_hotpath_copy_plan": True,
+                    "rust_hotpath_copy_pack": True,
+                    "rust_hotpath_persist_pad": True,
                     "metadata_cache_ttl_seconds": 10,
                     "statfs_cache_ttl_seconds": 10,
                     "lock_poll_interval_seconds": 0.1,
@@ -79,9 +83,10 @@ def main() -> None:
                     "workers_write": 1,
                     "workers_write_min_blocks": 16,
                     "persist_buffer_chunk_blocks": 64,
-                    "rust_hotpath_copy_dedupe": False,
-                    "rust_hotpath_copy_plan": False,
-                    "rust_hotpath_copy_pack": False,
+                    "rust_hotpath_copy_dedupe": True,
+                    "rust_hotpath_copy_plan": True,
+                    "rust_hotpath_copy_pack": True,
+                    "rust_hotpath_persist_pad": True,
                     "metadata_cache_ttl_seconds": 1,
                     "statfs_cache_ttl_seconds": 1,
                     "lock_poll_interval_seconds": 0.05,
@@ -126,6 +131,10 @@ def main() -> None:
             os.environ.pop("DBFS_RUST_HOTPATH_COPY_PACK", None)
         else:
             os.environ["DBFS_RUST_HOTPATH_COPY_PACK"] = original_rust_hotpath
+        if original_persist_pad is None:
+            os.environ.pop("DBFS_RUST_HOTPATH_PERSIST_PAD", None)
+        else:
+            os.environ["DBFS_RUST_HOTPATH_PERSIST_PAD"] = original_persist_pad
 
 
 if __name__ == "__main__":

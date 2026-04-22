@@ -183,7 +183,48 @@ class StorageSupport:
             page_size=chunk_size,
         )
 
+    def rust_hotpath_persist_pad_enabled(self):
+        return bool(getattr(self.owner, "rust_hotpath_persist_pad", True))
+
+    def rust_hotpath_persist_pad_bin_path(self):
+        raw_value = os.environ.get("DBFS_RUST_HOTPATH_PERSIST_PAD_BIN")
+        candidates = []
+        if raw_value:
+            candidates.append(Path(raw_value))
+        path_candidate = shutil.which("persist-pad")
+        if path_candidate:
+            candidates.append(Path(path_candidate))
+        repo_root = Path(__file__).resolve().parent
+        candidates.extend(
+            [
+                repo_root / "rust_hotpath" / "target" / "debug" / "persist-pad",
+                repo_root / "rust_hotpath" / "target" / "release" / "persist-pad",
+            ]
+        )
+        for candidate in candidates:
+            if candidate.is_file():
+                return str(candidate)
+        return None
+
     def _persist_block_payload(self, payload, used_len, block_size):
+        if self.rust_hotpath_persist_pad_enabled():
+            helper = self.rust_hotpath_persist_pad_bin_path()
+            if helper is not None:
+                try:
+                    completed = subprocess.run(
+                        [
+                            helper,
+                            str(int(used_len)),
+                            str(int(block_size)),
+                        ],
+                        input=bytes(payload[:block_size]),
+                        check=True,
+                        capture_output=True,
+                    )
+                    if len(completed.stdout) == max(1, int(block_size)):
+                        return completed.stdout
+                except Exception:
+                    pass
         if used_len >= block_size:
             return memoryview(payload)[:block_size]
         return bytes(payload[:used_len]) + (b"\x00" * (block_size - used_len))
