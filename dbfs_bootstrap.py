@@ -101,6 +101,7 @@ def main(argv: list[str] | None = None) -> None:
 
     log_level_name = args.log_level or ("DEBUG" if args.debug else None)
     configure_logging(log_level_name)
+    os.environ.setdefault("DBFS_USE_FUSE_CONTEXT", "1")
 
     if args.profile:
         os.environ["DBFS_PROFILE"] = args.profile

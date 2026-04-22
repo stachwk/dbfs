@@ -161,10 +161,10 @@ class DBFS(Operations):
         self._destroyed = False
 
     def current_uid_gid(self):
-        return identity_current_uid_gid()
+        return identity_current_uid_gid(prefer_fuse_context=True)
 
     def current_group_ids(self):
-        return identity_current_group_ids()
+        return identity_current_group_ids(prefer_fuse_context=True)
 
     def ctime_column(self, table_name):
         return identity_ctime_column(table_name)
@@ -1807,6 +1807,7 @@ class DBFS(Operations):
             return result
 
 if __name__ == '__main__':
+    os.environ.setdefault("DBFS_USE_FUSE_CONTEXT", "1")
     from dbfs_bootstrap import main
 
     main()

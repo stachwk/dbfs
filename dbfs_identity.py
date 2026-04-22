@@ -1,19 +1,57 @@
 from __future__ import annotations
 
 import os
+import pwd
 import stat
 import uuid
 import zlib
 from typing import Callable, Mapping, Any
 
 
-def current_uid_gid() -> tuple[int, int]:
+def _use_fuse_context() -> bool:
+    return os.environ.get("DBFS_USE_FUSE_CONTEXT", "0").strip().lower() not in {"", "0", "false", "no", "off"}
+
+
+def _fuse_context_uid_gid() -> tuple[int, int] | None:
+    if not _use_fuse_context():
+        return None
+    try:
+        from fuse import fuse_get_context
+    except Exception:
+        return None
+    try:
+        uid, gid, pid = fuse_get_context()
+    except Exception:
+        return None
+    try:
+        os.kill(int(pid), 0)
+    except Exception:
+        return None
+    return int(uid), int(gid)
+
+
+def current_uid_gid(prefer_fuse_context: bool = False) -> tuple[int, int]:
+    if prefer_fuse_context:
+        fuse_ctx = _fuse_context_uid_gid()
+        if fuse_ctx is not None:
+            return fuse_ctx
     uid = os.getuid() if hasattr(os, "getuid") else 0
     gid = os.getgid() if hasattr(os, "getgid") else 0
     return uid, gid
 
 
-def current_group_ids() -> set[int]:
+def current_group_ids(prefer_fuse_context: bool = False) -> set[int]:
+    if prefer_fuse_context:
+        fuse_ctx = _fuse_context_uid_gid()
+        if fuse_ctx is not None:
+            uid, gid = fuse_ctx
+            try:
+                user_name = pwd.getpwuid(uid).pw_name
+                group_ids = set(os.getgrouplist(user_name, gid))
+                group_ids.add(gid)
+                return group_ids
+            except Exception:
+                return {gid}
     _, gid = current_uid_gid()
     group_ids = {gid}
     if hasattr(os, "getgroups"):

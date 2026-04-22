@@ -128,6 +128,7 @@ export DBFS_ROLE="${ROLE}"
 if [[ -n "${PROFILE}" ]]; then
   export DBFS_PROFILE="${PROFILE}"
 fi
+export DBFS_USE_FUSE_CONTEXT="1"
 export DBFS_SELINUX="${SELINUX}"
 export DBFS_ACL="${ACL}"
 export DBFS_ATIME_POLICY="${ATIME_POLICY}"

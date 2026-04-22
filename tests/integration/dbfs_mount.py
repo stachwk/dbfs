@@ -146,6 +146,7 @@ class DBFSMount:
         if self.selinux_rootcontext:
             env["DBFS_SELINUX_ROOTCONTEXT"] = self.selinux_rootcontext
         env["DBFS_SYNCHRONOUS_COMMIT"] = self.synchronous_commit
+        env["DBFS_USE_FUSE_CONTEXT"] = "1"
 
         log_handle = open(log_file, "w", encoding="utf-8")
         self.process = subprocess.Popen(
