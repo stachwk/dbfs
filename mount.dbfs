@@ -135,10 +135,14 @@ if [[ "${DEBUG}" != "0" ]]; then
   export DBFS_DEBUG="1"
 fi
 
-if command -v dbfs-bootstrap >/dev/null 2>&1; then
+if [[ -n "${VIRTUAL_ENV:-}" && -x "${VIRTUAL_ENV}/bin/dbfs-bootstrap" ]]; then
+  DBFS_BOOTSTRAP_CMD=("${VIRTUAL_ENV}/bin/dbfs-bootstrap")
+elif command -v dbfs-bootstrap >/dev/null 2>&1; then
   DBFS_BOOTSTRAP_CMD=("dbfs-bootstrap")
-else
+elif [[ -x "${ROOT}/dbfs_bootstrap.py" ]]; then
   DBFS_BOOTSTRAP_CMD=("${ROOT}/.venv/bin/python" "${ROOT}/dbfs_bootstrap.py")
+else
+  DBFS_BOOTSTRAP_CMD=("python3" "-m" "dbfs_bootstrap")
 fi
 
 DBFS_ARGS=("-f" "${MOUNTPOINT}")
