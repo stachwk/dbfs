@@ -40,13 +40,14 @@ def main() -> None:
         assert result == expected, (args, result, expected)
 
     dedupe_cases = [
-        ((0, 4096), (1, False)),
-        ((4096, 4096), (1, False)),
-        ((65536, 4096), (16, False)),
+        ((0, 4096, 1, 1), (1, False, False, 1)),
+        ((4096, 4096, 1, 1), (1, False, False, 1)),
+        ((65536, 4096, 1, 1), (16, False, False, 1)),
+        ((65536, 4096, 4, 8), (16, False, True, 4)),
     ]
 
     for args, expected in dedupe_cases:
-        result = storage._write_copy_dedupe_plan_rust_ffi(*args)
+        result = storage._write_copy_plan_rust_ffi(*args)
         assert result is not None, args
         assert result == expected, (args, result, expected)
 
