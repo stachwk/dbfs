@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: dbfs
-Version: 2.0.21
+Version: 2.0.22
 Summary: DBFS FUSE filesystem backed by PostgreSQL
 Requires-Python: >=3.11
 Description-Content-Type: text/markdown

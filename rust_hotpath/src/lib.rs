@@ -194,6 +194,15 @@ pub fn read_missing_range_worker_count(
     workers_read.min(contiguous_ranges_len).max(1)
 }
 
+pub fn block_count_for_length(length: u64, block_size: u64, minimum_one: bool) -> u64 {
+    if length == 0 {
+        return if minimum_one { 1 } else { 0 };
+    }
+    let block_size = block_size.max(1);
+    let count = 1 + (length - 1) / block_size;
+    if minimum_one { count.max(1) } else { count }
+}
+
 pub fn pad_block_bytes(payload: &[u8], used_len: u64, block_size: u64) -> Vec<u8> {
     let block_size = block_size.max(1) as usize;
     let used_len = used_len.min(block_size as u64) as usize;
@@ -246,7 +255,8 @@ pub fn assemble_read_slice(
 mod tests {
     use super::{
         assemble_read_slice, copy_segments, pack_changed_copy_pairs, pack_changed_ranges,
-        pad_block_bytes, read_ahead_blocks, read_fetch_bounds, read_missing_range_worker_count,
+        block_count_for_length, pad_block_bytes, read_ahead_blocks, read_fetch_bounds,
+        read_missing_range_worker_count,
     };
 
     #[test]
@@ -348,6 +358,15 @@ mod tests {
         assert_eq!(read_missing_range_worker_count(4, 8, 8, 1), 1);
         assert_eq!(read_missing_range_worker_count(4, 8, 9, 3), 3);
         assert_eq!(read_missing_range_worker_count(8, 8, 9, 12), 8);
+    }
+
+    #[test]
+    fn counts_blocks_for_length() {
+        assert_eq!(block_count_for_length(0, 4096, false), 0);
+        assert_eq!(block_count_for_length(0, 4096, true), 1);
+        assert_eq!(block_count_for_length(1, 4096, false), 1);
+        assert_eq!(block_count_for_length(4096, 4096, false), 1);
+        assert_eq!(block_count_for_length(4097, 4096, false), 2);
     }
 
     #[test]

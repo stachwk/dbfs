@@ -2,8 +2,9 @@ use std::panic;
 use std::slice;
 
 use crate::{
-    assemble_read_slice, contiguous_ranges, copy_segments, crc32_bytes, pack_changed_ranges,
-    pad_block_bytes, read_ahead_blocks, read_fetch_bounds, read_missing_range_worker_count,
+    assemble_read_slice, block_count_for_length, contiguous_ranges, copy_segments, crc32_bytes,
+    pack_changed_ranges, pad_block_bytes, read_ahead_blocks, read_fetch_bounds,
+    read_missing_range_worker_count,
 };
 
 #[repr(C)]
@@ -361,6 +362,11 @@ pub extern "C" fn dbfs_read_missing_range_worker_count(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn dbfs_block_count_for_length(length: u64, block_size: u64, minimum_one: u8) -> u64 {
+    block_count_for_length(length, block_size, minimum_one != 0)
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn dbfs_contiguous_missing_ranges(
     missing_ptr: *const u64,
     missing_len: usize,
@@ -424,11 +430,11 @@ pub extern "C" fn dbfs_free_bytes(ptr: *mut u8, len: usize) {
 #[cfg(test)]
 mod tests {
     use super::{
-        dbfs_contiguous_missing_ranges, dbfs_copy_dedupe, dbfs_copy_pack, dbfs_copy_plan,
-        dbfs_crc32, dbfs_free_bytes, dbfs_free_copy_segments, dbfs_free_ranges,
-        dbfs_persist_pad, dbfs_read_assemble, dbfs_read_ahead_blocks, dbfs_read_fetch_bounds,
-        dbfs_read_missing_range_worker_count, dbfs_read_sequence_step, DbfsCopySegment,
-        DbfsRange, DbfsReadBlock, DbfsReadBounds,
+        dbfs_block_count_for_length, dbfs_contiguous_missing_ranges, dbfs_copy_dedupe,
+        dbfs_copy_pack, dbfs_copy_plan, dbfs_crc32, dbfs_free_bytes, dbfs_free_copy_segments,
+        dbfs_free_ranges, dbfs_persist_pad, dbfs_read_assemble, dbfs_read_ahead_blocks,
+        dbfs_read_fetch_bounds, dbfs_read_missing_range_worker_count, dbfs_read_sequence_step,
+        DbfsCopySegment, DbfsRange, DbfsReadBlock, DbfsReadBounds,
     };
 
     #[test]
@@ -641,5 +647,14 @@ mod tests {
         assert_eq!(dbfs_read_missing_range_worker_count(4, 8, 8, 1), 1);
         assert_eq!(dbfs_read_missing_range_worker_count(4, 8, 9, 3), 3);
         assert_eq!(dbfs_read_missing_range_worker_count(8, 8, 9, 12), 8);
+    }
+
+    #[test]
+    fn exports_block_count_for_length() {
+        assert_eq!(dbfs_block_count_for_length(0, 4096, 0), 0);
+        assert_eq!(dbfs_block_count_for_length(0, 4096, 1), 1);
+        assert_eq!(dbfs_block_count_for_length(1, 4096, 0), 1);
+        assert_eq!(dbfs_block_count_for_length(4096, 4096, 0), 1);
+        assert_eq!(dbfs_block_count_for_length(4097, 4096, 0), 2);
     }
 }

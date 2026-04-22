@@ -465,6 +465,12 @@ class StorageSupport:
             ctypes.c_uint64,
         ]
         lib.dbfs_read_missing_range_worker_count.restype = ctypes.c_uint64
+        lib.dbfs_block_count_for_length.argtypes = [
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_ubyte,
+        ]
+        lib.dbfs_block_count_for_length.restype = ctypes.c_uint64
         lib.dbfs_contiguous_missing_ranges.argtypes = [
             ctypes.POINTER(ctypes.c_uint64),
             ctypes.c_size_t,
@@ -540,6 +546,19 @@ class StorageSupport:
                 ctypes.c_uint64(int(workers_read_min_blocks)),
                 ctypes.c_uint64(int(missing_len)),
                 ctypes.c_uint64(int(contiguous_ranges_len)),
+            )
+        )
+
+    def _block_count_for_length_rust_ffi(self, length, block_size, minimum_one):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        return int(
+            lib.dbfs_block_count_for_length(
+                ctypes.c_uint64(int(length)),
+                ctypes.c_uint64(int(block_size)),
+                ctypes.c_ubyte(1 if minimum_one else 0),
             )
         )
 
@@ -880,7 +899,9 @@ class StorageSupport:
 
         end_offset = min(file_size, offset + size)
         block_size = self.owner.block_size
-        total_blocks = (file_size + block_size - 1) // block_size
+        total_blocks = self._block_count_for_length_rust_ffi(file_size, block_size, False)
+        if total_blocks is None:
+            total_blocks = (file_size + block_size - 1) // block_size
         if total_blocks == 0:
             return b""
 
@@ -1038,7 +1059,9 @@ class StorageSupport:
         state = self.ensure_write_state(file_id)
         file_size = int(state["file_size"])
         block_size = self.owner.block_size
-        total_blocks = (file_size + block_size - 1) // block_size if file_size > 0 else 0
+        total_blocks = self._block_count_for_length_rust_ffi(file_size, block_size, False)
+        if total_blocks is None:
+            total_blocks = (file_size + block_size - 1) // block_size if file_size > 0 else 0
         for block_index in range(total_blocks):
             self._mark_dirty_block(state, block_index, file_size)
 
@@ -1098,7 +1121,9 @@ class StorageSupport:
 
         file_size = int(state["file_size"])
         block_size = self.owner.block_size
-        total_blocks = (file_size + block_size - 1) // block_size if file_size > 0 else 0
+        total_blocks = self._block_count_for_length_rust_ffi(file_size, block_size, False)
+        if total_blocks is None:
+            total_blocks = (file_size + block_size - 1) // block_size if file_size > 0 else 0
         truncate_only = bool(truncate_pending and not dirty_blocks)
         blocks_written = 0
 
