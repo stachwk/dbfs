@@ -88,6 +88,7 @@ class DBFS(Operations):
         self.copy_skip_unchanged_blocks = self.resolve_copy_skip_unchanged_blocks()
         self.copy_skip_unchanged_blocks_min_blocks = self.resolve_copy_skip_unchanged_blocks_min_blocks()
         self.rust_hotpath_copy_plan = self.resolve_rust_hotpath_copy_plan()
+        self.rust_hotpath_copy_dedupe = self.resolve_rust_hotpath_copy_dedupe()
         self.rust_hotpath_copy_pack = self.resolve_rust_hotpath_copy_pack()
         self.metadata_cache_ttl_seconds = self.resolve_metadata_cache_ttl_seconds()
         self.statfs_cache_ttl_seconds = self.resolve_statfs_cache_ttl_seconds()
@@ -376,6 +377,12 @@ class DBFS(Operations):
         if raw_value is None or raw_value == "":
             return bool(self.runtime_config_getbool("rust_hotpath_copy_plan", False))
         return self.parse_bool_value(raw_value, "DBFS_RUST_HOTPATH_COPY_PLAN")
+
+    def resolve_rust_hotpath_copy_dedupe(self):
+        raw_value = os.environ.get("DBFS_RUST_HOTPATH_COPY_DEDUPE")
+        if raw_value is None or raw_value == "":
+            return bool(self.runtime_config_getbool("rust_hotpath_copy_dedupe", False))
+        return self.parse_bool_value(raw_value, "DBFS_RUST_HOTPATH_COPY_DEDUPE")
 
     def resolve_rust_hotpath_copy_pack(self):
         raw_value = os.environ.get("DBFS_RUST_HOTPATH_COPY_PACK")

@@ -66,9 +66,19 @@ pub fn pack_changed_ranges(
     ranges
 }
 
+pub fn pack_changed_copy_pairs(
+    off_out: u64,
+    total_len: u64,
+    block_size: u64,
+    pairs: &[(Vec<u8>, Vec<u8>)],
+) -> Vec<(u64, u64)> {
+    let changed_mask: Vec<bool> = pairs.iter().map(|(payload, current)| payload != current).collect();
+    pack_changed_ranges(off_out, total_len, block_size, &changed_mask)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{copy_segments, pack_changed_ranges};
+    use super::{copy_segments, pack_changed_copy_pairs, pack_changed_ranges};
 
     #[test]
     fn returns_empty_for_zero_length() {
@@ -102,6 +112,20 @@ mod tests {
                 (100 + 3 * 4096, 100 + 4 * 4096),
                 (100 + 6 * 4096, 100 + 7 * 4096)
             ]
+        );
+    }
+
+    #[test]
+    fn packs_changed_copy_pairs_into_contiguous_segments() {
+        let pairs = vec![
+            (b"same".to_vec(), b"same".to_vec()),
+            (b"diff".to_vec(), b"DIFF".to_vec()),
+            (b"diff2".to_vec(), b"DIFF2".to_vec()),
+            (b"same2".to_vec(), b"same2".to_vec()),
+        ];
+        assert_eq!(
+            pack_changed_copy_pairs(100, 4 * 4096, 4096, &pairs),
+            vec![(100 + 1 * 4096, 100 + 3 * 4096)]
         );
     }
 }

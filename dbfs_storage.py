@@ -816,6 +816,29 @@ class StorageSupport:
                 return str(candidate)
         return None
 
+    def rust_hotpath_copy_dedupe_enabled(self):
+        return bool(getattr(self.owner, "rust_hotpath_copy_dedupe", False))
+
+    def rust_hotpath_copy_dedupe_bin_path(self):
+        raw_value = os.environ.get("DBFS_RUST_HOTPATH_COPY_DEDUPE_BIN")
+        candidates = []
+        if raw_value:
+            candidates.append(Path(raw_value))
+        path_candidate = shutil.which("copy-dedupe")
+        if path_candidate:
+            candidates.append(Path(path_candidate))
+        repo_root = Path(__file__).resolve().parent
+        candidates.extend(
+            [
+                repo_root / "rust_hotpath" / "target" / "debug" / "copy-dedupe",
+                repo_root / "rust_hotpath" / "target" / "release" / "copy-dedupe",
+            ]
+        )
+        for candidate in candidates:
+            if candidate.is_file():
+                return str(candidate)
+        return None
+
     def _pack_changed_copy_ranges(self, dst_offset, total_len, block_size, changed_mask):
         if self.rust_hotpath_copy_pack_enabled():
             helper = self.rust_hotpath_copy_pack_bin_path()
@@ -877,14 +900,50 @@ class StorageSupport:
             return len(payload)
 
         changed_mask = []
+        dedupe_pairs = []
         for rel_offset in range(0, len(payload), block_size):
             chunk = payload[rel_offset:rel_offset + block_size]
             dst_chunk_offset = dst_offset + rel_offset
             current = self._read_copy_destination_chunk(dst_file_id, dst_chunk_offset, len(chunk))
             changed_mask.append(current != chunk)
+            if self.rust_hotpath_copy_dedupe_enabled():
+                dedupe_pairs.append((chunk, current))
+
+        if self.rust_hotpath_copy_dedupe_enabled():
+            helper = self.rust_hotpath_copy_dedupe_bin_path()
+            if helper is not None and dedupe_pairs:
+                try:
+                    input_data = "\n".join(
+                        f"{payload_chunk.hex()}|{current_chunk.hex()}"
+                        for payload_chunk, current_chunk in dedupe_pairs
+                    )
+                    completed = subprocess.run(
+                        [
+                            helper,
+                            str(int(dst_offset)),
+                            str(int(len(payload))),
+                            str(int(block_size)),
+                        ],
+                        input=input_data,
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                    ranges = []
+                    for line in completed.stdout.splitlines():
+                        if not line.strip():
+                            continue
+                        start, end = line.split(",")
+                        ranges.append((int(start), int(end)))
+                except Exception:
+                    ranges = self._pack_changed_copy_ranges(dst_offset, len(payload), block_size, changed_mask)
+            else:
+                ranges = self._pack_changed_copy_ranges(dst_offset, len(payload), block_size, changed_mask)
+        else:
+            ranges = self._pack_changed_copy_ranges(dst_offset, len(payload), block_size, changed_mask)
 
         bytes_written = 0
-        for run_start, run_end in self._pack_changed_copy_ranges(dst_offset, len(payload), block_size, changed_mask):
+        for run_start, run_end in ranges:
             if run_end <= run_start:
                 continue
             rel_start = run_start - dst_offset

@@ -160,6 +160,11 @@ def main(argv: list[str] | None = None) -> None:
         fs.rust_hotpath_copy_plan_bin_path(),
     )
     logging.info(
+        "DBFS Rust hot-path copy-dedupe=%s helper=%s",
+        fs.rust_hotpath_copy_dedupe,
+        fs.storage.rust_hotpath_copy_dedupe_bin_path(),
+    )
+    logging.info(
         "DBFS Rust hot-path copy-pack=%s helper=%s",
         fs.rust_hotpath_copy_pack,
         fs.rust_hotpath_copy_pack_bin_path(),
