@@ -19,8 +19,10 @@ def main() -> None:
     config_path = ROOT / "dbfs_config.ini"
     original_profile = os.environ.get("DBFS_PROFILE")
     original_sync_commit = os.environ.get("DBFS_SYNCHRONOUS_COMMIT")
+    original_copy_plan = os.environ.get("DBFS_RUST_HOTPATH_COPY_PLAN")
     original_rust_hotpath = os.environ.get("DBFS_RUST_HOTPATH_COPY_PACK")
     os.environ.pop("DBFS_SYNCHRONOUS_COMMIT", None)
+    os.environ.pop("DBFS_RUST_HOTPATH_COPY_PLAN", None)
     os.environ.pop("DBFS_RUST_HOTPATH_COPY_PACK", None)
     fs = None
     try:
@@ -38,6 +40,7 @@ def main() -> None:
                     "workers_write": 8,
                     "workers_write_min_blocks": 16,
                     "persist_buffer_chunk_blocks": 512,
+                    "rust_hotpath_copy_plan": False,
                     "rust_hotpath_copy_pack": False,
                     "metadata_cache_ttl_seconds": 1,
                     "statfs_cache_ttl_seconds": 1,
@@ -57,6 +60,7 @@ def main() -> None:
                     "workers_write": 2,
                     "workers_write_min_blocks": 16,
                     "persist_buffer_chunk_blocks": 64,
+                    "rust_hotpath_copy_plan": False,
                     "rust_hotpath_copy_pack": False,
                     "metadata_cache_ttl_seconds": 10,
                     "statfs_cache_ttl_seconds": 10,
@@ -71,6 +75,7 @@ def main() -> None:
                     "workers_write": 1,
                     "workers_write_min_blocks": 16,
                     "persist_buffer_chunk_blocks": 64,
+                    "rust_hotpath_copy_plan": False,
                     "rust_hotpath_copy_pack": False,
                     "metadata_cache_ttl_seconds": 1,
                     "statfs_cache_ttl_seconds": 1,
@@ -104,6 +109,10 @@ def main() -> None:
             os.environ.pop("DBFS_SYNCHRONOUS_COMMIT", None)
         else:
             os.environ["DBFS_SYNCHRONOUS_COMMIT"] = original_sync_commit
+        if original_copy_plan is None:
+            os.environ.pop("DBFS_RUST_HOTPATH_COPY_PLAN", None)
+        else:
+            os.environ["DBFS_RUST_HOTPATH_COPY_PLAN"] = original_copy_plan
         if original_rust_hotpath is None:
             os.environ.pop("DBFS_RUST_HOTPATH_COPY_PACK", None)
         else:

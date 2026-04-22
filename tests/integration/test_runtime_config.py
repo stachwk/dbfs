@@ -19,8 +19,10 @@ def main():
     previous_lock_backend = os.environ.get("DBFS_LOCK_BACKEND")
     previous_sync_commit = os.environ.get("DBFS_SYNCHRONOUS_COMMIT")
     previous_copy_skip = os.environ.get("DBFS_COPY_SKIP_UNCHANGED_BLOCKS")
+    previous_copy_plan = os.environ.get("DBFS_RUST_HOTPATH_COPY_PLAN")
     previous_rust_hotpath = os.environ.get("DBFS_RUST_HOTPATH_COPY_PACK")
     os.environ.pop("DBFS_SYNCHRONOUS_COMMIT", None)
+    os.environ.pop("DBFS_RUST_HOTPATH_COPY_PLAN", None)
     os.environ.pop("DBFS_RUST_HOTPATH_COPY_PACK", None)
     os.environ["DBFS_LOCK_BACKEND"] = "memory"
     fs = None
@@ -46,6 +48,7 @@ def main():
         "persist_buffer_chunk_blocks": 128,
         "copy_skip_unchanged_blocks": False,
         "copy_skip_unchanged_blocks_min_blocks": 16,
+        "rust_hotpath_copy_plan": False,
         "rust_hotpath_copy_pack": False,
         "metadata_cache_ttl_seconds": 1,
         "statfs_cache_ttl_seconds": 2,
@@ -104,6 +107,19 @@ def main():
             os.environ.pop("DBFS_COPY_SKIP_UNCHANGED_BLOCKS", None)
         else:
             os.environ["DBFS_COPY_SKIP_UNCHANGED_BLOCKS"] = previous_copy_skip
+
+    os.environ["DBFS_RUST_HOTPATH_COPY_PLAN"] = "1"
+    fs_plan_override = None
+    try:
+        fs_plan_override = DBFS(dsn, db_config, runtime_config=runtime_config)
+        assert fs_plan_override.rust_hotpath_copy_plan is True, fs_plan_override.rust_hotpath_copy_plan
+    finally:
+        if fs_plan_override is not None:
+            fs_plan_override.close()
+        if previous_copy_plan is None:
+            os.environ.pop("DBFS_RUST_HOTPATH_COPY_PLAN", None)
+        else:
+            os.environ["DBFS_RUST_HOTPATH_COPY_PLAN"] = previous_copy_plan
 
     os.environ["DBFS_RUST_HOTPATH_COPY_PACK"] = "1"
     fs_rust_override = None

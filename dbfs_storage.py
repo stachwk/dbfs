@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import shutil
 from pathlib import Path
 import time
 from itertools import chain
@@ -717,6 +718,33 @@ class StorageSupport:
         if length <= 0:
             return []
 
+        if self.rust_hotpath_copy_plan_enabled():
+            helper = self.rust_hotpath_copy_plan_bin_path()
+            if helper is not None:
+                try:
+                    completed = subprocess.run(
+                        [
+                            helper,
+                            str(int(off_in)),
+                            str(int(off_out)),
+                            str(int(length)),
+                            str(int(block_size)),
+                            str(int(workers)),
+                        ],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                    segments = []
+                    for line in completed.stdout.splitlines():
+                        if not line.strip():
+                            continue
+                        src, dst, chunk_len = line.split(",")
+                        segments.append((int(src), int(dst), int(chunk_len)))
+                    return segments
+                except Exception:
+                    pass
+
         total_blocks = max(1, (length + block_size - 1) // block_size)
         worker_count = max(1, min(int(workers), total_blocks))
         blocks_per_worker = max(1, (total_blocks + worker_count - 1) // worker_count)
@@ -736,6 +764,29 @@ class StorageSupport:
 
         return segments
 
+    def rust_hotpath_copy_plan_enabled(self):
+        return bool(getattr(self.owner, "rust_hotpath_copy_plan", False))
+
+    def rust_hotpath_copy_plan_bin_path(self):
+        raw_value = os.environ.get("DBFS_RUST_HOTPATH_COPY_PLAN_BIN")
+        candidates = []
+        if raw_value:
+            candidates.append(Path(raw_value))
+        path_candidate = shutil.which("copy-plan")
+        if path_candidate:
+            candidates.append(Path(path_candidate))
+        repo_root = Path(__file__).resolve().parent
+        candidates.extend(
+            [
+                repo_root / "rust_hotpath" / "target" / "debug" / "copy-plan",
+                repo_root / "rust_hotpath" / "target" / "release" / "copy-plan",
+            ]
+        )
+        for candidate in candidates:
+            if candidate.is_file():
+                return str(candidate)
+        return None
+
     def _read_copy_destination_chunk(self, dst_file_id, dst_offset, length):
         current = self.read_file_slice(dst_file_id, dst_offset, length)
         if len(current) < length:
@@ -750,6 +801,9 @@ class StorageSupport:
         candidates = []
         if raw_value:
             candidates.append(Path(raw_value))
+        path_candidate = shutil.which("copy-pack")
+        if path_candidate:
+            candidates.append(Path(path_candidate))
         repo_root = Path(__file__).resolve().parent
         candidates.extend(
             [

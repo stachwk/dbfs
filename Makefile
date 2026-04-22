@@ -33,7 +33,7 @@ DBFS_SYNC ?= 0
 DBFS_DIRSYNC ?= 0
 MOUNT_HELPER_DEST ?= /usr/local/sbin/mount.dbfs
 
-.PHONY: help venv deps up down restart logs wait init reset smoke mount mount-user demo unmount db-shell install-config install-config-user install-mount-helper install-root-scripts install-on-root pip-build pip-install pip-install-editable config-show test-integration test-xattr test-df test-locking test-pg-lock-manager test-permissions test-journal test-destroy test-dirhooks test-hardlink test-fallocate test-copy-file-range test-copy-skip-unchanged-blocks-benchmark test-worker-thresholds-block-size test-rust-hotpath-copy-plan test-rust-hotpath-copy-pack test-ioctl test-mknod test-bufio test-lseek test-poll test-access-groups test-inode-model test-ownership-inheritance test-rename-root-conflict test-bmap test-statfs-use-ino test-mount-workflow test-mount-root-permissions test-mount-wrapper-options test-fuse-context-identity test-files test-directories test-metadata test-symlink test-pool-connections test-mount-suite test-atime-noatime test-atime-relatime test-atime-benchmark test-timestamp-touch-once test-read-ahead-sequence test-read-cache-benchmark test-workers-read-parallel test-workers-write-parallel-copy test-runtime-config test-runtime-validation test-metadata-cache test-mkfs-pg-tls test-runtime-profile test-schema-upgrade test-schema-status test-postgresql-requirements test-throughput test-throughput-sync test-large-copy-benchmark test-large-file-multiblock-benchmark test-remount-durability-benchmark test-tree-scale test-flush-release-profile test-truncate-release-profile test-persist-buffer-chunking test-write-flush-threshold test-utimens-noop test-write-noop test-unlink-after-write test-local-vs-dbfs-permissions test-ext4-vs-dbfs-permissions test-root-owned-permissions test-allow-other-visibility test-multi-open-unique-handles test-version test-block-read test-connection-recovery test-all test-all-full clean
+.PHONY: help venv deps up down restart logs wait init reset smoke mount mount-user demo unmount db-shell install-config install-config-user install-mount-helper install-root-scripts install-rust-hotpath install-on-root pip-build pip-install pip-install-editable config-show test-integration test-xattr test-df test-locking test-pg-lock-manager test-permissions test-journal test-destroy test-dirhooks test-hardlink test-fallocate test-copy-file-range test-copy-skip-unchanged-blocks-benchmark test-worker-thresholds-block-size test-rust-hotpath-copy-plan test-rust-hotpath-copy-pack test-ioctl test-mknod test-bufio test-lseek test-poll test-access-groups test-inode-model test-ownership-inheritance test-rename-root-conflict test-bmap test-statfs-use-ino test-mount-workflow test-mount-root-permissions test-mount-wrapper-options test-fuse-context-identity test-files test-directories test-metadata test-symlink test-pool-connections test-mount-suite test-atime-noatime test-atime-relatime test-atime-benchmark test-timestamp-touch-once test-read-ahead-sequence test-read-cache-benchmark test-workers-read-parallel test-workers-write-parallel-copy test-runtime-config test-runtime-validation test-metadata-cache test-mkfs-pg-tls test-runtime-profile test-schema-upgrade test-schema-status test-postgresql-requirements test-throughput test-throughput-sync test-large-copy-benchmark test-large-file-multiblock-benchmark test-remount-durability-benchmark test-tree-scale test-flush-release-profile test-truncate-release-profile test-persist-buffer-chunking test-write-flush-threshold test-utimens-noop test-write-noop test-unlink-after-write test-local-vs-dbfs-permissions test-ext4-vs-dbfs-permissions test-root-owned-permissions test-allow-other-visibility test-multi-open-unique-handles test-version test-block-read test-connection-recovery test-all test-all-full clean
 
 help:
 	@printf '%s\n' \
@@ -51,7 +51,8 @@ help:
 		'  make install-config-user - install dbfs_config.ini to $$HOME/.config/dbfs/dbfs_config.ini without sudo' \
 		'  make install-mount-helper - install mount.dbfs to $(MOUNT_HELPER_DEST)' \
 		'  make install-root-scripts - install dbfs-bootstrap and mkfs.dbfs to /usr/local/bin' \
-		'  make install-on-root - install system config, pip package, and mount helper' \
+		'  make install-rust-hotpath - build and install copy-plan/copy-pack helper binaries' \
+		'  make install-on-root - install system config, pip package, mount helper, and Rust hot-path helpers' \
 		'  make pip-build - build a pip wheel into dist/' \
 		'  make pip-install - install the package into the active venv' \
 		'  make pip-install-editable - install the package in editable mode' \
@@ -209,8 +210,15 @@ install-root-scripts: pip-install
 	sudo install -D -m 0755 "$(VENV_DIR)/bin/dbfs-bootstrap" /usr/local/bin/dbfs-bootstrap
 	sudo install -D -m 0755 "$(VENV_DIR)/bin/mkfs.dbfs" /usr/local/bin/mkfs.dbfs
 
-install-on-root: install-config install-root-scripts install-mount-helper
-	@printf '%s\n' "DBFS installed for root-style use: config, pip package, and mount helper"
+install-rust-hotpath:
+	@printf '%s\n' "Building Rust hot-path helpers"
+	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --bin copy-plan --bin copy-pack
+	@printf '%s\n' "Installing copy-plan and copy-pack -> /usr/local/bin"
+	sudo install -D -m 0755 rust_hotpath/target/debug/copy-plan /usr/local/bin/copy-plan
+	sudo install -D -m 0755 rust_hotpath/target/debug/copy-pack /usr/local/bin/copy-pack
+
+install-on-root: install-config install-root-scripts install-rust-hotpath install-mount-helper
+	@printf '%s\n' "DBFS installed for root-style use: config, pip package, mount helper, and Rust hot-path helpers"
 
 pip-build:
 	PYTHONPATH=$(SYSTEM_SITE_PACKAGES) $(VENV_PYTHON) setup.py bdist_wheel -d dist
@@ -444,6 +452,7 @@ test-throughput-sync: venv up
 
 test-rust-hotpath-copy-plan:
 	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
+	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --bin copy-plan
 	$(VENV_PYTHON) tests/integration/test_rust_hotpath_copy_plan.py
 
 test-rust-hotpath-copy-pack:

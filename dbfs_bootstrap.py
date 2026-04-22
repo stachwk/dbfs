@@ -155,6 +155,11 @@ def main(argv: list[str] | None = None) -> None:
         fs.statfs_cache_ttl_seconds,
     )
     logging.info(
+        "DBFS Rust hot-path copy-plan=%s helper=%s",
+        fs.rust_hotpath_copy_plan,
+        fs.rust_hotpath_copy_plan_bin_path(),
+    )
+    logging.info(
         "DBFS Rust hot-path copy-pack=%s helper=%s",
         fs.rust_hotpath_copy_pack,
         fs.rust_hotpath_copy_pack_bin_path(),

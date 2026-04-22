@@ -221,13 +221,13 @@ make install-config-user
 make mount-user
 ```
 
-`make install-on-root` łączy `install-config`, `pip-install`, `install-root-scripts` i `install-mount-helper` w jeden krok dla instalacji typu root-style. To instaluje config, pakiet, polecenia `dbfs-bootstrap`/`mkfs.dbfs` oraz helper mounta.
+`make install-on-root` łączy `install-config`, `pip-install`, `install-root-scripts`, `install-rust-hotpath` i `install-mount-helper` w jeden krok dla instalacji typu root-style. To instaluje config, pakiet, polecenia `dbfs-bootstrap`/`mkfs.dbfs`, helpery Rust hot-path oraz helper mounta.
 
 ## Szybki start
 
 1. Skonfiguruj `/etc/dbfs/dbfs_config.ini` albo lokalny `dbfs_config.ini`.
 1. Opcjonalnie uruchom `make install-config`, żeby skopiować `dbfs_config.ini` do `/etc/dbfs/dbfs_config.ini`.
-1. Dla instalacji typu root-style uruchom `make install-on-root`, żeby zainstalować config, pakiet pip i helper mounta jednym krokiem.
+1. Dla instalacji typu root-style uruchom `make install-on-root`, żeby zainstalować config, pakiet pip, helpery Rust hot-path i helper mounta jednym krokiem.
 1. Dla lokalnego developmentu możesz uruchomić `make install-config-user`, żeby zainstalować `dbfs_config.ini` do `~/.config/dbfs/dbfs_config.ini` bez `sudo`.
 1. `make config-show` pokazuje, którego pliku konfiguracyjnego DBFS użyje, a `make mount-user` wymusza user-level `~/.config/dbfs/dbfs_config.ini`.
 1. Zainicjalizuj schemat:
@@ -487,7 +487,7 @@ Co sprawdzają testy:
 `make test-all` zawiera check xattr/SELinux/trusted/ACL oraz złożony mount smoke suite.
 Mount repliki można wymusić przez `--role replica`. Domyślne `--role auto` wykrywa replikę przez `pg_is_in_recovery()` i montuje filesystem jako read-only.
 
-Aktualne baseline'y porównawcze dla throughput, dużego copy, dużych wieloblokowych plików, durability po remount, read cache i zachowania `atime` są zapisane w [BENCHMARKS.md](BENCHMARKS.md). Na tym hoście uruchomienie `THROUGHPUT_SYNC=1` pozostało w podobnym zakresie wydajności jak wariant bez `fsync`, a największy batch był minimalnie lepszy, więc `synchronous_commit` zostaje knobem strojenia, a nie domyślną rekomendacją dla wszystkich workloadów. Porównanie `bulk_write` vs `metadata_heavy` dla dużego copy jest już baseline'em, a Rust POC w `rust_hotpath/` obejmuje teraz zarówno copy planner, jak i changed-run packer; packer można włączyć w runtime przez `rust_hotpath_copy_pack = true` albo `DBFS_RUST_HOTPATH_COPY_PACK=1`, gdy chcesz porównać ścieżkę Rust z fallbackiem w Pythonie.
+Aktualne baseline'y porównawcze dla throughput, dużego copy, dużych wieloblokowych plików, durability po remount, read cache i zachowania `atime` są zapisane w [BENCHMARKS.md](BENCHMARKS.md). Na tym hoście uruchomienie `THROUGHPUT_SYNC=1` pozostało w podobnym zakresie wydajności jak wariant bez `fsync`, a największy batch był minimalnie lepszy, więc `synchronous_commit` zostaje knobem strojenia, a nie domyślną rekomendacją dla wszystkich workloadów. Porównanie `bulk_write` vs `metadata_heavy` dla dużego copy jest już baseline'em, a Rust POC w `rust_hotpath/` obejmuje teraz zarówno copy planner, jak i changed-run packer; oba można włączyć w runtime przez `rust_hotpath_copy_plan = true` / `DBFS_RUST_HOTPATH_COPY_PLAN=1` oraz `rust_hotpath_copy_pack = true` / `DBFS_RUST_HOTPATH_COPY_PACK=1`, gdy chcesz porównać ścieżkę Rust z fallbackiem w Pythonie.
 
 ## Opcje runtime
 

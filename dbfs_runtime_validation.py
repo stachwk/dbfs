@@ -29,6 +29,7 @@ RUNTIME_ENUM_SPECS = {
 
 RUNTIME_BOOL_SPECS = {
     "copy_skip_unchanged_blocks": False,
+    "rust_hotpath_copy_plan": False,
     "rust_hotpath_copy_pack": False,
 }
 
