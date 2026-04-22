@@ -430,6 +430,8 @@ You can also pass DBFS-specific options through `-o`, for example:
 mount.dbfs /mnt/dbfs -o role=auto,selinux=off,acl=off,default_permissions
 ```
 
+If you want the mount to be visible to users other than the mount owner, add `allow_other` and make sure `/etc/fuse.conf` contains `user_allow_other`. Without that setting, FUSE will not let DBFS expose the mount to other users even if the filesystem itself is writable.
+
 If you need a custom config file, set `DBFS_CONFIG` before calling the helper:
 
 ```bash
@@ -543,7 +545,7 @@ Mount-time visibility options:
 - On successful mount startup, DBFS logs `DBFS schema version=<db> expected=<code>` so you can confirm compatibility before using the mount.
 - If mounting fails with `ENOTCONN` or a connection error, run `make smoke` first to confirm DB connectivity.
 - If `fusermount3` is missing, try `fusermount` or install the FUSE userspace tools for your distribution.
-- If `allow_other` is ignored, check `/etc/fuse.conf` and make sure `user_allow_other` is enabled.
+- If `allow_other` is ignored or other users cannot see the mount, check `/etc/fuse.conf` and make sure `user_allow_other` is enabled.
 - If ACL or SELinux features appear inactive, confirm that the mount was started with `--acl on` or `--selinux on|auto`.
 
 ## Recommended Mount Profiles
