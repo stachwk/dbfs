@@ -28,6 +28,17 @@ Observed on a mounted DBFS instance:
 - `8 MiB` write: roughly `9.06 MiB/s`
 - `16 MiB` write: roughly `7.83 MiB/s`
 
+### Recent Throughput Run
+
+Observed on the current default throughput target (`make test-throughput`):
+
+- `4M x8`
+  - `33554432 bytes in 1.522s (21.02 MiB/s)`
+- `8M x4`
+  - `33554432 bytes in 1.486s (21.54 MiB/s)`
+- `16M x2`
+  - `33554432 bytes in 1.588s (20.15 MiB/s)`
+
 ### Finalization Profile
 
 Observed on the current mounted DBFS instance with `DBFS_PROFILE_IO=1`:
