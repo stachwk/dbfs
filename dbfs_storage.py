@@ -559,13 +559,6 @@ class StorageSupport:
             ctypes.c_uint64,
         ]
         lib.dbfs_write_copy_plan.restype = DbfsWriteCopyPlan
-        lib.dbfs_contiguous_missing_ranges.argtypes = [
-            ctypes.POINTER(ctypes.c_uint64),
-            ctypes.c_size_t,
-            ctypes.POINTER(ctypes.POINTER(DbfsRange)),
-            ctypes.POINTER(ctypes.c_size_t),
-        ]
-        lib.dbfs_contiguous_missing_ranges.restype = ctypes.c_int
         lib.dbfs_sorted_contiguous_ranges.argtypes = [
             ctypes.POINTER(ctypes.c_uint64),
             ctypes.c_size_t,
@@ -785,33 +778,6 @@ class StorageSupport:
             ctypes.c_uint64(int(parallel_groups)),
         )
         return bool(result.parallel), int(result.workers)
-
-    def _missing_block_ranges_rust_ffi(self, missing):
-        lib = self._load_rust_hotpath_lib()
-        if lib is None:
-            return None
-
-        missing = [int(block_index) for block_index in missing]
-        if not missing:
-            return []
-
-        missing_array = (ctypes.c_uint64 * len(missing))(*missing)
-        out_ptr = ctypes.POINTER(DbfsRange)()
-        out_len = ctypes.c_size_t()
-
-        rc = lib.dbfs_contiguous_missing_ranges(
-            missing_array,
-            ctypes.c_size_t(len(missing)),
-            ctypes.byref(out_ptr),
-            ctypes.byref(out_len),
-        )
-        if rc != 0:
-            return None
-
-        try:
-            return [(int(out_ptr[i].start), int(out_ptr[i].end)) for i in range(out_len.value)]
-        finally:
-            lib.dbfs_free_ranges(out_ptr, out_len)
 
     def _sorted_contiguous_ranges_rust_ffi(self, values):
         lib = self._load_rust_hotpath_lib()
