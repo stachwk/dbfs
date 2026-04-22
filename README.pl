@@ -501,6 +501,7 @@ Ta sama sekcja może też ustawiać parametry wielowątkowości dla większych o
 Jeśli chcesz gotowy preset produkcyjny, ustaw `DBFS_PROFILE=bulk_write`, `DBFS_PROFILE=metadata_heavy` albo `DBFS_PROFILE=pg_locking` przed mountem. Wybrany profil nadpisuje bazowe wartości z `[dbfs]` w `dbfs_config.ini`.
 Profil możesz też podać jawnie jako `--profile bulk_write` do `dbfs_bootstrap.py` / `dbfs-bootstrap` albo jako `-o profile=bulk_write` do `mount.dbfs`.
 Ta sama zmienna `DBFS_PROFILE` działa też z `make mount`, `make mount-user` i `make demo`.
+Na primary DBFS używa backendu locków PostgreSQL lease, a na replice przełącza się na backend pamięciowy, bo mount i tak jest tylko do odczytu.
 
 Wsparcie xattr dla SELinux jest sterowane przez `--selinux auto|on|off` albo `DBFS_SELINUX=auto|on|off`.
 Domyślnie jest `off`. `on` wymusza aktywację, a `auto` używa wykrywania po stronie hosta.
