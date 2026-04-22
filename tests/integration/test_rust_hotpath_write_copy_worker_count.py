@@ -50,6 +50,17 @@ def main() -> None:
         assert result is not None, args
         assert result == expected, (args, result, expected)
 
+    transfer_cases = [
+        ((0, 4096, 4, 8, True), (1, False, 1)),
+        ((4096, 4096, 4, 8, True), (1, False, 1)),
+        ((65536, 4096, 4, 8, True), (16, True, 4)),
+    ]
+
+    for args, expected in transfer_cases:
+        result = storage._block_transfer_plan_rust_ffi(*args)
+        assert result is not None, args
+        assert result == expected, (args, result, expected)
+
     print("OK rust-hotpath-write-copy-worker-count")
 
 

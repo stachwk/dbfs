@@ -2,8 +2,9 @@ use std::panic;
 use std::slice;
 
 use crate::{
-    assemble_read_slice, block_count_for_length, contiguous_ranges, copy_segments, crc32_bytes,
-    pack_changed_ranges, pad_block_bytes, read_ahead_blocks, read_fetch_bounds,
+    assemble_read_slice, block_count_for_length, block_transfer_plan, contiguous_ranges,
+    copy_segments, crc32_bytes, pack_changed_ranges, pad_block_bytes, read_ahead_blocks,
+    read_fetch_bounds,
     parallel_worker_count, parallel_worker_plan, read_missing_range_worker_count, read_slice_plan,
     write_copy_dedupe_plan, write_copy_plan, write_copy_worker_count,
 };
@@ -51,6 +52,14 @@ pub struct DbfsReadSlicePlan {
     pub total_blocks: u64,
     pub fetch_first: u64,
     pub fetch_last: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct DbfsBlockTransferPlan {
+    pub total_blocks: u64,
+    pub parallel: u8,
+    pub workers: u64,
 }
 
 #[repr(C)]
@@ -429,6 +438,28 @@ pub extern "C" fn dbfs_read_slice_plan(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn dbfs_block_transfer_plan(
+    length: u64,
+    block_size: u64,
+    requested_workers: u64,
+    workers_min_blocks: u64,
+    minimum_one: u8,
+) -> DbfsBlockTransferPlan {
+    let (total_blocks, parallel, workers) = block_transfer_plan(
+        length,
+        block_size,
+        requested_workers,
+        workers_min_blocks,
+        minimum_one != 0,
+    );
+    DbfsBlockTransferPlan {
+        total_blocks,
+        parallel: parallel as u8,
+        workers,
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn dbfs_read_missing_range_worker_count(
     workers_read: u64,
     workers_read_min_blocks: u64,
@@ -607,10 +638,11 @@ mod tests {
         dbfs_copy_pack, dbfs_copy_plan, dbfs_crc32, dbfs_free_bytes, dbfs_free_copy_segments,
         dbfs_free_ranges, dbfs_persist_pad, dbfs_read_assemble, dbfs_read_ahead_blocks,
         dbfs_read_fetch_bounds, dbfs_read_missing_range_worker_count, dbfs_read_sequence_step,
-        dbfs_read_slice_plan, dbfs_parallel_worker_count, dbfs_parallel_worker_plan,
-        dbfs_write_copy_dedupe_plan, dbfs_write_copy_plan, dbfs_write_copy_worker_count,
-        DbfsCopySegment, DbfsParallelWorkerPlan, DbfsRange, DbfsReadBlock, DbfsReadBounds,
-        DbfsReadSlicePlan, DbfsWriteCopyDedupePlan, DbfsWriteCopyPlan,
+        dbfs_read_slice_plan, dbfs_block_transfer_plan, dbfs_parallel_worker_count,
+        dbfs_parallel_worker_plan, dbfs_write_copy_dedupe_plan, dbfs_write_copy_plan,
+        dbfs_write_copy_worker_count, DbfsBlockTransferPlan, DbfsCopySegment,
+        DbfsParallelWorkerPlan, DbfsRange, DbfsReadBlock, DbfsReadBounds, DbfsReadSlicePlan,
+        DbfsWriteCopyDedupePlan, DbfsWriteCopyPlan,
     };
 
     #[test]
@@ -834,6 +866,26 @@ mod tests {
                 total_blocks: 4,
                 fetch_first: 0,
                 fetch_last: 3,
+            }
+        );
+    }
+
+    #[test]
+    fn exports_block_transfer_plan() {
+        assert_eq!(
+            dbfs_block_transfer_plan(0, 4096, 4, 8, 0),
+            DbfsBlockTransferPlan {
+                total_blocks: 0,
+                parallel: 0,
+                workers: 1,
+            }
+        );
+        assert_eq!(
+            dbfs_block_transfer_plan(65536, 4096, 4, 8, 1),
+            DbfsBlockTransferPlan {
+                total_blocks: 16,
+                parallel: 1,
+                workers: 4,
             }
         );
     }

@@ -198,7 +198,7 @@ pub fn read_slice_plan(
     }
 
     let block_size = block_size.max(1);
-    let total_blocks = block_count_for_length(file_size, block_size, false);
+    let total_blocks = block_transfer_plan(file_size, block_size, 1, 1, false).0;
     if total_blocks == 0 {
         return None;
     }
@@ -249,6 +249,23 @@ pub fn block_count_for_length(length: u64, block_size: u64, minimum_one: bool) -
     if minimum_one { count.max(1) } else { count }
 }
 
+pub fn block_transfer_plan(
+    length: u64,
+    block_size: u64,
+    requested_workers: u64,
+    workers_min_blocks: u64,
+    minimum_one: bool,
+) -> (u64, bool, u64) {
+    let total_blocks = block_count_for_length(length, block_size, minimum_one);
+    let (parallel, workers) = parallel_worker_plan(
+        requested_workers,
+        workers_min_blocks,
+        total_blocks,
+        total_blocks,
+    );
+    (total_blocks, parallel, workers)
+}
+
 pub fn write_copy_worker_count(total_blocks: u64, workers_write: u64, workers_write_min_blocks: u64) -> u64 {
     parallel_worker_count(workers_write, workers_write_min_blocks, total_blocks, total_blocks)
 }
@@ -262,17 +279,16 @@ pub fn write_copy_plan(
     copy_dedupe_min_blocks: u64,
     copy_dedupe_max_blocks: u64,
     ) -> (u64, bool, bool, u64) {
-    let block_size = block_size.max(1);
-    let total_blocks = block_count_for_length(length, block_size, true);
+    let (total_blocks, parallel, workers) = block_transfer_plan(
+        length,
+        block_size,
+        workers_write,
+        workers_write_min_blocks,
+        true,
+    );
     let dedupe_enabled = copy_dedupe_enabled
         && total_blocks >= copy_dedupe_min_blocks.max(1)
         && (copy_dedupe_max_blocks == 0 || total_blocks <= copy_dedupe_max_blocks);
-    let (parallel, workers) = parallel_worker_plan(
-        workers_write,
-        workers_write_min_blocks,
-        total_blocks,
-        total_blocks,
-    );
     (total_blocks, dedupe_enabled, parallel, workers)
 }
 
@@ -283,7 +299,6 @@ pub fn write_copy_dedupe_plan(
     copy_dedupe_min_blocks: u64,
     copy_dedupe_max_blocks: u64,
 ) -> (u64, bool) {
-    let block_size = block_size.max(1);
     let total_blocks = block_count_for_length(length, block_size, true);
     let dedupe_enabled = copy_dedupe_enabled
         && total_blocks >= copy_dedupe_min_blocks.max(1)
@@ -371,7 +386,8 @@ pub fn assemble_read_slice(
 mod tests {
     use super::{
         assemble_read_slice, block_count_for_length, copy_segments, pack_changed_copy_pairs,
-        pack_changed_ranges, pad_block_bytes, parallel_worker_count, parallel_worker_plan,
+        block_transfer_plan, pack_changed_ranges, pad_block_bytes, parallel_worker_count,
+        parallel_worker_plan,
         read_ahead_blocks, read_fetch_bounds, read_missing_range_worker_count, read_slice_plan,
         write_copy_dedupe_plan, write_copy_plan, write_copy_worker_count,
     };
@@ -491,6 +507,13 @@ mod tests {
         assert_eq!(block_count_for_length(1, 4096, false), 1);
         assert_eq!(block_count_for_length(4096, 4096, false), 1);
         assert_eq!(block_count_for_length(4097, 4096, false), 2);
+    }
+
+    #[test]
+    fn plans_block_transfer_plan() {
+        assert_eq!(block_transfer_plan(0, 4096, 4, 8, false), (0, false, 1));
+        assert_eq!(block_transfer_plan(4096, 4096, 4, 8, false), (1, false, 1));
+        assert_eq!(block_transfer_plan(65536, 4096, 4, 8, true), (16, true, 4));
     }
 
     #[test]

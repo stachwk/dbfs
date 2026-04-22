@@ -58,6 +58,14 @@ class DbfsReadSlicePlan(ctypes.Structure):
     ]
 
 
+class DbfsBlockTransferPlan(ctypes.Structure):
+    _fields_ = [
+        ("total_blocks", ctypes.c_uint64),
+        ("parallel", ctypes.c_ubyte),
+        ("workers", ctypes.c_uint64),
+    ]
+
+
 class DbfsParallelWorkerPlan(ctypes.Structure):
     _fields_ = [
         ("parallel", ctypes.c_ubyte),
@@ -507,6 +515,14 @@ class StorageSupport:
             ctypes.POINTER(DbfsReadSlicePlan),
         ]
         lib.dbfs_read_slice_plan.restype = ctypes.c_int
+        lib.dbfs_block_transfer_plan.argtypes = [
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_ubyte,
+        ]
+        lib.dbfs_block_transfer_plan.restype = DbfsBlockTransferPlan
         lib.dbfs_read_missing_range_worker_count.argtypes = [
             ctypes.c_uint64,
             ctypes.c_uint64,
@@ -644,6 +660,20 @@ class StorageSupport:
         if rc != 0:
             return None
         return int(out.total_blocks), int(out.fetch_first), int(out.fetch_last)
+
+    def _block_transfer_plan_rust_ffi(self, length, block_size, requested_workers, workers_min_blocks, minimum_one):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        result = lib.dbfs_block_transfer_plan(
+            ctypes.c_uint64(int(length)),
+            ctypes.c_uint64(int(block_size)),
+            ctypes.c_uint64(int(requested_workers)),
+            ctypes.c_uint64(int(workers_min_blocks)),
+            ctypes.c_ubyte(1 if minimum_one else 0),
+        )
+        return int(result.total_blocks), bool(result.parallel), int(result.workers)
 
     def _read_missing_range_worker_count_rust_ffi(self, workers_read, workers_read_min_blocks, missing_len, contiguous_ranges_len):
         plan = self._parallel_worker_plan_rust_ffi(
@@ -1107,9 +1137,13 @@ class StorageSupport:
 
         plan = self._read_slice_plan_rust_ffi(file_size, offset, size, block_size, sequential, streak)
         if plan is None:
-            total_blocks = self._block_count_for_length_rust_ffi(file_size, block_size, False)
-            if total_blocks is None:
-                total_blocks = (file_size + block_size - 1) // block_size
+            transfer_plan = self._block_transfer_plan_rust_ffi(file_size, block_size, 1, 1, False)
+            if transfer_plan is None:
+                total_blocks = self._block_count_for_length_rust_ffi(file_size, block_size, False)
+                if total_blocks is None:
+                    total_blocks = (file_size + block_size - 1) // block_size
+            else:
+                total_blocks, _, _ = transfer_plan
             if total_blocks == 0:
                 return b""
 
@@ -1272,9 +1306,13 @@ class StorageSupport:
         state = self.ensure_write_state(file_id)
         file_size = int(state["file_size"])
         block_size = self.owner.block_size
-        total_blocks = self._block_count_for_length_rust_ffi(file_size, block_size, False)
-        if total_blocks is None:
-            total_blocks = (file_size + block_size - 1) // block_size if file_size > 0 else 0
+        transfer_plan = self._block_transfer_plan_rust_ffi(file_size, block_size, 1, 1, False)
+        if transfer_plan is None:
+            total_blocks = self._block_count_for_length_rust_ffi(file_size, block_size, False)
+            if total_blocks is None:
+                total_blocks = (file_size + block_size - 1) // block_size if file_size > 0 else 0
+        else:
+            total_blocks, _, _ = transfer_plan
         for block_index in range(total_blocks):
             self._mark_dirty_block(state, block_index, file_size)
 
@@ -1334,9 +1372,13 @@ class StorageSupport:
 
         file_size = int(state["file_size"])
         block_size = self.owner.block_size
-        total_blocks = self._block_count_for_length_rust_ffi(file_size, block_size, False)
-        if total_blocks is None:
-            total_blocks = (file_size + block_size - 1) // block_size if file_size > 0 else 0
+        transfer_plan = self._block_transfer_plan_rust_ffi(file_size, block_size, 1, 1, False)
+        if transfer_plan is None:
+            total_blocks = self._block_count_for_length_rust_ffi(file_size, block_size, False)
+            if total_blocks is None:
+                total_blocks = (file_size + block_size - 1) // block_size if file_size > 0 else 0
+        else:
+            total_blocks, _, _ = transfer_plan
         truncate_only = bool(truncate_pending and not dirty_blocks)
         blocks_written = 0
 
@@ -1989,7 +2031,7 @@ class StorageSupport:
         block_size = self.owner.block_size
         workers_write = max(1, int(getattr(self.owner, "workers_write", 1) or 1))
         workers_write_min_blocks = max(1, int(getattr(self.owner, "workers_write_min_blocks", 8) or 8))
-        plan = self._write_copy_plan_rust_ffi(length, block_size, workers_write, workers_write_min_blocks)
+        plan = self._block_transfer_plan_rust_ffi(length, block_size, workers_write, workers_write_min_blocks, True)
         if plan is None:
             total_blocks = self._block_count_for_length_rust_ffi(length, block_size, True)
             if total_blocks is None:
@@ -2007,7 +2049,19 @@ class StorageSupport:
             else:
                 parallel_workers = max(1, min(workers_write, total_blocks))
         else:
-            total_blocks, dedupe_enabled, parallel, parallel_workers = plan
+            total_blocks, parallel, parallel_workers = plan
+            dedupe_plan = self._write_copy_dedupe_plan_rust_ffi(length, block_size)
+            if dedupe_plan is None:
+                skip_unchanged_blocks = bool(getattr(self.owner, "copy_dedupe_enabled", False))
+                skip_unchanged_blocks_min_blocks = max(1, int(getattr(self.owner, "copy_dedupe_min_blocks", 16) or 16))
+                skip_unchanged_blocks_max_blocks = max(0, int(getattr(self.owner, "copy_dedupe_max_blocks", 0) or 0))
+                dedupe_enabled = (
+                    skip_unchanged_blocks
+                    and total_blocks >= skip_unchanged_blocks_min_blocks
+                    and (skip_unchanged_blocks_max_blocks <= 0 or total_blocks <= skip_unchanged_blocks_max_blocks)
+                )
+            else:
+                _, dedupe_enabled = dedupe_plan
             if not parallel:
                 parallel_workers = 1
 
