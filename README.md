@@ -87,6 +87,7 @@ That installs the project scripts into the active venv:
 - `mount.dbfs`
 
 The source tree still keeps the direct-run scripts `dbfs_bootstrap.py` and `mkfs.dbfs.py`; the pip package installs the shorter command names above. If you want a non-editable install, use `make pip-install`. Editable installs are available via `make pip-install-editable` if your venv can see `setuptools`. The package metadata lives in `setup.py`.
+The installed `mount.dbfs` wrapper prefers `dbfs-bootstrap` from `PATH` and falls back to the source-tree bootstrapper when you run it from the repository itself.
 
 PostgreSQL requirements for the current feature set:
 

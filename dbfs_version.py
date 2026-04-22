@@ -1,4 +1,4 @@
 from __future__ import annotations
 
-DBFS_VERSION = "1.04.001"
+DBFS_VERSION = "1.04.002"
 DBFS_VERSION_LABEL = f"DBFS {DBFS_VERSION}"

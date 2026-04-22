@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DBFS_PY="${ROOT}/dbfs_bootstrap.py"
+DBFS_BOOTSTRAP_CMD=()
 
 ROLE="${DBFS_ROLE:-auto}"
 PROFILE="${DBFS_PROFILE:-}"
@@ -135,9 +135,15 @@ if [[ "${DEBUG}" != "0" ]]; then
   export DBFS_DEBUG="1"
 fi
 
+if command -v dbfs-bootstrap >/dev/null 2>&1; then
+  DBFS_BOOTSTRAP_CMD=("dbfs-bootstrap")
+else
+  DBFS_BOOTSTRAP_CMD=("${ROOT}/.venv/bin/python" "${ROOT}/dbfs_bootstrap.py")
+fi
+
 DBFS_ARGS=("-f" "${MOUNTPOINT}")
 if [[ -n "${PROFILE}" ]]; then
   DBFS_ARGS+=("--profile" "${PROFILE}")
 fi
 
-exec "${ROOT}/.venv/bin/python" "${DBFS_PY}" "${DBFS_ARGS[@]}"
+exec "${DBFS_BOOTSTRAP_CMD[@]}" "${DBFS_ARGS[@]}"
