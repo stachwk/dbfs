@@ -5,7 +5,7 @@ use crate::{
     assemble_read_slice, block_count_for_length, contiguous_ranges, copy_segments, crc32_bytes,
     pack_changed_ranges, pad_block_bytes, read_ahead_blocks, read_fetch_bounds,
     parallel_worker_count, parallel_worker_plan, read_missing_range_worker_count, read_slice_plan,
-    write_copy_plan, write_copy_worker_count,
+    write_copy_dedupe_plan, write_copy_plan, write_copy_worker_count,
 };
 
 #[repr(C)]
@@ -67,6 +67,13 @@ pub struct DbfsWriteCopyPlan {
     pub dedupe_enabled: u8,
     pub parallel: u8,
     pub workers: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct DbfsWriteCopyDedupePlan {
+    pub total_blocks: u64,
+    pub dedupe_enabled: u8,
 }
 
 unsafe fn slice_from_raw<'a>(ptr: *const u8, len: usize) -> Option<&'a [u8]> {
@@ -512,6 +519,27 @@ pub extern "C" fn dbfs_write_copy_plan(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn dbfs_write_copy_dedupe_plan(
+    length: u64,
+    block_size: u64,
+    copy_dedupe_enabled: u8,
+    copy_dedupe_min_blocks: u64,
+    copy_dedupe_max_blocks: u64,
+) -> DbfsWriteCopyDedupePlan {
+    let (total_blocks, dedupe_enabled) = write_copy_dedupe_plan(
+        length,
+        block_size,
+        copy_dedupe_enabled != 0,
+        copy_dedupe_min_blocks,
+        copy_dedupe_max_blocks,
+    );
+    DbfsWriteCopyDedupePlan {
+        total_blocks,
+        dedupe_enabled: dedupe_enabled as u8,
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn dbfs_contiguous_missing_ranges(
     missing_ptr: *const u64,
     missing_len: usize,
@@ -580,9 +608,9 @@ mod tests {
         dbfs_free_ranges, dbfs_persist_pad, dbfs_read_assemble, dbfs_read_ahead_blocks,
         dbfs_read_fetch_bounds, dbfs_read_missing_range_worker_count, dbfs_read_sequence_step,
         dbfs_read_slice_plan, dbfs_parallel_worker_count, dbfs_parallel_worker_plan,
-        dbfs_write_copy_plan, dbfs_write_copy_worker_count, DbfsCopySegment,
-        DbfsParallelWorkerPlan, DbfsRange, DbfsReadBlock, DbfsReadBounds, DbfsReadSlicePlan,
-        DbfsWriteCopyPlan,
+        dbfs_write_copy_dedupe_plan, dbfs_write_copy_plan, dbfs_write_copy_worker_count,
+        DbfsCopySegment, DbfsParallelWorkerPlan, DbfsRange, DbfsReadBlock, DbfsReadBounds,
+        DbfsReadSlicePlan, DbfsWriteCopyDedupePlan, DbfsWriteCopyPlan,
     };
 
     #[test]
@@ -882,6 +910,24 @@ mod tests {
                 dedupe_enabled: 1,
                 parallel: 1,
                 workers: 4,
+            }
+        );
+    }
+
+    #[test]
+    fn exports_write_copy_dedupe_plan() {
+        assert_eq!(
+            dbfs_write_copy_dedupe_plan(0, 4096, 1, 16, 0),
+            DbfsWriteCopyDedupePlan {
+                total_blocks: 1,
+                dedupe_enabled: 0,
+            }
+        );
+        assert_eq!(
+            dbfs_write_copy_dedupe_plan(65536, 4096, 1, 16, 0),
+            DbfsWriteCopyDedupePlan {
+                total_blocks: 16,
+                dedupe_enabled: 1,
             }
         );
     }

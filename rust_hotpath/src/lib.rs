@@ -261,7 +261,7 @@ pub fn write_copy_plan(
     copy_dedupe_enabled: bool,
     copy_dedupe_min_blocks: u64,
     copy_dedupe_max_blocks: u64,
-) -> (u64, bool, bool, u64) {
+    ) -> (u64, bool, bool, u64) {
     let block_size = block_size.max(1);
     let total_blocks = block_count_for_length(length, block_size, true);
     let dedupe_enabled = copy_dedupe_enabled
@@ -274,6 +274,21 @@ pub fn write_copy_plan(
         total_blocks,
     );
     (total_blocks, dedupe_enabled, parallel, workers)
+}
+
+pub fn write_copy_dedupe_plan(
+    length: u64,
+    block_size: u64,
+    copy_dedupe_enabled: bool,
+    copy_dedupe_min_blocks: u64,
+    copy_dedupe_max_blocks: u64,
+) -> (u64, bool) {
+    let block_size = block_size.max(1);
+    let total_blocks = block_count_for_length(length, block_size, true);
+    let dedupe_enabled = copy_dedupe_enabled
+        && total_blocks >= copy_dedupe_min_blocks.max(1)
+        && (copy_dedupe_max_blocks == 0 || total_blocks <= copy_dedupe_max_blocks);
+    (total_blocks, dedupe_enabled)
 }
 
 pub fn parallel_worker_count(
@@ -358,7 +373,7 @@ mod tests {
         assemble_read_slice, block_count_for_length, copy_segments, pack_changed_copy_pairs,
         pack_changed_ranges, pad_block_bytes, parallel_worker_count, parallel_worker_plan,
         read_ahead_blocks, read_fetch_bounds, read_missing_range_worker_count, read_slice_plan,
-        write_copy_plan, write_copy_worker_count,
+        write_copy_dedupe_plan, write_copy_plan, write_copy_worker_count,
     };
 
     #[test]
@@ -493,6 +508,14 @@ mod tests {
         assert_eq!(write_copy_plan(4096, 4096, 4, 8, true, 16, 0), (1, false, false, 1));
         assert_eq!(write_copy_plan(65536, 4096, 4, 8, true, 16, 0), (16, true, true, 4));
         assert_eq!(write_copy_plan(65536, 4096, 1, 8, true, 16, 0), (16, true, false, 1));
+    }
+
+    #[test]
+    fn plans_write_copy_dedupe_plan() {
+        assert_eq!(write_copy_dedupe_plan(0, 4096, true, 16, 0), (1, false));
+        assert_eq!(write_copy_dedupe_plan(4096, 4096, true, 16, 0), (1, false));
+        assert_eq!(write_copy_dedupe_plan(65536, 4096, true, 16, 0), (16, true));
+        assert_eq!(write_copy_dedupe_plan(65536, 4096, false, 16, 0), (16, false));
     }
 
     #[test]

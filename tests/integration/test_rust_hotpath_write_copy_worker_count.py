@@ -39,6 +39,17 @@ def main() -> None:
         assert result is not None, args
         assert result == expected, (args, result, expected)
 
+    dedupe_cases = [
+        ((0, 4096), (1, False)),
+        ((4096, 4096), (1, False)),
+        ((65536, 4096), (16, False)),
+    ]
+
+    for args, expected in dedupe_cases:
+        result = storage._write_copy_dedupe_plan_rust_ffi(*args)
+        assert result is not None, args
+        assert result == expected, (args, result, expected)
+
     print("OK rust-hotpath-write-copy-worker-count")
 
 
