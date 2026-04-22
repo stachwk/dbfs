@@ -1,0 +1,12 @@
+[package]
+name = "dbfs-rust-hotpath"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "dbfs_rust_hotpath"
+path = "src/lib.rs"
+
+[[bin]]
+name = "copy-plan"
+path = "src/bin/copy-plan.rs"
