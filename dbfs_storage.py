@@ -177,10 +177,21 @@ class StorageSupport:
             workers_read_min_blocks = max(1, int(getattr(self.owner, "workers_read_min_blocks", 8) or 8))
             contiguous_ranges = self._missing_block_ranges(missing)
 
-            if workers_read <= 1 or len(missing) < workers_read_min_blocks or len(contiguous_ranges) <= 1:
+            max_workers = self._read_missing_range_worker_count_rust_ffi(
+                workers_read,
+                workers_read_min_blocks,
+                len(missing),
+                len(contiguous_ranges),
+            )
+            if max_workers is None:
+                if workers_read <= 1 or len(missing) < workers_read_min_blocks or len(contiguous_ranges) <= 1:
+                    max_workers = 1
+                else:
+                    max_workers = max(1, min(workers_read, len(contiguous_ranges)))
+
+            if max_workers <= 1:
                 fetched_maps = [self._fetch_block_range_chunk(file_id, missing[0], missing[-1])]
             else:
-                max_workers = max(1, min(workers_read, len(contiguous_ranges)))
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     futures = [
                         executor.submit(self._fetch_block_range_chunk, file_id, range_first, range_last)
@@ -447,6 +458,13 @@ class StorageSupport:
             ctypes.POINTER(DbfsReadBounds),
         ]
         lib.dbfs_read_fetch_bounds.restype = ctypes.c_int
+        lib.dbfs_read_missing_range_worker_count.argtypes = [
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+        ]
+        lib.dbfs_read_missing_range_worker_count.restype = ctypes.c_uint64
         lib.dbfs_contiguous_missing_ranges.argtypes = [
             ctypes.POINTER(ctypes.c_uint64),
             ctypes.c_size_t,
@@ -510,6 +528,20 @@ class StorageSupport:
         if rc != 0:
             return None
         return int(out.fetch_first), int(out.fetch_last)
+
+    def _read_missing_range_worker_count_rust_ffi(self, workers_read, workers_read_min_blocks, missing_len, contiguous_ranges_len):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        return int(
+            lib.dbfs_read_missing_range_worker_count(
+                ctypes.c_uint64(int(workers_read)),
+                ctypes.c_uint64(int(workers_read_min_blocks)),
+                ctypes.c_uint64(int(missing_len)),
+                ctypes.c_uint64(int(contiguous_ranges_len)),
+            )
+        )
 
     def _missing_block_ranges_rust_ffi(self, missing):
         lib = self._load_rust_hotpath_lib()

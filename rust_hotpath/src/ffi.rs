@@ -3,7 +3,7 @@ use std::slice;
 
 use crate::{
     assemble_read_slice, contiguous_ranges, copy_segments, crc32_bytes, pack_changed_ranges,
-    pad_block_bytes, read_ahead_blocks, read_fetch_bounds,
+    pad_block_bytes, read_ahead_blocks, read_fetch_bounds, read_missing_range_worker_count,
 };
 
 #[repr(C)]
@@ -346,6 +346,21 @@ pub extern "C" fn dbfs_read_fetch_bounds(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn dbfs_read_missing_range_worker_count(
+    workers_read: u64,
+    workers_read_min_blocks: u64,
+    missing_len: u64,
+    contiguous_ranges_len: u64,
+) -> u64 {
+    read_missing_range_worker_count(
+        workers_read,
+        workers_read_min_blocks,
+        missing_len,
+        contiguous_ranges_len,
+    )
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn dbfs_contiguous_missing_ranges(
     missing_ptr: *const u64,
     missing_len: usize,
@@ -412,7 +427,8 @@ mod tests {
         dbfs_contiguous_missing_ranges, dbfs_copy_dedupe, dbfs_copy_pack, dbfs_copy_plan,
         dbfs_crc32, dbfs_free_bytes, dbfs_free_copy_segments, dbfs_free_ranges,
         dbfs_persist_pad, dbfs_read_assemble, dbfs_read_ahead_blocks, dbfs_read_fetch_bounds,
-        dbfs_read_sequence_step, DbfsCopySegment, DbfsRange, DbfsReadBlock, DbfsReadBounds,
+        dbfs_read_missing_range_worker_count, dbfs_read_sequence_step, DbfsCopySegment,
+        DbfsRange, DbfsReadBlock, DbfsReadBounds,
     };
 
     #[test]
@@ -616,5 +632,14 @@ mod tests {
         );
         assert_eq!(out.fetch_first, 2);
         assert_eq!(out.fetch_last, 11);
+    }
+
+    #[test]
+    fn exports_read_missing_range_worker_count() {
+        assert_eq!(dbfs_read_missing_range_worker_count(1, 8, 10, 3), 1);
+        assert_eq!(dbfs_read_missing_range_worker_count(4, 8, 7, 3), 1);
+        assert_eq!(dbfs_read_missing_range_worker_count(4, 8, 8, 1), 1);
+        assert_eq!(dbfs_read_missing_range_worker_count(4, 8, 9, 3), 3);
+        assert_eq!(dbfs_read_missing_range_worker_count(8, 8, 9, 12), 8);
     }
 }
