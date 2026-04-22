@@ -154,6 +154,19 @@ class StorageSupport:
         first_block = next(blocks, None)
         if first_block is None:
             return
+        second_block = next(blocks, None)
+        if second_block is None:
+            file_id, block_index, data = first_block
+            cur.execute(
+                """
+                INSERT INTO data_blocks (id_file, _order, data)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (id_file, _order)
+                DO UPDATE SET data = EXCLUDED.data
+                """,
+                (file_id, block_index, data),
+            )
+            return
         execute_values(
             cur,
             """
@@ -162,7 +175,7 @@ class StorageSupport:
             ON CONFLICT (id_file, _order)
             DO UPDATE SET data = EXCLUDED.data
             """,
-            chain((first_block,), blocks),
+            chain((first_block, second_block), blocks),
             page_size=chunk_size,
         )
 

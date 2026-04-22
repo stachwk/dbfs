@@ -44,10 +44,10 @@ Observed on the current default throughput target (`make test-throughput`):
 Observed on the current mounted DBFS instance with `DBFS_PROFILE_IO=1`:
 
 - `persist_buffer_chunk_blocks=128`
-  - `write_seconds=0.001252`
-  - `persist_seconds=0.004660`
-  - `flush_seconds=0.004696`
-  - `finalization_seconds=0.009356`
+  - `write_seconds=0.001127`
+  - `persist_seconds=0.003594`
+  - `flush_seconds=0.003700`
+  - `finalization_seconds=0.007293`
 - `persist_buffer_chunk_blocks=512`
   - `write_seconds=0.001751`
   - `persist_seconds=0.004242`
@@ -59,13 +59,13 @@ Observed on the current mounted DBFS instance with `DBFS_PROFILE_IO=1`:
   - `flush_seconds=0.005079`
   - `finalization_seconds=0.010112`
 - truncate-only flush/release on a large file
-  - `persist_seconds=0.003040`
-  - `flush_seconds=0.003073`
-  - `finalization_seconds=0.006112`
+  - `persist_seconds=0.002476`
+  - `flush_seconds=0.002512`
+  - `finalization_seconds=0.004989`
 
 The larger chunk setting shaved a bit off the finalization path on this run, so `bulk_write` now uses the larger batch size.
 The write side itself is now effectively negligible in this profile; the remaining work is concentrated in `persist_buffer()` and `flush()`.
-The latest small win came from switching block upserts inside `persist_buffer()` to PostgreSQL `execute_values()`, making the batch size configurable, avoiding an extra copy when building block payloads for flush, and caching dirty-byte accounting so `maybe_flush_dirty_write_buffer()` does not rescan every dirty block on each write.
+The latest small win came from switching block upserts inside `persist_buffer()` to PostgreSQL `execute_values()`, making the batch size configurable, avoiding an extra copy when building block payloads for flush, caching dirty-byte accounting so `maybe_flush_dirty_write_buffer()` does not rescan every dirty block on each write, and adding a single-block fast path that bypasses `execute_values()` when only one dirty block needs to be persisted.
 Truncate-only finalization now short-circuits block packing when no dirty blocks remain, which keeps the large-file truncate path from paying extra Python-side work before the necessary tail delete.
 
 ## Throughput
