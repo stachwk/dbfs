@@ -11,6 +11,7 @@ This document records the small set of open follow-ups plus completed work, clos
 - Treat the current copy profile comparison as a frozen baseline; continue the narrow Rust hot-path work in `libdbfs-2.so`, with planner, changed-run packing, persist padding, read assembly, startup query handling, and the first repository lookups/mutations moving to Rust while Python remains the fallback and orchestration layer.
 - Keep Rust dedupe opt-in and off by default; benchmark notes show it can be slower than the Python fallback on repeated-copy workloads.
 - Start consolidating the small Rust helper surface into shared planners where the same arithmetic is repeated across read and write paths, beginning with a common worker-count planner before adding broader write/read generalizations.
+- Keep the truncate/fallocate resize planner in Rust and treat the actual mutation boundary as the next step; the current helper only plans logical resize, while Python still performs the SQL transaction and overlay cleanup.
 - Treat namespace mutation cleanup (`unlink`/`rename`/`rmdir`, xattrs, cache invalidation, epoch bumps) as a future Rust repository/backend rewrite if it ever moves out of Python; do not split it into one-off FFI helpers.
 - When schema changes actually hit a limit or compatibility failure, add a concrete migration file plus a regression test instead of widening the schema bootstrap path ad hoc.
 

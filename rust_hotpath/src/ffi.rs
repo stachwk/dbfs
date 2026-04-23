@@ -3,7 +3,7 @@ use std::slice;
 
 use crate::{
     assemble_read_slice, block_count_for_length, block_transfer_plan, copy_segments, crc32_bytes,
-    dirty_block_size, pack_changed_ranges, pad_block_bytes, parallel_worker_count,
+    dirty_block_size, logical_resize_plan, pack_changed_ranges, pad_block_bytes, parallel_worker_count,
     parallel_worker_plan, pg::DbRepo, read_ahead_blocks, read_fetch_bounds,
     read_missing_range_worker_count, read_slice_plan, sorted_contiguous_ranges, write_copy_plan,
     write_copy_worker_count,
@@ -108,6 +108,20 @@ pub struct DbfsWriteCopyPlan {
     pub dedupe_enabled: u8,
     pub parallel: u8,
     pub workers: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct DbfsLogicalResizePlan {
+    pub old_size: u64,
+    pub new_size: u64,
+    pub block_size: u64,
+    pub shrinking: u8,
+    pub has_valid_blocks: u8,
+    pub max_valid_block: u64,
+    pub has_partial_tail: u8,
+    pub tail_block_index: u64,
+    pub tail_valid_len: u64,
 }
 
 unsafe fn slice_from_raw<'a>(ptr: *const u8, len: usize) -> Option<&'a [u8]> {
@@ -1655,6 +1669,26 @@ pub extern "C" fn dbfs_dirty_block_size(file_size: u64, block_index: u64, block_
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn dbfs_logical_resize_plan(
+    old_size: u64,
+    new_size: u64,
+    block_size: u64,
+) -> DbfsLogicalResizePlan {
+    let plan = logical_resize_plan(old_size, new_size, block_size);
+    DbfsLogicalResizePlan {
+        old_size: plan.old_size,
+        new_size: plan.new_size,
+        block_size: plan.block_size,
+        shrinking: plan.shrinking as u8,
+        has_valid_blocks: plan.has_valid_blocks as u8,
+        max_valid_block: plan.max_valid_block,
+        has_partial_tail: plan.has_partial_tail as u8,
+        tail_block_index: plan.tail_block_index,
+        tail_valid_len: plan.tail_valid_len,
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn dbfs_write_copy_worker_count(
     total_blocks: u64,
     workers_write: u64,
@@ -1830,10 +1864,10 @@ mod tests {
         dbfs_read_assemble, dbfs_read_ahead_blocks, dbfs_read_fetch_bounds,
         dbfs_read_missing_range_worker_count, dbfs_read_sequence_step, dbfs_read_slice_plan,
         dbfs_sorted_contiguous_ranges, dbfs_block_transfer_plan, dbfs_dirty_block_ranges_plan,
-        dbfs_parallel_worker_count, dbfs_parallel_worker_plan, dbfs_write_copy_plan,
-        dbfs_write_copy_worker_count, DbfsBlockTransferPlan, DbfsCopySegment,
-        DbfsParallelWorkerPlan, DbfsRange, DbfsReadBlock, DbfsReadBounds, DbfsReadSlicePlan,
-        DbfsWriteCopyPlan,
+        dbfs_logical_resize_plan, dbfs_parallel_worker_count, dbfs_parallel_worker_plan,
+        dbfs_write_copy_plan, dbfs_write_copy_worker_count, DbfsBlockTransferPlan,
+        DbfsCopySegment, DbfsLogicalResizePlan, DbfsParallelWorkerPlan, DbfsRange,
+        DbfsReadBlock, DbfsReadBounds, DbfsReadSlicePlan, DbfsWriteCopyPlan,
     };
 
     #[test]
@@ -2042,6 +2076,52 @@ mod tests {
             ]
         );
         dbfs_free_ranges(out_ptr, out_len);
+    }
+
+    #[test]
+    fn exports_logical_resize_plan() {
+        assert_eq!(
+            dbfs_logical_resize_plan(10, 0, 4),
+            DbfsLogicalResizePlan {
+                old_size: 10,
+                new_size: 0,
+                block_size: 4,
+                shrinking: 1,
+                has_valid_blocks: 0,
+                max_valid_block: 0,
+                has_partial_tail: 0,
+                tail_block_index: 0,
+                tail_valid_len: 0,
+            }
+        );
+        assert_eq!(
+            dbfs_logical_resize_plan(10, 6, 4),
+            DbfsLogicalResizePlan {
+                old_size: 10,
+                new_size: 6,
+                block_size: 4,
+                shrinking: 1,
+                has_valid_blocks: 1,
+                max_valid_block: 1,
+                has_partial_tail: 1,
+                tail_block_index: 1,
+                tail_valid_len: 2,
+            }
+        );
+        assert_eq!(
+            dbfs_logical_resize_plan(10, 16, 4),
+            DbfsLogicalResizePlan {
+                old_size: 10,
+                new_size: 16,
+                block_size: 4,
+                shrinking: 0,
+                has_valid_blocks: 1,
+                max_valid_block: 3,
+                has_partial_tail: 0,
+                tail_block_index: 0,
+                tail_valid_len: 0,
+            }
+        );
     }
 
     #[test]

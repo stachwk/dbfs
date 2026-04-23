@@ -264,6 +264,41 @@ pub fn dirty_block_size(file_size: u64, block_index: u64, block_size: u64) -> u6
     block_end.saturating_sub(block_start)
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct LogicalResizePlan {
+    pub old_size: u64,
+    pub new_size: u64,
+    pub block_size: u64,
+    pub shrinking: bool,
+    pub has_valid_blocks: bool,
+    pub max_valid_block: u64,
+    pub has_partial_tail: bool,
+    pub tail_block_index: u64,
+    pub tail_valid_len: u64,
+}
+
+pub fn logical_resize_plan(old_size: u64, new_size: u64, block_size: u64) -> LogicalResizePlan {
+    let block_size = block_size.max(1);
+    let shrinking = new_size < old_size;
+    let has_valid_blocks = new_size > 0;
+    let max_valid_block = if has_valid_blocks { (new_size - 1) / block_size } else { 0 };
+    let tail_valid_len = if has_valid_blocks { new_size % block_size } else { 0 };
+    let has_partial_tail = has_valid_blocks && tail_valid_len != 0;
+    let tail_block_index = if has_partial_tail { new_size / block_size } else { 0 };
+
+    LogicalResizePlan {
+        old_size,
+        new_size,
+        block_size,
+        shrinking,
+        has_valid_blocks,
+        max_valid_block,
+        has_partial_tail,
+        tail_block_index,
+        tail_valid_len,
+    }
+}
+
 pub fn block_transfer_plan(
     length: u64,
     block_size: u64,
@@ -406,11 +441,12 @@ pub fn assemble_read_slice(
 mod tests {
     use super::{
         assemble_read_slice, block_count_for_length, copy_segments, dirty_block_size,
-        pack_changed_copy_pairs, block_transfer_plan, pack_changed_ranges, pad_block_bytes,
+        logical_resize_plan, pack_changed_copy_pairs, block_transfer_plan, pack_changed_ranges, pad_block_bytes,
         parallel_worker_count, parallel_worker_plan, sorted_contiguous_ranges,
         read_ahead_blocks, read_fetch_bounds, read_missing_range_worker_count, read_slice_plan,
         write_copy_dedupe_plan, write_copy_plan, write_copy_worker_count,
     };
+    use crate::LogicalResizePlan;
 
     #[test]
     fn returns_empty_for_zero_length() {
@@ -536,6 +572,52 @@ mod tests {
         assert_eq!(dirty_block_size(4096, 0, 4096), 4096);
         assert_eq!(dirty_block_size(4100, 1, 4096), 4);
         assert_eq!(dirty_block_size(8192, 3, 4096), 0);
+    }
+
+    #[test]
+    fn plans_logical_resize() {
+        assert_eq!(
+            logical_resize_plan(10, 0, 4),
+            LogicalResizePlan {
+                old_size: 10,
+                new_size: 0,
+                block_size: 4,
+                shrinking: true,
+                has_valid_blocks: false,
+                max_valid_block: 0,
+                has_partial_tail: false,
+                tail_block_index: 0,
+                tail_valid_len: 0,
+            }
+        );
+        assert_eq!(
+            logical_resize_plan(10, 6, 4),
+            LogicalResizePlan {
+                old_size: 10,
+                new_size: 6,
+                block_size: 4,
+                shrinking: true,
+                has_valid_blocks: true,
+                max_valid_block: 1,
+                has_partial_tail: true,
+                tail_block_index: 1,
+                tail_valid_len: 2,
+            }
+        );
+        assert_eq!(
+            logical_resize_plan(10, 16, 4),
+            LogicalResizePlan {
+                old_size: 10,
+                new_size: 16,
+                block_size: 4,
+                shrinking: false,
+                has_valid_blocks: true,
+                max_valid_block: 3,
+                has_partial_tail: false,
+                tail_block_index: 0,
+                tail_valid_len: 0,
+            }
+        );
     }
 
     #[test]

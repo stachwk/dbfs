@@ -1514,6 +1514,8 @@ class DBFS(Operations):
         old_size = self.storage.get_logical_file_size(id_file)
         end_offset = offset + length
         new_size = max(old_size, end_offset)
+        resize_plan = self.storage.python_to_rust_hotpath_logical_resize_plan(old_size, new_size, self.block_size)
+        new_size = int(resize_plan.new_size)
 
         # W modelu overlay nie ladujemy calego pliku do RAM.
         # Jesli trzeba rozszerzyc plik, podnosimy tylko logiczny rozmiar.

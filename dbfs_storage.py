@@ -82,6 +82,20 @@ class DbfsWriteCopyPlan(ctypes.Structure):
     ]
 
 
+class DbfsLogicalResizePlan(ctypes.Structure):
+    _fields_ = [
+        ("old_size", ctypes.c_uint64),
+        ("new_size", ctypes.c_uint64),
+        ("block_size", ctypes.c_uint64),
+        ("shrinking", ctypes.c_ubyte),
+        ("has_valid_blocks", ctypes.c_ubyte),
+        ("max_valid_block", ctypes.c_uint64),
+        ("has_partial_tail", ctypes.c_ubyte),
+        ("tail_block_index", ctypes.c_uint64),
+        ("tail_valid_len", ctypes.c_uint64),
+    ]
+
+
 class DbfsWriteTransferPlan:
     __slots__ = ("total_blocks", "dedupe_enabled", "parallel", "workers", "use_crc_table")
 
@@ -546,6 +560,12 @@ class StorageSupport:
             ctypes.c_uint64,
         ]
         lib.dbfs_dirty_block_size.restype = ctypes.c_uint64
+        lib.dbfs_logical_resize_plan.argtypes = [
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+        ]
+        lib.dbfs_logical_resize_plan.restype = DbfsLogicalResizePlan
         lib.dbfs_write_copy_worker_count.argtypes = [
             ctypes.c_uint64,
             ctypes.c_uint64,
@@ -1281,8 +1301,9 @@ class StorageSupport:
             helper = self.python_to_rust_hotpath_read_assemble_bin_path()
             if helper is not None:
                 try:
+                    zero_block = b"\x00" * block_size
                     input_data = "\n".join(
-                        f"{block_index}|{(bytes(state['overlay_blocks'][block_index]) if state is not None and block_index in state['overlay_blocks'] else block_map.get(block_index, b'')).hex()}"
+                        f"{block_index}|{(bytes(state['overlay_blocks'][block_index]) if state is not None and block_index in state['overlay_blocks'] else block_map.get(block_index, zero_block)).hex()}"
                         for block_index in range(fetch_first, fetch_last + 1)
                     )
                     completed = subprocess.run(
@@ -1674,6 +1695,34 @@ class StorageSupport:
         block_end = min(int(file_size), block_start + block_size)
         return max(0, block_end - block_start)
 
+    def _python_logical_resize_plan(self, old_size, new_size, block_size):
+        plan = DbfsLogicalResizePlan()
+        old_size = max(0, int(old_size))
+        new_size = max(0, int(new_size))
+        block_size = max(1, int(block_size))
+
+        plan.old_size = old_size
+        plan.new_size = new_size
+        plan.block_size = block_size
+        plan.shrinking = 1 if new_size < old_size else 0
+        plan.has_valid_blocks = 1 if new_size > 0 else 0
+        plan.max_valid_block = ((new_size - 1) // block_size) if new_size > 0 else 0
+        plan.has_partial_tail = 1 if (new_size > 0 and (new_size % block_size) != 0) else 0
+        plan.tail_block_index = (new_size // block_size) if plan.has_partial_tail else 0
+        plan.tail_valid_len = (new_size % block_size) if plan.has_partial_tail else 0
+        return plan
+
+    def python_to_rust_hotpath_logical_resize_plan(self, old_size, new_size, block_size):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return self._python_logical_resize_plan(old_size, new_size, block_size)
+
+        return lib.dbfs_logical_resize_plan(
+            ctypes.c_uint64(int(old_size)),
+            ctypes.c_uint64(int(new_size)),
+            ctypes.c_uint64(int(block_size)),
+        )
+
     def _mark_dirty_block(self, state, block_index, file_size):
         dirty_blocks = state["dirty_blocks"]
         if block_index in dirty_blocks:
@@ -1782,22 +1831,26 @@ class StorageSupport:
         state = self.ensure_write_state(file_id)
         old_size = int(state["file_size"])
         block_size = self.owner.block_size
+        plan = self.python_to_rust_hotpath_logical_resize_plan(old_size, length, block_size)
 
         if length == old_size:
             return
 
-        if length < old_size:
+        if plan.shrinking:
             state["truncate_pending"] = True
 
-        state["file_size"] = int(length)
+        state["file_size"] = int(plan.new_size)
 
         # Usun bloki calkowicie poza nowym EOF
-        max_valid_block = ((length - 1) // block_size) if length > 0 else -1
-        stale_blocks = [
-            block_index
-            for block_index in list(state["overlay_blocks"].keys())
-            if block_index > max_valid_block
-        ]
+        if plan.has_valid_blocks:
+            max_valid_block = int(plan.max_valid_block)
+            stale_blocks = [
+                block_index
+                for block_index in list(state["overlay_blocks"].keys())
+                if block_index > max_valid_block
+            ]
+        else:
+            stale_blocks = list(state["overlay_blocks"].keys())
         for block_index in stale_blocks:
             state["overlay_blocks"].pop(block_index, None)
             if block_index in state["dirty_blocks"]:
@@ -1806,10 +1859,10 @@ class StorageSupport:
                 state["dirty_bytes"] = max(0, int(state.get("dirty_bytes", 0)) - int(removed_bytes))
 
         # Jesli skracamy do srodka bloku, wyzeruj ogon tego bloku
-        if length > 0 and (length % block_size) != 0:
-            last_block = length // block_size
+        if plan.has_partial_tail:
+            last_block = int(plan.tail_block_index)
             block = self.ensure_overlay_block_for_write(file_id, last_block, state["file_size"])
-            valid_len = length - (last_block * block_size)
+            valid_len = int(plan.tail_valid_len)
             if valid_len < block_size:
                 block[valid_len:] = b"\x00" * (block_size - valid_len)
             self._mark_dirty_block(state, last_block, state["file_size"])
