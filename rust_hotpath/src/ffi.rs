@@ -1306,6 +1306,31 @@ pub extern "C" fn dbfs_rust_pg_repo_choose_primary_hardlink(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_promote_hardlink_to_primary(
+    repo_ptr: *mut DbfsPgRepo,
+    file_id: u64,
+    out_promoted: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_promoted.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.promote_hardlink_to_primary(file_id) {
+            Ok(value) => {
+                *out_promoted = if value { 1 } else { 0 };
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn dbfs_rust_pg_repo_resolve_path(
     repo_ptr: *mut DbfsPgRepo,
     path_ptr: *const u8,
@@ -1871,9 +1896,10 @@ mod tests {
         dbfs_read_missing_range_worker_count, dbfs_read_sequence_step, dbfs_read_slice_plan,
         dbfs_sorted_contiguous_ranges, dbfs_block_transfer_plan, dbfs_dirty_block_ranges_plan,
         dbfs_logical_resize_plan, dbfs_parallel_worker_count, dbfs_parallel_worker_plan,
-        dbfs_write_copy_plan, dbfs_write_copy_worker_count, DbfsBlockTransferPlan,
-        DbfsCopySegment, DbfsLogicalResizePlan, DbfsParallelWorkerPlan, DbfsRange,
-        DbfsReadBlock, DbfsReadBounds, DbfsReadSlicePlan, DbfsWriteCopyPlan,
+        dbfs_write_copy_plan, dbfs_write_copy_worker_count,
+        dbfs_rust_pg_repo_promote_hardlink_to_primary, DbfsBlockTransferPlan, DbfsCopySegment,
+        DbfsLogicalResizePlan, DbfsParallelWorkerPlan, DbfsRange, DbfsReadBlock, DbfsReadBounds,
+        DbfsReadSlicePlan, DbfsWriteCopyPlan,
     };
 
     #[test]
@@ -1998,6 +2024,18 @@ mod tests {
         assert_eq!(ranges[0].start, 0);
         assert_eq!(ranges[0].end, 4);
         dbfs_free_ranges(out_ptr, out_len);
+    }
+
+    #[test]
+    fn exports_promote_hardlink_to_primary() {
+        let mut out_promoted = 0u8;
+        let status = dbfs_rust_pg_repo_promote_hardlink_to_primary(
+            std::ptr::null_mut(),
+            1,
+            &mut out_promoted,
+        );
+        assert_eq!(status, 1);
+        assert_eq!(out_promoted, 0);
     }
 
     #[test]

@@ -352,19 +352,9 @@ class NamespaceRepositoryLookup:
 
     def promote_hardlink_to_primary(self, file_id, cur):
         dbfs = self.dbfs
-        rust_value = dbfs.backend.python_to_rust_namespace_choose_primary_hardlink(file_id)
+        rust_value = dbfs.backend.python_to_rust_namespace_promote_hardlink_to_primary(file_id)
         if rust_value is not None:
-            hardlink_id, hardlink_dir_id, hardlink_name = rust_value
-            cur.execute(
-                """
-                UPDATE files
-                SET id_directory = %s, name = %s
-                WHERE id_file = %s
-                """,
-                (hardlink_dir_id, hardlink_name, file_id),
-            )
-            cur.execute("DELETE FROM hardlinks WHERE id_hardlink = %s", (hardlink_id,))
-            return hardlink_id, hardlink_dir_id, hardlink_name
+            return bool(rust_value)
 
         cur.execute(
             """
@@ -378,7 +368,7 @@ class NamespaceRepositoryLookup:
         )
         result = cur.fetchone()
         if not result:
-            return None
+            return False
 
         hardlink_id, hardlink_dir_id, hardlink_name = result
         cur.execute(
@@ -390,4 +380,4 @@ class NamespaceRepositoryLookup:
             (hardlink_dir_id, hardlink_name, file_id),
         )
         cur.execute("DELETE FROM hardlinks WHERE id_hardlink = %s", (hardlink_id,))
-        return hardlink_id, hardlink_dir_id, hardlink_name
+        return True

@@ -823,6 +823,107 @@ impl DbRepo {
         }
     }
 
+    pub fn promote_hardlink_to_primary(&self, file_id: u64) -> Result<bool, String> {
+        let sql_choose = CString::new(
+            "
+            SELECT id_hardlink, id_directory, name
+            FROM hardlinks
+            WHERE id_file = $1
+            ORDER BY id_hardlink ASC
+            LIMIT 1
+            ",
+        )
+        .map_err(|_| "SQL contains NUL byte".to_string())?;
+        let sql_update_null_parent = CString::new(
+            "
+            UPDATE files
+            SET id_directory = NULL, name = $1
+            WHERE id_file = $2
+            ",
+        )
+        .map_err(|_| "SQL contains NUL byte".to_string())?;
+        let sql_update_parent = CString::new(
+            "
+            UPDATE files
+            SET id_directory = $1, name = $2
+            WHERE id_file = $3
+            ",
+        )
+        .map_err(|_| "SQL contains NUL byte".to_string())?;
+        let sql_delete = CString::new("DELETE FROM hardlinks WHERE id_hardlink = $1")
+            .map_err(|_| "SQL contains NUL byte".to_string())?;
+        let file_id = CString::new(file_id.to_string())
+            .map_err(|_| "file id contains NUL byte".to_string())?;
+
+        unsafe {
+            let conn = connect(&self.conninfo)?;
+            let result = transactional(conn, |conn| {
+                let params = [&file_id];
+                let res = exec_params(conn, &sql_choose, &params)?;
+                let chosen = match PQresultStatus(res) {
+                    PGRES_TUPLES_OK => {
+                        let rows = PQntuples(res);
+                        let cols = PQnfields(res);
+                        let value = if rows < 1 || cols < 3 {
+                            None
+                        } else {
+                            let hardlink_ptr = PQgetvalue(res, 0, 0);
+                            let parent_ptr = PQgetvalue(res, 0, 1);
+                            let name_ptr = PQgetvalue(res, 0, 2);
+                            if hardlink_ptr.is_null() || parent_ptr.is_null() || name_ptr.is_null() {
+                                None
+                            } else {
+                                let hardlink_id = CStr::from_ptr(hardlink_ptr)
+                                    .to_string_lossy()
+                                    .trim()
+                                    .parse::<u64>()
+                                    .ok();
+                                let parent_id = CStr::from_ptr(parent_ptr)
+                                    .to_string_lossy()
+                                    .trim()
+                                    .parse::<u64>()
+                                    .ok();
+                                let name = CStr::from_ptr(name_ptr).to_string_lossy().to_string();
+                                hardlink_id.map(|hardlink_id| (hardlink_id, parent_id, name))
+                            }
+                        };
+                        PQclear(res);
+                        value
+                    }
+                    _ => {
+                        PQclear(res);
+                        return Err(conn_error(conn));
+                    }
+                };
+
+                let Some((hardlink_id, parent_id, name)) = chosen else {
+                    return Ok(false);
+                };
+
+                let file_name = CString::new(name).map_err(|_| "hardlink name contains NUL byte".to_string())?;
+                let hardlink_id = CString::new(hardlink_id.to_string())
+                    .map_err(|_| "hardlink id contains NUL byte".to_string())?;
+                if let Some(parent_id) = parent_id {
+                    let parent_id = CString::new(parent_id.to_string())
+                        .map_err(|_| "parent id contains NUL byte".to_string())?;
+                    let params = [&parent_id, &file_name, &file_id];
+                    let res = exec_params(conn, &sql_update_parent, &params)?;
+                    PQclear(res);
+                } else {
+                    let params = [&file_name, &file_id];
+                    let res = exec_params(conn, &sql_update_null_parent, &params)?;
+                    PQclear(res);
+                }
+                let params = [&hardlink_id];
+                let res = exec_params(conn, &sql_delete, &params)?;
+                PQclear(res);
+                Ok(true)
+            });
+            PQfinish(conn);
+            result
+        }
+    }
+
     pub fn create_hardlink(
         &self,
         source_file_id: u64,

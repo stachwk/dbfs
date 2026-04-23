@@ -96,6 +96,7 @@ def main():
 
             file_name = f"{namespace_name}/payload.txt"
             file_fh = fs.create(file_name, 0o644)
+            file_cleanup_name = file_name
             try:
                 rust_resolved_file = backend.python_to_rust_namespace_resolve_path(file_name)
                 rust_file_id = backend.python_to_rust_namespace_get_file_id(file_name)
@@ -113,24 +114,30 @@ def main():
 
                 hardlink_name = f"{namespace_name}/payload-link.txt"
                 fs.link(hardlink_name, file_name)
-                try:
-                    rust_hardlink_id = backend.python_to_rust_namespace_get_hardlink_id(hardlink_name)
-                    python_hardlink_id = fs.get_hardlink_id(hardlink_name)
-                    rust_hardlink_mode = backend.python_to_rust_namespace_get_file_mode_value(hardlink_name)
-                    python_hardlink_mode = fs.get_file_mode_value(hardlink_name)
-                    rust_primary_hardlink = backend.python_to_rust_namespace_choose_primary_hardlink(rust_file_id)
-                    rust_hardlink_file_id = backend.python_to_rust_namespace_get_hardlink_file_id(rust_hardlink_id)
-                    python_hardlink_file_id = fs.get_hardlink_file_id(python_hardlink_id)
-                    assert rust_hardlink_id == python_hardlink_id, (rust_hardlink_id, python_hardlink_id)
-                    assert rust_hardlink_id is not None, rust_hardlink_id
-                    assert rust_hardlink_mode == "644", rust_hardlink_mode
-                    assert python_hardlink_mode == "644", python_hardlink_mode
-                    assert rust_primary_hardlink == (rust_hardlink_id, rust_dir_id, "payload-link.txt"), rust_primary_hardlink
-                    assert rust_hardlink_file_id == python_hardlink_file_id, (rust_hardlink_file_id, python_hardlink_file_id)
-                    assert rust_hardlink_file_id == rust_file_id, (rust_hardlink_file_id, rust_file_id)
-                    assert backend.python_to_rust_namespace_count_file_links(rust_file_id) == 2
-                finally:
-                    fs.unlink(hardlink_name)
+                rust_hardlink_id = backend.python_to_rust_namespace_get_hardlink_id(hardlink_name)
+                python_hardlink_id = fs.get_hardlink_id(hardlink_name)
+                rust_hardlink_mode = backend.python_to_rust_namespace_get_file_mode_value(hardlink_name)
+                python_hardlink_mode = fs.get_file_mode_value(hardlink_name)
+                rust_primary_hardlink = backend.python_to_rust_namespace_choose_primary_hardlink(rust_file_id)
+                rust_hardlink_file_id = backend.python_to_rust_namespace_get_hardlink_file_id(rust_hardlink_id)
+                python_hardlink_file_id = fs.get_hardlink_file_id(python_hardlink_id)
+                assert rust_hardlink_id == python_hardlink_id, (rust_hardlink_id, python_hardlink_id)
+                assert rust_hardlink_id is not None, rust_hardlink_id
+                assert rust_hardlink_mode == "644", rust_hardlink_mode
+                assert python_hardlink_mode == "644", python_hardlink_mode
+                assert rust_primary_hardlink == (rust_hardlink_id, rust_dir_id, "payload-link.txt"), rust_primary_hardlink
+                assert rust_hardlink_file_id == python_hardlink_file_id, (rust_hardlink_file_id, python_hardlink_file_id)
+                assert rust_hardlink_file_id == rust_file_id, (rust_hardlink_file_id, rust_file_id)
+                assert backend.python_to_rust_namespace_count_file_links(rust_file_id) == 2
+
+                rust_promoted = backend.python_to_rust_namespace_promote_hardlink_to_primary(rust_file_id)
+                assert rust_promoted is True, rust_promoted
+                assert fs.get_file_id(file_name) is None
+                assert fs.get_file_id(hardlink_name) == rust_file_id
+                assert fs.get_hardlink_id(hardlink_name) is None
+                assert fs.get_file_mode_value(hardlink_name) == "644"
+                assert backend.python_to_rust_namespace_count_file_links(rust_file_id) == 1
+                file_cleanup_name = hardlink_name
 
                 symlink_name = f"{namespace_name}/payload-link.symlink"
                 fs.symlink(symlink_name, file_name)
@@ -159,7 +166,7 @@ def main():
                         fs.unlink(f"{namespace_name}/payload-link-rust.symlink")
             finally:
                 fs.release(file_name, file_fh)
-                fs.unlink(file_name)
+                fs.unlink(file_cleanup_name)
                 fs.unlink(rust_created_file_name)
         finally:
             fs.rmdir(namespace_name)

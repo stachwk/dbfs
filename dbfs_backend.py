@@ -276,6 +276,12 @@ class PostgresBackend:
             ctypes.POINTER(ctypes.c_ubyte),
         ]
         lib.dbfs_rust_pg_repo_choose_primary_hardlink.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_promote_hardlink_to_primary.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_promote_hardlink_to_primary.restype = ctypes.c_int
         lib.dbfs_rust_pg_repo_count_file_links.argtypes = [
             ctypes.c_void_p,
             ctypes.c_uint64,
@@ -748,6 +754,22 @@ class PostgresBackend:
 
         parent_id = int(out_parent_id.value) if out_parent_found.value else None
         return int(out_hardlink_id.value), parent_id, name
+
+    def python_to_rust_namespace_promote_hardlink_to_primary(self, file_id):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        lib = self._load_rust_hotpath_lib()
+        out_promoted = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_promote_hardlink_to_primary(
+            repo,
+            int(file_id),
+            ctypes.byref(out_promoted),
+        )
+        if status != 0:
+            return None
+        return bool(out_promoted.value)
 
     def python_to_rust_namespace_count_file_links(self, file_id):
         repo = self._load_rust_pg_repo()
