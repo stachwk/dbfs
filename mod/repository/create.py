@@ -60,9 +60,26 @@ class NamespaceRepositoryCreateMutations:
         if parent_path != "/" and self.get_dir_id(parent_path) is None:
             raise dbfs.FuseOSError(errno.ENOENT)
 
+        uid, gid = dbfs.creation_uid_gid(parent_path)
+        inode_seed = dbfs.generate_inode_seed()
+        rust_symlink_id = dbfs.backend.python_to_rust_namespace_create_symlink(
+            parent_id,
+            link_name,
+            source,
+            uid,
+            gid,
+            inode_seed,
+        )
+        if rust_symlink_id is not None:
+            with dbfs.db_connection() as conn, conn.cursor() as cur:
+                dbfs.append_journal_event(cur, "symlink", target, directory_id=parent_id)
+                conn.commit()
+            dbfs.touch_namespace_epoch()
+            dbfs.invalidate_metadata_cache(include_statfs=True)
+            return 0
+
         with dbfs.db_connection() as conn, conn.cursor() as cur:
             try:
-                uid, gid = dbfs.creation_uid_gid(parent_path)
                 symlink_ctime = dbfs.ctime_column("symlinks")
                 cur.execute(
                     """
@@ -135,12 +152,12 @@ class NamespaceRepositoryCreateMutations:
                         (source_file_id, target_parent_id, target_name, uid, gid),
                     )
                     rust_hardlink_id = cur.fetchone()[0]
+                    if target_parent_id is not None:
+                        cur.execute(
+                            f"UPDATE directories SET modification_date = NOW(), {dbfs.ctime_column('directories')} = NOW() WHERE id_directory = %s",
+                            (target_parent_id,),
+                        )
                 dbfs.append_journal_event(cur, "link", target, file_id=source_file_id, directory_id=target_parent_id)
-                if target_parent_id is not None:
-                    cur.execute(
-                        f"UPDATE directories SET modification_date = NOW(), {dbfs.ctime_column('directories')} = NOW() WHERE id_directory = %s",
-                        (target_parent_id,),
-                    )
                 conn.commit()
                 dbfs.touch_namespace_epoch()
                 dbfs.invalidate_metadata_cache(include_statfs=True)

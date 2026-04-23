@@ -115,8 +115,24 @@ def main():
                     python_symlink_id = fs.get_symlink_id(symlink_name)
                     assert rust_symlink_id == python_symlink_id, (rust_symlink_id, python_symlink_id)
                     assert rust_symlink_id is not None, rust_symlink_id
+
+                    rust_direct_symlink_name = f"{namespace_name}/payload-link-rust.symlink"
+                    direct_uid, direct_gid = fs.current_uid_gid()
+                    direct_inode_seed = fs.generate_inode_seed()
+                    rust_direct_symlink_id = backend.python_to_rust_namespace_create_symlink(
+                        rust_dir_id,
+                        "payload-link-rust.symlink",
+                        file_name,
+                        direct_uid,
+                        direct_gid,
+                        direct_inode_seed,
+                    )
+                    assert rust_direct_symlink_id is not None, rust_direct_symlink_id
+                    assert fs.get_symlink_id(rust_direct_symlink_name) == rust_direct_symlink_id
                 finally:
                     fs.unlink(symlink_name)
+                    if fs.get_symlink_id(f"{namespace_name}/payload-link-rust.symlink") is not None:
+                        fs.unlink(f"{namespace_name}/payload-link-rust.symlink")
             finally:
                 fs.release(file_name, file_fh)
                 fs.unlink(file_name)

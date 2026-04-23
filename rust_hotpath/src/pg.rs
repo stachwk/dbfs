@@ -13,6 +13,7 @@ struct PGresult {
 
 const CONNECTION_OK: c_int = 0;
 const PGRES_TUPLES_OK: c_int = 2;
+const PGRES_COMMAND_OK: c_int = 1;
 
 #[link(name = "pq")]
 unsafe extern "C" {
@@ -87,6 +88,69 @@ unsafe fn fetch_single_text(res: *mut PGresult) -> Result<String, String> {
     };
     PQclear(res);
     value
+}
+
+unsafe fn exec_command(conn: *mut PGconn, sql: &CString) -> Result<(), String> {
+    let res = PQexec(conn, sql.as_ptr());
+    if res.is_null() {
+        return Err(conn_error(conn));
+    }
+    let status = PQresultStatus(res);
+    PQclear(res);
+    if status == PGRES_COMMAND_OK {
+        Ok(())
+    } else {
+        Err(conn_error(conn))
+    }
+}
+
+unsafe fn exec_params(conn: *mut PGconn, sql: &CString, params: &[&CString]) -> Result<*mut PGresult, String> {
+    let param_values = params.iter().map(|value| value.as_ptr()).collect::<Vec<_>>();
+    let param_lengths = params
+        .iter()
+        .map(|value| value.as_bytes().len() as c_int)
+        .collect::<Vec<_>>();
+    let param_formats = vec![0 as c_int; params.len()];
+    let res = PQexecParams(
+        conn,
+        sql.as_ptr(),
+        params.len() as c_int,
+        std::ptr::null(),
+        param_values.as_ptr(),
+        param_lengths.as_ptr(),
+        param_formats.as_ptr(),
+        0,
+    );
+    if res.is_null() {
+        Err(conn_error(conn))
+    } else {
+        Ok(res)
+    }
+}
+
+unsafe fn transactional<T, F>(conn: *mut PGconn, mut f: F) -> Result<T, String>
+where
+    F: FnMut(*mut PGconn) -> Result<T, String>,
+{
+    let begin = CString::new("BEGIN").map_err(|_| "SQL contains NUL byte".to_string())?;
+    let commit = CString::new("COMMIT").map_err(|_| "SQL contains NUL byte".to_string())?;
+    let rollback = CString::new("ROLLBACK").map_err(|_| "SQL contains NUL byte".to_string())?;
+
+    exec_command(conn, &begin)?;
+    match f(conn) {
+        Ok(value) => {
+            if let Err(err) = exec_command(conn, &commit) {
+                let _ = exec_command(conn, &rollback);
+                Err(err)
+            } else {
+                Ok(value)
+            }
+        }
+        Err(err) => {
+            let _ = exec_command(conn, &rollback);
+            Err(err)
+        }
+    }
 }
 
 pub struct DbRepo {
@@ -772,6 +836,10 @@ impl DbRepo {
             .map_err(|_| "file id contains NUL byte".to_string())?;
         let uid = CString::new(uid.to_string()).map_err(|_| "uid contains NUL byte".to_string())?;
         let gid = CString::new(gid.to_string()).map_err(|_| "gid contains NUL byte".to_string())?;
+        let sql_touch_parent = CString::new(
+            "UPDATE directories SET modification_date = NOW(), change_date = NOW() WHERE id_directory = $1",
+        )
+        .map_err(|_| "SQL contains NUL byte".to_string())?;
         let sql_null_parent = CString::new(
             "
             INSERT INTO hardlinks (id_file, id_directory, name, uid, gid, creation_date, modification_date, access_date)
@@ -792,63 +860,23 @@ impl DbRepo {
         unsafe {
             let conn = connect(&self.conninfo)?;
             let result = {
-                let res = if let Some(parent_id) = target_parent_id {
-                    let parent_id = CString::new(parent_id.to_string())
-                        .map_err(|_| "parent id contains NUL byte".to_string())?;
-                    let param_values = [
-                        source_file_id.as_ptr(),
-                        target_name.as_ptr(),
-                        uid.as_ptr(),
-                        gid.as_ptr(),
-                        parent_id.as_ptr(),
-                    ];
-                    let param_lengths = [
-                        source_file_id.as_bytes().len() as c_int,
-                        target_name.as_bytes().len() as c_int,
-                        uid.as_bytes().len() as c_int,
-                        gid.as_bytes().len() as c_int,
-                        parent_id.as_bytes().len() as c_int,
-                    ];
-                    let param_formats = [0 as c_int; 5];
-                    PQexecParams(
-                        conn,
-                        sql_parent.as_ptr(),
-                        5,
-                        std::ptr::null(),
-                        param_values.as_ptr(),
-                        param_lengths.as_ptr(),
-                        param_formats.as_ptr(),
-                        0,
-                    )
-                } else {
-                    let param_values = [
-                        source_file_id.as_ptr(),
-                        target_name.as_ptr(),
-                        uid.as_ptr(),
-                        gid.as_ptr(),
-                    ];
-                    let param_lengths = [
-                        source_file_id.as_bytes().len() as c_int,
-                        target_name.as_bytes().len() as c_int,
-                        uid.as_bytes().len() as c_int,
-                        gid.as_bytes().len() as c_int,
-                    ];
-                    let param_formats = [0 as c_int; 4];
-                    PQexecParams(
-                        conn,
-                        sql_null_parent.as_ptr(),
-                        4,
-                        std::ptr::null(),
-                        param_values.as_ptr(),
-                        param_lengths.as_ptr(),
-                        param_formats.as_ptr(),
-                        0,
-                    )
-                };
-                if res.is_null() {
-                    Err(conn_error(conn))
-                } else {
-                    match PQresultStatus(res) {
+                transactional(conn, |conn| {
+                    let res = if let Some(parent_id) = target_parent_id {
+                        let parent_id = CString::new(parent_id.to_string())
+                            .map_err(|_| "parent id contains NUL byte".to_string())?;
+                        let params = [
+                            &source_file_id,
+                            &target_name,
+                            &uid,
+                            &gid,
+                            &parent_id,
+                        ];
+                        exec_params(conn, &sql_parent, &params)?
+                    } else {
+                        let params = [&source_file_id, &target_name, &uid, &gid];
+                        exec_params(conn, &sql_null_parent, &params)?
+                    };
+                    let value = match PQresultStatus(res) {
                         PGRES_TUPLES_OK => {
                             let rows = PQntuples(res);
                             let cols = PQnfields(res);
@@ -869,9 +897,100 @@ impl DbRepo {
                             PQclear(res);
                             Err(conn_error(conn))
                         }
+                    }?;
+                    if let Some(parent_id) = target_parent_id {
+                        let parent_id = CString::new(parent_id.to_string())
+                            .map_err(|_| "parent id contains NUL byte".to_string())?;
+                        let params = [&parent_id];
+                        let res = exec_params(conn, &sql_touch_parent, &params)?;
+                        PQclear(res);
                     }
-                }
+                    Ok(value)
+                })
             };
+            PQfinish(conn);
+            result
+        }
+    }
+
+    pub fn create_symlink(
+        &self,
+        target_parent_id: Option<u64>,
+        target_name: &str,
+        target: &str,
+        uid: u32,
+        gid: u32,
+        inode_seed: &str,
+    ) -> Result<u64, String> {
+        let target_name = CString::new(target_name).map_err(|_| "target name contains NUL byte".to_string())?;
+        let target = CString::new(target).map_err(|_| "symlink target contains NUL byte".to_string())?;
+        let uid = CString::new(uid.to_string()).map_err(|_| "uid contains NUL byte".to_string())?;
+        let gid = CString::new(gid.to_string()).map_err(|_| "gid contains NUL byte".to_string())?;
+        let inode_seed = CString::new(inode_seed).map_err(|_| "inode seed contains NUL byte".to_string())?;
+        let sql_touch_parent = CString::new(
+            "UPDATE directories SET modification_date = NOW(), change_date = NOW() WHERE id_directory = $1",
+        )
+        .map_err(|_| "SQL contains NUL byte".to_string())?;
+        let sql_null_parent = CString::new(
+            "
+            INSERT INTO symlinks (id_parent, name, target, uid, gid, inode_seed, change_date, creation_date, modification_date, access_date)
+            VALUES (NULL, $1, $2, $3, $4, $5, NOW(), NOW(), NOW(), NOW())
+            RETURNING id_symlink
+            ",
+        )
+        .map_err(|_| "SQL contains NUL byte".to_string())?;
+        let sql_parent = CString::new(
+            "
+            INSERT INTO symlinks (id_parent, name, target, uid, gid, inode_seed, change_date, creation_date, modification_date, access_date)
+            VALUES ($6, $1, $2, $3, $4, $5, NOW(), NOW(), NOW(), NOW())
+            RETURNING id_symlink
+            ",
+        )
+        .map_err(|_| "SQL contains NUL byte".to_string())?;
+
+        unsafe {
+            let conn = connect(&self.conninfo)?;
+            let result = transactional(conn, |conn| {
+                let res = if let Some(parent_id) = target_parent_id {
+                    let parent_id = CString::new(parent_id.to_string())
+                        .map_err(|_| "parent id contains NUL byte".to_string())?;
+                    let params = [&target_name, &target, &uid, &gid, &inode_seed, &parent_id];
+                    exec_params(conn, &sql_parent, &params)?
+                } else {
+                    let params = [&target_name, &target, &uid, &gid, &inode_seed];
+                    exec_params(conn, &sql_null_parent, &params)?
+                };
+                let value = match PQresultStatus(res) {
+                    PGRES_TUPLES_OK => {
+                        let rows = PQntuples(res);
+                        let cols = PQnfields(res);
+                        let value = if rows < 1 || cols < 1 {
+                            None
+                        } else {
+                            let value_ptr = PQgetvalue(res, 0, 0);
+                            if value_ptr.is_null() {
+                                None
+                            } else {
+                                CStr::from_ptr(value_ptr).to_string_lossy().trim().parse::<u64>().ok()
+                            }
+                        };
+                        PQclear(res);
+                        value.ok_or_else(|| "failed to create symlink".to_string())
+                    }
+                    _ => {
+                        PQclear(res);
+                        Err(conn_error(conn))
+                    }
+                }?;
+                if let Some(parent_id) = target_parent_id {
+                    let parent_id = CString::new(parent_id.to_string())
+                        .map_err(|_| "parent id contains NUL byte".to_string())?;
+                    let params = [&parent_id];
+                    let res = exec_params(conn, &sql_touch_parent, &params)?;
+                    PQclear(res);
+                }
+                Ok(value)
+            });
             PQfinish(conn);
             result
         }
