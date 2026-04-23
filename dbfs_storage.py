@@ -6,6 +6,7 @@ import os
 import time
 from itertools import chain
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from psycopg2.extras import execute_values
 
@@ -334,8 +335,14 @@ class StorageSupport:
             return
 
         file_id = int(block_rows[0][0])
-        if self.owner.backend.python_to_rust_pg_repo_persist_copy_block_crc_rows(file_id, block_size, block_rows):
-            return
+        rust_persist_copy_block_crc_rows = getattr(
+            self.owner.backend,
+            "python_to_rust_pg_repo_persist_copy_block_crc_rows",
+            None,
+        )
+        if rust_persist_copy_block_crc_rows is not None:
+            if rust_persist_copy_block_crc_rows(file_id, block_size, block_rows):
+                return
 
         crc_rows = []
         stale_rows = []
@@ -1608,17 +1615,24 @@ class StorageSupport:
                             if payload is None:
                                 continue
 
-                        data = self._persist_block_payload(payload, used_len, block_size)
-                        block_rows.append((file_id, block_index, data, used_len))
+                            data = self._persist_block_payload(payload, used_len, block_size)
+                            block_rows.append((file_id, block_index, data, used_len))
 
-                    rust_persisted = self.owner.backend.python_to_rust_pg_repo_persist_file_blocks(
-                        file_id,
-                        file_size,
-                        block_size,
-                        total_blocks,
-                        truncate_pending,
-                        block_rows,
+                    rust_persist_file_blocks = getattr(
+                        self.owner.backend,
+                        "python_to_rust_pg_repo_persist_file_blocks",
+                        None,
                     )
+                    rust_persisted = False
+                    if rust_persist_file_blocks is not None:
+                        rust_persisted = rust_persist_file_blocks(
+                            file_id,
+                            file_size,
+                            block_size,
+                            total_blocks,
+                            truncate_pending,
+                            block_rows,
+                        )
                     if rust_persisted:
                         blocks_written = len(block_rows)
                         conn.commit()
