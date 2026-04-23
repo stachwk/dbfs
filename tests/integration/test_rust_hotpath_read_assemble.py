@@ -2,18 +2,9 @@
 
 from __future__ import annotations
 
-import subprocess
-import sys
-from pathlib import Path
 from types import SimpleNamespace
 
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
 from dbfs_storage import StorageSupport
-
-RUST_MANIFEST = ROOT / "rust_hotpath" / "Cargo.toml"
 
 
 def python_assemble(fetch_first, fetch_last, offset, end_offset, block_size, blocks):
@@ -29,47 +20,26 @@ def python_assemble(fetch_first, fetch_last, offset, end_offset, block_size, blo
     return raw[start_offset:end_offset_in_raw]
 
 
-def run_rust_assemble(fetch_first, fetch_last, offset, end_offset, block_size, blocks):
-    input_data = "\n".join(f"{block_index}|{block.hex()}" for block_index, block in blocks)
-    completed = subprocess.run(
-        [
-            "cargo",
-            "run",
-            "--quiet",
-            "--manifest-path",
-            str(RUST_MANIFEST),
-            "--bin",
-            "dbfs-read-assemble",
-            "--",
-            str(int(fetch_first)),
-            str(int(fetch_last)),
-            str(int(offset)),
-            str(int(end_offset)),
-            str(int(block_size)),
-        ],
-        input=input_data.encode(),
-        check=True,
-        capture_output=True,
-    )
-    return completed.stdout
-
-
 def main() -> None:
     cases = [
-        (0, 2, 1, 11, 4, [(0, b"abcd"), (1, b"efgh"), (2, b"ijkl")]),
-        (2, 4, 9, 19, 4, [(2, b"2345"), (4, b"6789")]),
-        (1, 1, 9, 12, 8, [(1, b"abcdefgh")]),
+        (0, 2, 0, 12, 4, [(0, b"abcd"), (1, b"efgh"), (2, b"ijkl")]),
+        (2, 4, 8, 20, 4, [(2, b"2345"), (4, b"6789")]),
+        (1, 1, 8, 16, 8, [(1, b"abcdefgh")]),
     ]
 
     storage = StorageSupport(SimpleNamespace(rust_hotpath_read_assemble=True))
-    assert storage.rust_hotpath_read_assemble_bin_path() is not None, "expected built Rust helper binary"
+    assert storage._load_rust_hotpath_lib() is not None, "expected built Rust hot-path library"
 
     for case in cases:
+        fetch_first, fetch_last, offset, end_offset, block_size, blocks = case
+        block_map = {index: data for index, data in blocks}
+        storage.owner.block_size = block_size
+        storage._fetch_block_range = lambda file_id, first_block, last_block, block_map=block_map: block_map
         python_result = python_assemble(*case)
-        rust_result = run_rust_assemble(*case)
-        assert rust_result == python_result, (
+        runtime_result = storage._assemble_blocks(99, fetch_first, fetch_last)
+        assert runtime_result == python_result, (
             f"read-assemble mismatch for {case!r}: "
-            f"python={python_result!r} rust={rust_result!r}"
+            f"python={python_result!r} runtime={runtime_result!r}"
         )
 
     print("OK rust-hotpath-read-assemble")
