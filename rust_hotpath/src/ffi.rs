@@ -4,7 +4,7 @@ use std::slice;
 use crate::{
     assemble_read_slice, block_count_for_length, block_transfer_plan, copy_segments, crc32_bytes,
     dirty_block_size, logical_resize_plan, pack_changed_ranges, pad_block_bytes, parallel_worker_count,
-    parallel_worker_plan, persist_layout_plan, pg::DbRepo, read_ahead_blocks, read_fetch_bounds,
+    parallel_worker_plan, persist_block_plan, persist_layout_plan, pg::DbRepo, read_ahead_blocks, read_fetch_bounds,
     read_missing_range_worker_count, read_slice_plan, sorted_contiguous_ranges, write_copy_plan,
     write_copy_worker_count,
 };
@@ -132,6 +132,22 @@ pub struct DbfsLogicalResizePlan {
 pub struct DbfsPersistLayoutPlan {
     pub total_blocks: u64,
     pub truncate_only: u8,
+}
+
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct DbfsPersistBlockPlanEntry {
+    pub block_index: u64,
+    pub used_len: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct DbfsPersistBlockPlan {
+    pub total_blocks: u64,
+    pub truncate_only: u8,
+    pub blocks_ptr: *mut DbfsPersistBlockPlanEntry,
+    pub blocks_len: usize,
 }
 
 unsafe fn slice_from_raw<'a>(ptr: *const u8, len: usize) -> Option<&'a [u8]> {
@@ -1903,6 +1919,50 @@ pub extern "C" fn dbfs_persist_layout_plan(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn dbfs_persist_block_plan(
+    file_size: u64,
+    block_size: u64,
+    truncate_pending: u8,
+    dirty_ptr: *const u64,
+    dirty_len: usize,
+    out_total_blocks: *mut u64,
+    out_truncate_only: *mut u8,
+    out_ptr: *mut *mut DbfsPersistBlockPlanEntry,
+    out_len: *mut usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if out_total_blocks.is_null() || out_truncate_only.is_null() {
+            return 1;
+        }
+        let dirty = if dirty_len == 0 {
+            &[][..]
+        } else {
+            if dirty_ptr.is_null() {
+                return 1;
+            }
+            slice::from_raw_parts(dirty_ptr, dirty_len)
+        };
+        let plan = persist_block_plan(file_size, block_size, truncate_pending != 0, dirty);
+        *out_total_blocks = plan.total_blocks;
+        *out_truncate_only = if plan.truncate_only { 1 } else { 0 };
+        let blocks = plan
+            .blocks
+            .into_iter()
+            .map(|entry| DbfsPersistBlockPlanEntry {
+                block_index: entry.block_index,
+                used_len: entry.used_len,
+            })
+            .collect::<Vec<_>>();
+        write_boxed_output(blocks, out_ptr, out_len)
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn dbfs_free_copy_segments(ptr: *mut DbfsCopySegment, len: usize) {
     if ptr.is_null() || len == 0 {
         return;
@@ -1915,6 +1975,17 @@ pub extern "C" fn dbfs_free_copy_segments(ptr: *mut DbfsCopySegment, len: usize)
 
 #[unsafe(no_mangle)]
 pub extern "C" fn dbfs_free_ranges(ptr: *mut DbfsRange, len: usize) {
+    if ptr.is_null() || len == 0 {
+        return;
+    }
+
+    unsafe {
+        let _ = Vec::from_raw_parts(ptr, len, len);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_free_persist_blocks(ptr: *mut DbfsPersistBlockPlanEntry, len: usize) {
     if ptr.is_null() || len == 0 {
         return;
     }
@@ -1939,16 +2010,16 @@ pub extern "C" fn dbfs_free_bytes(ptr: *mut u8, len: usize) {
 mod tests {
     use super::{
         dbfs_block_count_for_length, dbfs_copy_dedupe, dbfs_copy_pack, dbfs_copy_plan,
-        dbfs_crc32, dbfs_free_bytes, dbfs_free_copy_segments, dbfs_free_ranges, dbfs_persist_pad,
-        dbfs_read_assemble, dbfs_read_ahead_blocks, dbfs_read_fetch_bounds,
-        dbfs_read_missing_range_worker_count, dbfs_read_sequence_step, dbfs_read_slice_plan,
-        dbfs_sorted_contiguous_ranges, dbfs_block_transfer_plan, dbfs_dirty_block_ranges_plan,
-        dbfs_logical_resize_plan, dbfs_parallel_worker_count, dbfs_parallel_worker_plan,
-        dbfs_persist_layout_plan,
+        dbfs_crc32, dbfs_free_bytes, dbfs_free_copy_segments, dbfs_free_persist_blocks,
+        dbfs_free_ranges, dbfs_persist_block_plan, dbfs_persist_pad, dbfs_read_assemble,
+        dbfs_read_ahead_blocks, dbfs_read_fetch_bounds, dbfs_read_missing_range_worker_count,
+        dbfs_read_sequence_step, dbfs_read_slice_plan, dbfs_sorted_contiguous_ranges,
+        dbfs_block_transfer_plan, dbfs_dirty_block_ranges_plan, dbfs_logical_resize_plan,
+        dbfs_parallel_worker_count, dbfs_parallel_worker_plan, dbfs_persist_layout_plan,
         dbfs_write_copy_plan, dbfs_write_copy_worker_count,
         dbfs_rust_pg_repo_promote_hardlink_to_primary, DbfsBlockTransferPlan, DbfsCopySegment,
-        DbfsLogicalResizePlan, DbfsParallelWorkerPlan, DbfsRange,
-        DbfsReadBlock, DbfsReadBounds, DbfsReadSlicePlan, DbfsWriteCopyPlan,
+        DbfsLogicalResizePlan, DbfsParallelWorkerPlan, DbfsPersistBlockPlanEntry,
+        DbfsRange, DbfsReadBlock, DbfsReadBounds, DbfsReadSlicePlan, DbfsWriteCopyPlan,
     };
 
     #[test]
@@ -2203,6 +2274,43 @@ mod tests {
             ]
         );
         dbfs_free_ranges(out_ptr, out_len);
+    }
+
+    #[test]
+    fn exports_persist_block_plan() {
+        let dirty = [7u64, 3, 4, 10, 11, 11, 8];
+        let mut total_blocks = 0u64;
+        let mut truncate_only = 0u8;
+        let mut out_ptr: *mut DbfsPersistBlockPlanEntry = std::ptr::null_mut();
+        let mut out_len: usize = 0;
+
+        let status = dbfs_persist_block_plan(
+            65536,
+            4096,
+            1,
+            dirty.as_ptr(),
+            dirty.len(),
+            &mut total_blocks,
+            &mut truncate_only,
+            &mut out_ptr,
+            &mut out_len,
+        );
+        assert_eq!(status, 0);
+        assert_eq!(total_blocks, 16);
+        assert_eq!(truncate_only, 0);
+        let blocks = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(
+            blocks,
+            &[
+                DbfsPersistBlockPlanEntry { block_index: 3, used_len: 4096 },
+                DbfsPersistBlockPlanEntry { block_index: 4, used_len: 4096 },
+                DbfsPersistBlockPlanEntry { block_index: 7, used_len: 4096 },
+                DbfsPersistBlockPlanEntry { block_index: 8, used_len: 4096 },
+                DbfsPersistBlockPlanEntry { block_index: 10, used_len: 4096 },
+                DbfsPersistBlockPlanEntry { block_index: 11, used_len: 4096 },
+            ]
+        );
+        dbfs_free_persist_blocks(out_ptr, out_len);
     }
 
     #[test]

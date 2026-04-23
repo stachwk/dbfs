@@ -333,6 +333,56 @@ pub fn persist_layout_plan(
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct PersistBlockPlanEntry {
+    pub block_index: u64,
+    pub used_len: u64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct PersistBlockPlan {
+    pub total_blocks: u64,
+    pub truncate_only: bool,
+    pub blocks: Vec<PersistBlockPlanEntry>,
+}
+
+pub fn persist_block_plan(
+    file_size: u64,
+    block_size: u64,
+    truncate_pending: bool,
+    dirty_blocks: &[u64],
+) -> PersistBlockPlan {
+    let block_size = block_size.max(1);
+    let total_blocks = block_count_for_length(file_size, block_size, false);
+    let truncate_only = truncate_pending && dirty_blocks.is_empty();
+
+    let mut blocks = Vec::new();
+    if !truncate_only {
+        let mut sorted_dirty_blocks = dirty_blocks.to_vec();
+        sorted_dirty_blocks.sort_unstable();
+        sorted_dirty_blocks.dedup();
+        for block_index in sorted_dirty_blocks {
+            if block_index >= total_blocks {
+                continue;
+            }
+            let used_len = dirty_block_size(file_size, block_index, block_size);
+            if used_len == 0 {
+                continue;
+            }
+            blocks.push(PersistBlockPlanEntry {
+                block_index,
+                used_len,
+            });
+        }
+    }
+
+    PersistBlockPlan {
+        total_blocks,
+        truncate_only,
+        blocks,
+    }
+}
+
 pub fn block_transfer_plan(
     length: u64,
     block_size: u64,
@@ -476,11 +526,11 @@ mod tests {
     use super::{
         assemble_read_slice, block_count_for_length, copy_segments, dirty_block_size,
         logical_resize_plan, pack_changed_copy_pairs, block_transfer_plan, pack_changed_ranges, pad_block_bytes,
-        parallel_worker_count, parallel_worker_plan, sorted_contiguous_ranges,
-        persist_layout_plan, read_ahead_blocks, read_fetch_bounds, read_missing_range_worker_count,
-        read_slice_plan, write_copy_dedupe_plan, write_copy_plan, write_copy_worker_count,
+        parallel_worker_count, parallel_worker_plan, persist_block_plan, persist_layout_plan,
+        read_ahead_blocks, read_fetch_bounds, read_missing_range_worker_count, read_slice_plan,
+        sorted_contiguous_ranges, write_copy_dedupe_plan, write_copy_plan, write_copy_worker_count,
     };
-    use crate::LogicalResizePlan;
+    use crate::{LogicalResizePlan, PersistBlockPlanEntry};
 
     #[test]
     fn returns_empty_for_zero_length() {
@@ -680,6 +730,24 @@ mod tests {
         assert_eq!(plan.total_blocks, 1);
         assert!(plan.truncate_only);
         assert!(plan.ordered_dirty_ranges.is_empty());
+    }
+
+    #[test]
+    fn plans_persist_block_plan() {
+        let plan = persist_block_plan(65536, 4096, true, &[7, 3, 4, 10, 11, 11, 8]);
+        assert_eq!(plan.total_blocks, 16);
+        assert!(!plan.truncate_only);
+        assert_eq!(
+            plan.blocks,
+            vec![
+                PersistBlockPlanEntry { block_index: 3, used_len: 4096 },
+                PersistBlockPlanEntry { block_index: 4, used_len: 4096 },
+                PersistBlockPlanEntry { block_index: 7, used_len: 4096 },
+                PersistBlockPlanEntry { block_index: 8, used_len: 4096 },
+                PersistBlockPlanEntry { block_index: 10, used_len: 4096 },
+                PersistBlockPlanEntry { block_index: 11, used_len: 4096 },
+            ]
+        );
     }
 
     #[test]
