@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import uuid
 import sys
+import zlib
 
 import psycopg2
 
@@ -93,6 +94,38 @@ def main():
             assert rust_created_file_id is not None, rust_created_file_id
             assert fs.get_file_id(rust_created_file_name) == rust_created_file_id
             assert fs.get_file_mode_value(rust_created_file_name) == "644"
+
+            crc_block_size = int(fs.block_size)
+            crc_full = bytes(range(256)) * 16
+            crc_partial = b"abc"
+            with psycopg2.connect(**dsn) as conn, conn.cursor() as cur:
+                cur.execute("DELETE FROM copy_block_crc WHERE id_file = %s", (rust_created_file_id,))
+                cur.execute(
+                    "INSERT INTO copy_block_crc (id_file, _order, crc32) VALUES (%s, %s, %s)",
+                    (rust_created_file_id, 0, 1),
+                )
+                cur.execute(
+                    "INSERT INTO copy_block_crc (id_file, _order, crc32) VALUES (%s, %s, %s)",
+                    (rust_created_file_id, 1, 2),
+                )
+                conn.commit()
+
+            rust_crc_plan = backend.python_to_rust_pg_repo_persist_copy_block_crc_rows(
+                rust_created_file_id,
+                crc_block_size,
+                [
+                    (rust_created_file_id, 0, crc_full, crc_block_size),
+                    (rust_created_file_id, 1, crc_partial, len(crc_partial)),
+                ],
+            )
+            assert rust_crc_plan is True, rust_crc_plan
+            with psycopg2.connect(**dsn) as conn, conn.cursor() as cur:
+                cur.execute(
+                    "SELECT _order, crc32 FROM copy_block_crc WHERE id_file = %s ORDER BY _order",
+                    (rust_created_file_id,),
+                )
+                crc_rows = cur.fetchall()
+            assert crc_rows == [(0, zlib.crc32(crc_full) & 0xFFFFFFFF)], crc_rows
 
             file_name = f"{namespace_name}/payload.txt"
             file_fh = fs.create(file_name, 0o644)

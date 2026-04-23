@@ -34,6 +34,15 @@ def load_dbfs_runtime_config(file_path):
     return runtime
 
 
+class RustPersistBlockInput(ctypes.Structure):
+    _fields_ = [
+        ("block_index", ctypes.c_uint64),
+        ("ptr", ctypes.POINTER(ctypes.c_ubyte)),
+        ("len", ctypes.c_size_t),
+        ("used_len", ctypes.c_uint64),
+    ]
+
+
 class PostgresBackend:
     def __init__(self, dsn, db_config, pool_max_connections=10, synchronous_commit="on"):
         self.dsn = dsn
@@ -282,6 +291,14 @@ class PostgresBackend:
             ctypes.POINTER(ctypes.c_ubyte),
         ]
         lib.dbfs_rust_pg_repo_promote_hardlink_to_primary.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_persist_copy_block_crc_rows.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.POINTER(RustPersistBlockInput),
+            ctypes.c_size_t,
+        ]
+        lib.dbfs_rust_pg_repo_persist_copy_block_crc_rows.restype = ctypes.c_int
         lib.dbfs_rust_pg_repo_count_file_links.argtypes = [
             ctypes.c_void_p,
             ctypes.c_uint64,
@@ -770,6 +787,45 @@ class PostgresBackend:
         if status != 0:
             return None
         return bool(out_promoted.value)
+
+    def python_to_rust_pg_repo_persist_copy_block_crc_rows(self, file_id, block_size, block_rows):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        if not block_rows:
+            return True
+
+        payload_buffers = []
+        inputs = []
+        for _, block_index, data, used_len in block_rows:
+            payload = bytes(data)
+            buffer = ctypes.create_string_buffer(payload, len(payload))
+            payload_buffers.append(buffer)
+            inputs.append(
+                RustPersistBlockInput(
+                    block_index=ctypes.c_uint64(int(block_index)),
+                    ptr=ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte)),
+                    len=ctypes.c_size_t(len(payload)),
+                    used_len=ctypes.c_uint64(int(used_len)),
+                )
+            )
+
+        inputs_array = (RustPersistBlockInput * len(inputs))(*inputs)
+        status = lib.dbfs_rust_pg_repo_persist_copy_block_crc_rows(
+            repo,
+            int(file_id),
+            int(block_size),
+            inputs_array,
+            len(inputs),
+        )
+        if status != 0:
+            return None
+        return True
 
     def python_to_rust_namespace_count_file_links(self, file_id):
         repo = self._load_rust_pg_repo()

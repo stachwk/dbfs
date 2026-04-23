@@ -333,6 +333,13 @@ class StorageSupport:
         )
 
     def _persist_copy_block_crc_rows(self, cur, block_rows, block_size):
+        if not block_rows:
+            return
+
+        file_id = int(block_rows[0][0])
+        if self.owner.backend.python_to_rust_pg_repo_persist_copy_block_crc_rows(file_id, block_size, block_rows):
+            return
+
         crc_rows = []
         stale_rows = []
         for file_id, block_index, data, used_len in block_rows:
@@ -1744,54 +1751,11 @@ class StorageSupport:
                             blocks_written += 1
 
                         if block_rows:
-                            crc_plan = self.python_to_rust_hotpath_persist_block_crc_plan(block_size, [
-                                (block_index, data, used_len) for _, block_index, data, used_len in block_rows
-                            ])
-                            if crc_plan is None:
-                                crc_plan = []
-                            crc_rows = []
-                            stale_rows = []
-                            crc_plan_by_block = {block_index: (has_crc, crc32) for block_index, has_crc, crc32 in crc_plan}
-                            for file_id_row, block_index, data, used_len in block_rows:
-                                has_crc, crc_value = crc_plan_by_block.get(block_index, (used_len >= block_size, None))
-                                if has_crc:
-                                    if crc_value is None:
-                                        crc_value = self.python_to_rust_hotpath_crc32(data)
-                                        if crc_value is None:
-                                            crc_value = binascii.crc32(bytes(data)) & 0xFFFFFFFF
-                                    crc_rows.append((file_id_row, block_index, crc_value))
-                                else:
-                                    stale_rows.append((file_id_row, block_index))
-
                             self._persist_block_chunks(
                                 cur,
                                 ((file_id, block_index, data) for file_id, block_index, data, _ in block_rows),
                             )
-                            if crc_rows:
-                                chunk_size = max(1, int(getattr(self.owner, "persist_buffer_chunk_blocks", self.PERSIST_BUFFER_CHUNK_BLOCKS) or self.PERSIST_BUFFER_CHUNK_BLOCKS))
-                                execute_values(
-                                    cur,
-                                    """
-                                    INSERT INTO copy_block_crc (id_file, _order, crc32)
-                                    VALUES %s
-                                    ON CONFLICT (id_file, _order)
-                                    DO UPDATE SET crc32 = EXCLUDED.crc32, updated_at = NOW()
-                                    """,
-                                    crc_rows,
-                                    page_size=chunk_size,
-                                )
-                            if stale_rows:
-                                execute_values(
-                                    cur,
-                                    """
-                                    DELETE FROM copy_block_crc
-                                    USING (VALUES %s) AS stale(id_file, _order)
-                                    WHERE copy_block_crc.id_file = stale.id_file
-                                      AND copy_block_crc._order = stale._order
-                                    """,
-                                    stale_rows,
-                                    page_size=max(1, int(getattr(self.owner, "persist_buffer_chunk_blocks", self.PERSIST_BUFFER_CHUNK_BLOCKS) or self.PERSIST_BUFFER_CHUNK_BLOCKS)),
-                                )
+                            self._persist_copy_block_crc_rows(cur, block_rows, block_size)
 
                     cur.execute(
                         """

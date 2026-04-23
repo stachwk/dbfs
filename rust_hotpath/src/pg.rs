@@ -1,3 +1,4 @@
+use crate::crc32_bytes;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_uint};
 use std::sync::Mutex;
@@ -129,6 +130,17 @@ unsafe fn exec_params(conn: *mut PGconn, sql: &CString, params: &[&CString]) -> 
     }
 }
 
+unsafe fn exec_command_params(conn: *mut PGconn, sql: &CString, params: &[&CString]) -> Result<(), String> {
+    let res = exec_params(conn, sql, params)?;
+    let status = PQresultStatus(res);
+    PQclear(res);
+    if status == PGRES_COMMAND_OK {
+        Ok(())
+    } else {
+        Err(conn_error(conn))
+    }
+}
+
 unsafe fn transactional<T, F>(conn: *mut PGconn, mut f: F) -> Result<T, String>
 where
     F: FnMut(*mut PGconn) -> Result<T, String>,
@@ -172,6 +184,13 @@ pub struct ResolvedPath {
     pub parent_id: Option<u64>,
     pub kind: Option<String>,
     pub entry_id: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PersistBlockRow<'a> {
+    pub block_index: u64,
+    pub data: &'a [u8],
+    pub used_len: u64,
 }
 
 impl DbRepo {
@@ -1386,6 +1405,55 @@ impl DbRepo {
                 Ok(id_file)
             });
             result
+        })
+    }
+
+    pub fn persist_copy_block_crc_rows<'a>(
+        &self,
+        file_id: u64,
+        block_size: u64,
+        blocks: &[PersistBlockRow<'a>],
+    ) -> Result<(), String> {
+        if blocks.is_empty() {
+            return Ok(());
+        }
+
+        let file_id = CString::new(file_id.to_string()).map_err(|_| "file id contains NUL byte".to_string())?;
+        let sql_upsert = CString::new(
+            "
+            INSERT INTO copy_block_crc (id_file, _order, crc32)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (id_file, _order)
+            DO UPDATE SET crc32 = EXCLUDED.crc32, updated_at = NOW()
+            ",
+        )
+        .map_err(|_| "SQL contains NUL byte".to_string())?;
+        let sql_delete = CString::new(
+            "
+            DELETE FROM copy_block_crc
+            WHERE id_file = $1 AND _order = $2
+            ",
+        )
+        .map_err(|_| "SQL contains NUL byte".to_string())?;
+        let block_size = block_size.max(1);
+
+        self.with_cached_connection(|conn| unsafe {
+            transactional(conn, |conn| {
+                for block in blocks {
+                    let block_index = CString::new(block.block_index.to_string())
+                        .map_err(|_| "block index contains NUL byte".to_string())?;
+                    if block.used_len >= block_size {
+                        let crc32 = CString::new(crc32_bytes(block.data).to_string())
+                            .map_err(|_| "crc32 contains NUL byte".to_string())?;
+                        let params = [&file_id, &block_index, &crc32];
+                        exec_command_params(conn, &sql_upsert, &params)?;
+                    } else {
+                        let params = [&file_id, &block_index];
+                        exec_command_params(conn, &sql_delete, &params)?;
+                    }
+                }
+                Ok(())
+            })
         })
     }
 

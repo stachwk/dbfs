@@ -4,9 +4,9 @@ use std::slice;
 use crate::{
     assemble_read_slice, block_count_for_length, block_transfer_plan, copy_segments, crc32_bytes,
     dirty_block_size, logical_resize_plan, pack_changed_ranges, pad_block_bytes, parallel_worker_count,
-    parallel_worker_plan, persist_block_plan, persist_layout_plan, pg::DbRepo, read_ahead_blocks, read_fetch_bounds,
-    read_missing_range_worker_count, read_slice_plan, sorted_contiguous_ranges, write_copy_plan,
-    write_copy_worker_count,
+    parallel_worker_plan, persist_block_plan, persist_layout_plan, pg::DbRepo, pg::PersistBlockRow,
+    read_ahead_blocks, read_fetch_bounds, read_missing_range_worker_count, read_slice_plan,
+    sorted_contiguous_ranges, write_copy_plan, write_copy_worker_count,
 };
 
 #[repr(C)]
@@ -1367,6 +1367,49 @@ pub extern "C" fn dbfs_rust_pg_repo_promote_hardlink_to_primary(
                 *out_promoted = if value { 1 } else { 0 };
                 0
             }
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_persist_copy_block_crc_rows(
+    repo_ptr: *mut DbfsPgRepo,
+    file_id: u64,
+    block_size: u64,
+    blocks_ptr: *const DbfsPersistBlockInput,
+    blocks_len: usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        if blocks_len == 0 {
+            return 0;
+        }
+        if blocks_ptr.is_null() {
+            return 1;
+        }
+        let blocks = slice::from_raw_parts(blocks_ptr, blocks_len);
+        let mut rows = Vec::with_capacity(blocks.len());
+        for block in blocks {
+            let data = match slice_from_raw(block.ptr, block.len) {
+                Some(slice) => slice,
+                None => return 1,
+            };
+            rows.push(PersistBlockRow {
+                block_index: block.block_index,
+                data,
+                used_len: block.used_len,
+            });
+        }
+        match (*repo_ptr).repo.persist_copy_block_crc_rows(file_id, block_size, &rows) {
+            Ok(()) => 0,
             Err(_) => 3,
         }
     });
