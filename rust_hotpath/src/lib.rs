@@ -256,6 +256,13 @@ pub fn block_count_for_length(length: u64, block_size: u64, minimum_one: bool) -
     if minimum_one { count.max(1) } else { count }
 }
 
+pub fn dirty_block_size(file_size: u64, block_index: u64, block_size: u64) -> u64 {
+    let block_size = block_size.max(1);
+    let block_start = block_index.saturating_mul(block_size);
+    let block_end = file_size.min(block_start.saturating_add(block_size));
+    block_end.saturating_sub(block_start)
+}
+
 pub fn block_transfer_plan(
     length: u64,
     block_size: u64,
@@ -397,9 +404,9 @@ pub fn assemble_read_slice(
 #[cfg(test)]
 mod tests {
     use super::{
-        assemble_read_slice, block_count_for_length, copy_segments, pack_changed_copy_pairs,
-        block_transfer_plan, pack_changed_ranges, pad_block_bytes, parallel_worker_count,
-        parallel_worker_plan, sorted_contiguous_ranges,
+        assemble_read_slice, block_count_for_length, copy_segments, dirty_block_size,
+        pack_changed_copy_pairs, block_transfer_plan, pack_changed_ranges, pad_block_bytes,
+        parallel_worker_count, parallel_worker_plan, sorted_contiguous_ranges,
         read_ahead_blocks, read_fetch_bounds, read_missing_range_worker_count, read_slice_plan,
         write_copy_dedupe_plan, write_copy_plan, write_copy_worker_count,
     };
@@ -519,6 +526,15 @@ mod tests {
         assert_eq!(block_count_for_length(1, 4096, false), 1);
         assert_eq!(block_count_for_length(4096, 4096, false), 1);
         assert_eq!(block_count_for_length(4097, 4096, false), 2);
+    }
+
+    #[test]
+    fn computes_dirty_block_sizes() {
+        assert_eq!(dirty_block_size(0, 0, 4096), 0);
+        assert_eq!(dirty_block_size(1, 0, 4096), 1);
+        assert_eq!(dirty_block_size(4096, 0, 4096), 4096);
+        assert_eq!(dirty_block_size(4100, 1, 4096), 4);
+        assert_eq!(dirty_block_size(8192, 3, 4096), 0);
     }
 
     #[test]

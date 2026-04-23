@@ -3,9 +3,9 @@ use std::slice;
 
 use crate::{
     assemble_read_slice, block_count_for_length, block_transfer_plan, copy_segments, crc32_bytes,
-    pack_changed_ranges, pad_block_bytes, parallel_worker_count, parallel_worker_plan,
-    read_ahead_blocks, read_fetch_bounds, read_missing_range_worker_count, read_slice_plan,
-    sorted_contiguous_ranges, write_copy_plan, write_copy_worker_count,
+    dirty_block_size, pack_changed_ranges, pad_block_bytes, parallel_worker_count,
+    parallel_worker_plan, read_ahead_blocks, read_fetch_bounds, read_missing_range_worker_count,
+    read_slice_plan, sorted_contiguous_ranges, write_copy_plan, write_copy_worker_count,
 };
 
 #[repr(C)]
@@ -469,6 +469,11 @@ pub extern "C" fn dbfs_read_missing_range_worker_count(
 #[unsafe(no_mangle)]
 pub extern "C" fn dbfs_block_count_for_length(length: u64, block_size: u64, minimum_one: u8) -> u64 {
     block_count_for_length(length, block_size, minimum_one != 0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_dirty_block_size(file_size: u64, block_index: u64, block_size: u64) -> u64 {
+    dirty_block_size(file_size, block_index, block_size)
 }
 
 #[unsafe(no_mangle)]

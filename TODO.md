@@ -10,6 +10,7 @@ This document records the small set of open follow-ups plus completed work, clos
 - Keep the Python-orchestrator / Rust-hot-path split as a standing direction, not as an active rewrite backlog.
 - Treat the current copy profile comparison as a frozen baseline; continue the narrow Rust POC for the write/copy hot path, with planner, changed-copy dedupe, changed-run packing, persist padding, and read assembly enabled by default while Python remains the fallback, rather than another round of Python tuning.
 - Start consolidating the small Rust helper surface into shared planners where the same arithmetic is repeated across read and write paths, beginning with a common worker-count planner before adding broader write/read generalizations.
+- Treat namespace mutation cleanup (`unlink`/`rename`/`rmdir`, xattrs, cache invalidation, epoch bumps) as a future Rust repository/backend rewrite if it ever moves out of Python; do not split it into one-off FFI helpers.
 - When schema changes actually hit a limit or compatibility failure, add a concrete migration file plus a regression test instead of widening the schema bootstrap path ad hoc.
 
 ## Target Architecture

@@ -145,6 +145,51 @@ def main() -> None:
         if updated_crc != mutated_crc:
             raise AssertionError((updated_crc, mutated_crc))
 
+        victim_path = f"{dir_path}/victim.bin"
+        move_src_path = f"{dir_path}/move-src.bin"
+        victim_seed_payload = b"seed-" * ((block_size * 2) // 5 + 4)
+        victim_payload = b"victim-" * ((block_size * 2) // 7 + 4)
+        victim_seed_fh = fs.create(victim_path, 0o644)
+        try:
+            written = fs.write(victim_path, victim_seed_payload[: block_size * 2], 0, victim_seed_fh)
+            if written != block_size * 2:
+                raise AssertionError((written, block_size * 2))
+            fs.flush(victim_path, victim_seed_fh)
+        finally:
+            fs.release(victim_path, victim_seed_fh)
+        victim_file_id = fs.get_file_id(victim_path)
+        if victim_file_id is None:
+            raise AssertionError("missing victim file id")
+        with fs.db_connection() as conn, conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM copy_block_crc WHERE id_file = %s", (victim_file_id,))
+            victim_crc_rows_before = int(cur.fetchone()[0])
+        if victim_crc_rows_before != 2:
+            raise AssertionError(victim_crc_rows_before)
+
+        move_src_fh = fs.create(move_src_path, 0o644)
+        try:
+            written = fs.write(move_src_path, victim_payload[: block_size * 2], 0, move_src_fh)
+            if written != block_size * 2:
+                raise AssertionError((written, block_size * 2))
+            fs.flush(move_src_path, move_src_fh)
+        finally:
+            fs.release(move_src_path, move_src_fh)
+        move_src_file_id = fs.get_file_id(move_src_path)
+        if move_src_file_id is None:
+            raise AssertionError("missing move-src file id")
+        with fs.db_connection() as conn, conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM copy_block_crc WHERE id_file = %s", (move_src_file_id,))
+            move_src_crc_rows = int(cur.fetchone()[0])
+        if move_src_crc_rows != 2:
+            raise AssertionError(move_src_crc_rows)
+
+        fs.rename(move_src_path, victim_path)
+        with fs.db_connection() as conn, conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM copy_block_crc WHERE id_file = %s", (victim_file_id,))
+            after_rename_crc_rows = int(cur.fetchone()[0])
+        if after_rename_crc_rows != 0:
+            raise AssertionError(after_rename_crc_rows)
+
         dst_fh = fs.open(dst_path, os.O_WRONLY)
         try:
             copied = fs.copy_file_range(src_path, None, 0, dst_path, dst_fh, 0, len(payload), 0)
@@ -179,6 +224,13 @@ def main() -> None:
             fs.release(dst_path, read_fh)
         if read_back != payload:
             raise AssertionError("copy block crc payload mismatch")
+
+        fs.unlink(dst_path)
+        with fs.db_connection() as conn, conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM copy_block_crc WHERE id_file = %s", (dst_file_id,))
+            after_unlink_crc_rows = int(cur.fetchone()[0])
+        if after_unlink_crc_rows != 0:
+            raise AssertionError(after_unlink_crc_rows)
 
         print(
             "OK copy-block-crc-table "

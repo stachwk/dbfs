@@ -9,6 +9,20 @@ import psycopg2
 
 
 class NamespaceRepositoryDeleteMutations:
+    def _purge_primary_file(self, cur, file_id):
+        cur.execute("DELETE FROM data_blocks WHERE id_file = %s", (file_id,))
+        cur.execute("DELETE FROM copy_block_crc WHERE id_file = %s", (file_id,))
+        cur.execute("DELETE FROM files WHERE id_file = %s", (file_id,))
+        dbfs = self.dbfs
+        dbfs.clear_write_buffer_dirty(file_id)
+        dbfs._clear_path_lock_state(("file", file_id))
+        dbfs.clear_read_cache(file_id)
+
+    def _finish_namespace_mutation(self, include_statfs=True):
+        dbfs = self.dbfs
+        dbfs.touch_namespace_epoch()
+        dbfs.invalidate_metadata_cache(include_statfs=include_statfs)
+
     def unlink(self, path):
         dbfs = self.dbfs
         path = dbfs.normalize_path(path)
@@ -25,8 +39,7 @@ class NamespaceRepositoryDeleteMutations:
                 dbfs.append_journal_event(cur, "unlink", path, file_id=file_id, directory_id=directory_id)
                 cur.execute("DELETE FROM hardlinks WHERE id_hardlink = %s", (entry_id,))
                 conn.commit()
-                dbfs.touch_namespace_epoch()
-                dbfs.invalidate_metadata_cache(include_statfs=True)
+                self._finish_namespace_mutation()
                 return
 
         parent_path = os.path.dirname(path)
@@ -42,11 +55,7 @@ class NamespaceRepositoryDeleteMutations:
                     if promoted is None:
                         raise dbfs.FuseOSError(errno.ENOENT)
                 else:
-                    cur.execute("DELETE FROM data_blocks WHERE id_file = %s", (entry_id,))
-                    cur.execute("DELETE FROM files WHERE id_file = %s", (entry_id,))
-                    dbfs.clear_write_buffer_dirty(entry_id)
-                    dbfs._clear_path_lock_state(("file", entry_id))
-                    dbfs.clear_read_cache(entry_id)
+                    self._purge_primary_file(cur, entry_id)
                 dbfs.delete_path_xattrs(path, cur=cur)
                 if parent_id is not None:
                     cur.execute(
@@ -54,8 +63,7 @@ class NamespaceRepositoryDeleteMutations:
                         (parent_id,),
                     )
                 conn.commit()
-                dbfs.touch_namespace_epoch()
-                dbfs.invalidate_metadata_cache(include_statfs=True)
+                self._finish_namespace_mutation()
                 return
 
         if kind != "symlink":
@@ -72,8 +80,7 @@ class NamespaceRepositoryDeleteMutations:
                 )
             dbfs.append_journal_event(cur, "unlink", path, directory_id=parent_id)
             conn.commit()
-            dbfs.touch_namespace_epoch()
-            dbfs.invalidate_metadata_cache(include_statfs=True)
+            self._finish_namespace_mutation()
 
     def rename(self, old, new):
         dbfs = self.dbfs
@@ -119,10 +126,7 @@ class NamespaceRepositoryDeleteMutations:
                             if promoted is None:
                                 raise dbfs.FuseOSError(errno.ENOENT)
                         else:
-                            cur.execute("DELETE FROM data_blocks WHERE id_file = %s", (target_file_id,))
-                            cur.execute("DELETE FROM files WHERE id_file = %s", (target_file_id,))
-                            dbfs.clear_write_buffer_dirty(target_file_id)
-                            dbfs._clear_path_lock_state(("file", target_file_id))
+                            self._purge_primary_file(cur, target_file_id)
                         dbfs.delete_path_xattrs(new, cur=cur)
                     elif existing_kind == "symlink":
                         cur.execute("DELETE FROM symlinks WHERE id_symlink = %s", (existing_id,))
@@ -199,8 +203,7 @@ class NamespaceRepositoryDeleteMutations:
                         (new_parent_id,),
                     )
                 conn.commit()
-                dbfs.touch_namespace_epoch()
-                dbfs.invalidate_metadata_cache(include_statfs=True)
+                self._finish_namespace_mutation()
             except psycopg2.IntegrityError as exc:
                 conn.rollback()
                 raise dbfs.FuseOSError(errno.EEXIST) from exc
@@ -241,5 +244,4 @@ class NamespaceRepositoryDeleteMutations:
                     (parent_id,),
                 )
             conn.commit()
-            dbfs.touch_namespace_epoch()
-            dbfs.invalidate_metadata_cache(include_statfs=True)
+            self._finish_namespace_mutation()

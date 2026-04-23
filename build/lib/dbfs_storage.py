@@ -540,6 +540,12 @@ class StorageSupport:
             ctypes.c_ubyte,
         ]
         lib.dbfs_block_count_for_length.restype = ctypes.c_uint64
+        lib.dbfs_dirty_block_size.argtypes = [
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+        ]
+        lib.dbfs_dirty_block_size.restype = ctypes.c_uint64
         lib.dbfs_write_copy_worker_count.argtypes = [
             ctypes.c_uint64,
             ctypes.c_uint64,
@@ -726,6 +732,19 @@ class StorageSupport:
         if block_size <= 0 or length <= 0:
             return 1 if minimum_one else 0
         return max(1 if minimum_one else 0, (int(length) + int(block_size) - 1) // int(block_size))
+
+    def _dirty_block_size_rust_ffi(self, file_size, block_index, block_size):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        return int(
+            lib.dbfs_dirty_block_size(
+                ctypes.c_uint64(int(file_size)),
+                ctypes.c_uint64(int(block_index)),
+                ctypes.c_uint64(int(block_size)),
+            )
+        )
 
     def _write_copy_worker_count_rust_ffi(self, total_blocks, workers_write, workers_write_min_blocks):
         plan = self._parallel_worker_plan_rust_ffi(
@@ -1644,6 +1663,9 @@ class StorageSupport:
 
     def _dirty_block_size(self, file_size, block_index):
         block_size = self.owner.block_size
+        size = self._dirty_block_size_rust_ffi(file_size, block_index, block_size)
+        if size is not None:
+            return size
         block_start = block_index * block_size
         block_end = min(int(file_size), block_start + block_size)
         return max(0, block_end - block_start)
