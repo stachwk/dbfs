@@ -1421,6 +1421,70 @@ pub extern "C" fn dbfs_rust_pg_repo_persist_copy_block_crc_rows(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_persist_file_blocks(
+    repo_ptr: *mut DbfsPgRepo,
+    file_id: u64,
+    file_size: u64,
+    block_size: u64,
+    total_blocks: u64,
+    truncate_pending: u8,
+    blocks_ptr: *const DbfsPersistBlockInput,
+    blocks_len: usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        if blocks_len == 0 {
+            let blocks: &[PersistBlockRow<'_>] = &[];
+            return match (*repo_ptr).repo.persist_file_blocks(
+                file_id,
+                file_size,
+                block_size,
+                total_blocks,
+                truncate_pending != 0,
+                blocks,
+            ) {
+                Ok(()) => 0,
+                Err(_) => 3,
+            };
+        }
+        if blocks_ptr.is_null() {
+            return 1;
+        }
+        let blocks = slice::from_raw_parts(blocks_ptr, blocks_len);
+        let mut rows = Vec::with_capacity(blocks.len());
+        for block in blocks {
+            let data = match slice_from_raw(block.ptr, block.len) {
+                Some(slice) => slice,
+                None => return 1,
+            };
+            rows.push(PersistBlockRow {
+                block_index: block.block_index,
+                data,
+                used_len: block.used_len,
+            });
+        }
+        match (*repo_ptr).repo.persist_file_blocks(
+            file_id,
+            file_size,
+            block_size,
+            total_blocks,
+            truncate_pending != 0,
+            &rows,
+        ) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn dbfs_rust_pg_repo_resolve_path(
     repo_ptr: *mut DbfsPgRepo,
     path_ptr: *const u8,

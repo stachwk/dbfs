@@ -1703,6 +1703,33 @@ class StorageSupport:
         for attempt in range(2):
             try:
                 with self.owner.db_connection() as conn, conn.cursor() as cur:
+                    block_rows = []
+                    if not truncate_only:
+                        overlay_blocks = state["overlay_blocks"]
+                        for block_index, used_len in ordered_dirty_plan:
+                            if block_index >= total_blocks:
+                                continue
+
+                            payload = overlay_blocks.get(block_index)
+                            if payload is None:
+                                continue
+
+                        data = self._persist_block_payload(payload, used_len, block_size)
+                        block_rows.append((file_id, block_index, data, used_len))
+
+                    rust_persisted = self.owner.backend.python_to_rust_pg_repo_persist_file_blocks(
+                        file_id,
+                        file_size,
+                        block_size,
+                        total_blocks,
+                        truncate_pending,
+                        block_rows,
+                    )
+                    if rust_persisted:
+                        blocks_written = len(block_rows)
+                        conn.commit()
+                        break
+
                     if truncate_pending:
                         if total_blocks == 0:
                             cur.execute(
@@ -1735,27 +1762,13 @@ class StorageSupport:
                                 (file_id, total_blocks),
                             )
 
-                    if not truncate_only:
-                        overlay_blocks = state["overlay_blocks"]
-                        block_rows = []
-                        for block_index, used_len in ordered_dirty_plan:
-                            if block_index >= total_blocks:
-                                continue
-
-                            payload = overlay_blocks.get(block_index)
-                            if payload is None:
-                                continue
-
-                            data = self._persist_block_payload(payload, used_len, block_size)
-                            block_rows.append((file_id, block_index, data, used_len))
-                            blocks_written += 1
-
-                        if block_rows:
-                            self._persist_block_chunks(
-                                cur,
-                                ((file_id, block_index, data) for file_id, block_index, data, _ in block_rows),
-                            )
-                            self._persist_copy_block_crc_rows(cur, block_rows, block_size)
+                    if not truncate_only and block_rows:
+                        blocks_written = len(block_rows)
+                        self._persist_block_chunks(
+                            cur,
+                            ((file_id, block_index, data) for file_id, block_index, data, _ in block_rows),
+                        )
+                        self._persist_copy_block_crc_rows(cur, block_rows, block_size)
 
                     cur.execute(
                         """

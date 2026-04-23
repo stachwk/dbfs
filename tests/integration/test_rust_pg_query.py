@@ -127,6 +127,27 @@ def main():
                 crc_rows = cur.fetchall()
             assert crc_rows == [(0, zlib.crc32(crc_full) & 0xFFFFFFFF)], crc_rows
 
+            rust_data_plan = backend.python_to_rust_pg_repo_persist_file_blocks(
+                rust_created_file_id,
+                crc_block_size + len(crc_partial),
+                crc_block_size,
+                2,
+                False,
+                [
+                    (rust_created_file_id, 0, crc_full, crc_block_size),
+                    (rust_created_file_id, 1, crc_partial + b"\x00" * (crc_block_size - len(crc_partial)), len(crc_partial)),
+                ],
+            )
+            assert rust_data_plan is True, rust_data_plan
+            with psycopg2.connect(**dsn) as conn, conn.cursor() as cur:
+                cur.execute(
+                    "SELECT _order, data FROM data_blocks WHERE id_file = %s ORDER BY _order",
+                    (rust_created_file_id,),
+                )
+                data_rows = cur.fetchall()
+            assert data_rows[0][0] == 0 and bytes(data_rows[0][1]) == crc_full, data_rows
+            assert data_rows[1][0] == 1 and bytes(data_rows[1][1])[: len(crc_partial)] == crc_partial, data_rows
+
             file_name = f"{namespace_name}/payload.txt"
             file_fh = fs.create(file_name, 0o644)
             file_cleanup_name = file_name

@@ -299,6 +299,17 @@ class PostgresBackend:
             ctypes.c_size_t,
         ]
         lib.dbfs_rust_pg_repo_persist_copy_block_crc_rows.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_persist_file_blocks.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_ubyte,
+            ctypes.POINTER(RustPersistBlockInput),
+            ctypes.c_size_t,
+        ]
+        lib.dbfs_rust_pg_repo_persist_file_blocks.restype = ctypes.c_int
         lib.dbfs_rust_pg_repo_count_file_links.argtypes = [
             ctypes.c_void_p,
             ctypes.c_uint64,
@@ -820,6 +831,45 @@ class PostgresBackend:
             repo,
             int(file_id),
             int(block_size),
+            inputs_array,
+            len(inputs),
+        )
+        if status != 0:
+            return None
+        return True
+
+    def python_to_rust_pg_repo_persist_file_blocks(self, file_id, file_size, block_size, total_blocks, truncate_pending, block_rows):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        payload_buffers = []
+        inputs = []
+        for _, block_index, data, used_len in block_rows:
+            payload = bytes(data)
+            buffer = ctypes.create_string_buffer(payload, len(payload))
+            payload_buffers.append(buffer)
+            inputs.append(
+                RustPersistBlockInput(
+                    block_index=ctypes.c_uint64(int(block_index)),
+                    ptr=ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte)),
+                    len=ctypes.c_size_t(len(payload)),
+                    used_len=ctypes.c_uint64(int(used_len)),
+                )
+            )
+
+        inputs_array = (RustPersistBlockInput * len(inputs))(*inputs) if inputs else None
+        status = lib.dbfs_rust_pg_repo_persist_file_blocks(
+            repo,
+            int(file_id),
+            int(file_size),
+            int(block_size),
+            int(total_blocks),
+            ctypes.c_ubyte(1 if truncate_pending else 0),
             inputs_array,
             len(inputs),
         )
