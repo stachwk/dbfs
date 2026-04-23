@@ -51,7 +51,7 @@ help:
 		'  make install-config-user - install dbfs_config.ini to $$HOME/.config/dbfs/dbfs_config.ini without sudo' \
 		'  make install-mount-helper - install mount.dbfs to $(MOUNT_HELPER_DEST)' \
 		'  make install-root-scripts - install dbfs-bootstrap and mkfs.dbfs to /usr/local/bin' \
-		'  make install-rust-hotpath - build and install libdbfs-2.so plus dbfs-* helper binaries' \
+		'  make install-rust-hotpath - build and install libdbfs-2.so' \
 		'  make install-on-root - install system config, pip package, mount helper, and Rust hot-path artifacts' \
 		'  make install-on-root-venv - create .venv, then run the full root-style install' \
 		'  make pip-build - build a pip wheel into dist/' \
@@ -236,20 +236,15 @@ install-root-scripts: pip-install
 
 install-rust-hotpath:
 	@printf '%s\n' "Building Rust hot-path artifacts"
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib --bin dbfs-copy-plan --bin dbfs-copy-dedupe --bin dbfs-copy-pack --bin dbfs-persist-pad --bin dbfs-read-assemble
-	@printf '%s\n' "Installing libdbfs-2.so plus dbfs-copy-plan, dbfs-copy-dedupe, dbfs-copy-pack, dbfs-persist-pad and dbfs-read-assemble -> /usr/local/bin"
-	sudo install -D -m 0755 rust_hotpath/target/debug/dbfs-copy-plan /usr/local/bin/dbfs-copy-plan
-	sudo install -D -m 0755 rust_hotpath/target/debug/dbfs-copy-dedupe /usr/local/bin/dbfs-copy-dedupe
-	sudo install -D -m 0755 rust_hotpath/target/debug/dbfs-copy-pack /usr/local/bin/dbfs-copy-pack
-	sudo install -D -m 0755 rust_hotpath/target/debug/dbfs-persist-pad /usr/local/bin/dbfs-persist-pad
-	sudo install -D -m 0755 rust_hotpath/target/debug/dbfs-read-assemble /usr/local/bin/dbfs-read-assemble
-	sudo install -D -m 0755 rust_hotpath/target/debug/libdbfs_rust_hotpath.so /usr/local/lib/libdbfs-2.so
+	@$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
+	@printf '%s\n' "Installing libdbfs-2.so -> /usr/local/lib"
+	@sudo install -D -m 0755 rust_hotpath/target/debug/libdbfs_rust_hotpath.so /usr/local/lib/libdbfs-2.so
 
 install-on-root: install-config install-root-scripts install-rust-hotpath install-mount-helper
-	@printf '%s\n' "DBFS installed for root-style use: config, pip package, mount helper, libdbfs-2.so, and Rust hot-path helpers"
+	@printf '%s\n' "DBFS installed for root-style use: config, pip package, mount helper, and libdbfs-2.so"
 
 install-on-root-venv: venv install-on-root
-	@printf '%s\n' "DBFS root-style install ready in $(VENV_DIR): config, pip package, mount helper, libdbfs-2.so, and Rust hot-path helpers"
+	@printf '%s\n' "DBFS root-style install ready in $(VENV_DIR): config, pip package, mount helper, and libdbfs-2.so"
 
 pip-build:
 	PYTHONPATH=$(SYSTEM_SITE_PACKAGES) $(VENV_PYTHON) setup.py bdist_wheel -d dist
