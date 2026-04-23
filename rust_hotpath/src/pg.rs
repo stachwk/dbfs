@@ -528,8 +528,7 @@ impl DbRepo {
             .map(|value| CString::new(value.to_string()).map_err(|_| "parent id contains NUL byte".to_string()))
             .transpose()?;
 
-        unsafe {
-            let conn = connect(&self.conninfo)?;
+        self.with_cached_connection(|conn| unsafe {
             let result = {
                 let sql = if parent_id_text.is_some() {
                     CString::new(
@@ -623,9 +622,8 @@ impl DbRepo {
                     }
                 }
             };
-            PQfinish(conn);
             result
-        }
+        })
     }
 
     pub fn get_hardlink_id(&self, path: &str) -> Result<Option<u64>, String> {
@@ -640,8 +638,7 @@ impl DbRepo {
             .map(|value| CString::new(value.to_string()).map_err(|_| "parent id contains NUL byte".to_string()))
             .transpose()?;
 
-        unsafe {
-            let conn = connect(&self.conninfo)?;
+        self.with_cached_connection(|conn| unsafe {
             let result = {
                 let sql = if parent_id_text.is_some() {
                     CString::new(
@@ -720,9 +717,8 @@ impl DbRepo {
                     }
                 }
             };
-            PQfinish(conn);
             result
-        }
+        })
     }
 
     pub fn get_hardlink_file_id(&self, hardlink_id: u64) -> Result<Option<u64>, String> {
@@ -731,8 +727,7 @@ impl DbRepo {
         let hardlink_id = CString::new(hardlink_id.to_string())
             .map_err(|_| "hardlink id contains NUL byte".to_string())?;
 
-        unsafe {
-            let conn = connect(&self.conninfo)?;
+        self.with_cached_connection(|conn| unsafe {
             let result = {
                 let param_values = [hardlink_id.as_ptr()];
                 let param_lengths = [hardlink_id.as_bytes().len() as c_int];
@@ -775,9 +770,8 @@ impl DbRepo {
                     }
                 }
             };
-            PQfinish(conn);
             result
-        }
+        })
     }
 
     pub fn choose_primary_hardlink(
@@ -890,8 +884,7 @@ impl DbRepo {
         let file_id = CString::new(file_id.to_string())
             .map_err(|_| "file id contains NUL byte".to_string())?;
 
-        unsafe {
-            let conn = connect(&self.conninfo)?;
+        self.with_cached_connection(|conn| unsafe {
             let result = transactional(conn, |conn| {
                 let params = [&file_id];
                 let res = exec_params(conn, &sql_choose, &params)?;
@@ -954,9 +947,8 @@ impl DbRepo {
                 PQclear(res);
                 Ok(true)
             });
-            PQfinish(conn);
             result
-        }
+        })
     }
 
     pub fn create_hardlink(
