@@ -113,18 +113,28 @@ class NamespaceRepositoryCreateMutations:
         if target_parent_path != "/" and self.get_dir_id(target_parent_path) is None:
             raise dbfs.FuseOSError(errno.ENOENT)
 
+        uid, gid = dbfs.current_uid_gid()
+        rust_hardlink_id = dbfs.backend.python_to_rust_namespace_create_hardlink(
+            source_file_id,
+            target_parent_id,
+            target_name,
+            uid,
+            gid,
+        )
+
         with dbfs.db_connection() as conn, conn.cursor() as cur:
             try:
-                uid, gid = dbfs.current_uid_gid()
                 hardlink_ctime = dbfs.ctime_column("hardlinks")
-                cur.execute(
-                    """
-                    INSERT INTO hardlinks (id_file, id_directory, name, uid, gid, {hardlink_ctime}, creation_date, modification_date, access_date)
-                    VALUES (%s, %s, %s, %s, %s, NOW(), NOW(), NOW(), NOW())
-                    RETURNING id_hardlink
-                    """.format(hardlink_ctime=hardlink_ctime),
-                    (source_file_id, target_parent_id, target_name, uid, gid),
-                )
+                if rust_hardlink_id is None:
+                    cur.execute(
+                        """
+                        INSERT INTO hardlinks (id_file, id_directory, name, uid, gid, {hardlink_ctime}, creation_date, modification_date, access_date)
+                        VALUES (%s, %s, %s, %s, %s, NOW(), NOW(), NOW(), NOW())
+                        RETURNING id_hardlink
+                        """.format(hardlink_ctime=hardlink_ctime),
+                        (source_file_id, target_parent_id, target_name, uid, gid),
+                    )
+                    rust_hardlink_id = cur.fetchone()[0]
                 dbfs.append_journal_event(cur, "link", target, file_id=source_file_id, directory_id=target_parent_id)
                 if target_parent_id is not None:
                     cur.execute(
@@ -134,7 +144,7 @@ class NamespaceRepositoryCreateMutations:
                 conn.commit()
                 dbfs.touch_namespace_epoch()
                 dbfs.invalidate_metadata_cache(include_statfs=True)
-                dbfs.logging.debug("link created target=%s source=%s file_id=%s", target, source, source_file_id)
+                dbfs.logging.debug("link created target=%s source=%s file_id=%s hardlink_id=%s", target, source, source_file_id, rust_hardlink_id)
                 return 0
             except psycopg2.IntegrityError as exc:
                 conn.rollback()

@@ -187,6 +187,19 @@ class PostgresBackend:
             ctypes.POINTER(ctypes.c_ubyte),
         ]
         lib.dbfs_rust_pg_repo_get_hardlink_file_id.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_create_hardlink.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_ubyte,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_create_hardlink.restype = ctypes.c_int
         lib.dbfs_rust_pg_repo_choose_primary_hardlink.argtypes = [
             ctypes.c_void_p,
             ctypes.c_uint64,
@@ -487,6 +500,31 @@ class PostgresBackend:
         status = lib.dbfs_rust_pg_repo_get_hardlink_file_id(
             repo,
             int(hardlink_id),
+            ctypes.byref(out_value),
+            ctypes.byref(out_found),
+        )
+        if status != 0 or not out_found.value:
+            return None
+        return int(out_value.value)
+
+    def python_to_rust_namespace_create_hardlink(self, source_file_id, target_parent_id, target_name, uid, gid):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        target_name_bytes = str(target_name).encode("utf-8")
+        lib = self._load_rust_hotpath_lib()
+        out_value = ctypes.c_uint64()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_create_hardlink(
+            repo,
+            int(source_file_id),
+            int(target_parent_id or 0),
+            ctypes.c_ubyte(1 if target_parent_id is not None else 0),
+            target_name_bytes,
+            len(target_name_bytes),
+            ctypes.c_uint32(int(uid)),
+            ctypes.c_uint32(int(gid)),
             ctypes.byref(out_value),
             ctypes.byref(out_found),
         )
