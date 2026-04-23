@@ -8,7 +8,9 @@ This file records the current comparison baselines for the main performance-sens
 - Throughput, finalization, read-cache, and atime numbers are treated as baselines, not fixed promises.
 - `make test-throughput` and `make test-flush-release-profile` are the current write-path and finalization entry points.
 - Additional write-oriented baselines now cover large `copy_file_range()` transfers, large multi-block file writes, and remount durability checks.
-- The current `bulk_write` vs `metadata_heavy` large-copy comparison is the baseline for profile selection; the Rust POC on the write/copy hot path now lives in `rust_hotpath/`, covers the copy planner, changed-copy dedupe, changed-run packing, persist padding, and read assembly, and the helpers are enabled by default while the Python fallback remains available for comparison.
+- The current `bulk_write` vs `metadata_heavy` large-copy comparison is the baseline for profile selection; the Rust hot path now lives in `rust_hotpath/` and is built into `libdbfs-2.so`, covering the copy planner, changed-run packing, persist padding, read assembly, startup config queries, and the first repository lookups/mutations while the Python fallback remains available for comparison.
+- Rust hot-path dedupe remains opt-in and off by default because it can be slower than the Python fallback on repeated-copy workloads.
+- The current write-path boundary in Rust now includes the first repository-side namespace lookups plus hardlink/symlink creation planning; Python still owns orchestration, cache invalidation, and journal append/commit glue.
 - `test-tree-scale` now seeds a unique root per run and cleans it up afterward, so profile comparisons can be rerun on the same seed without duplicate-key conflicts.
 - When a tuning change matters, the repository should record the before/after numbers here and in `TODO.md`.
 - DBFS assumes transactional PostgreSQL connections with `autocommit` disabled; the practical operating floor is PostgreSQL 9.5+, `read committed`, and `max_connections` above `pool_max_connections + 2`.
@@ -139,7 +141,7 @@ Worker parallelism is still block-oriented, so `block_size` changes when a workl
 
 ### Rust Copy Dedupe Benchmark
 
-Observed on a repeated changed-copy workload with the Rust dedupe helper enabled by default:
+Observed on a repeated changed-copy workload with the Rust dedupe helper available as an opt-in path:
 
 - Python fallback
   - `bytes=67108864`
@@ -158,7 +160,7 @@ Observed on a repeated changed-copy workload with the Rust dedupe helper enabled
   - `flush_seconds=1.713539`
   - `finalization_seconds=3.426051`
 
-On this host the Rust dedupe helper did not produce an end-to-end win. The internal changed-copy packing was not enough to offset the total runtime cost, so the Python fallback remains the comparison point even though the Rust helper is enabled by default.
+On this host the Rust dedupe helper did not produce an end-to-end win. The internal changed-copy packing was not enough to offset the total runtime cost, so the Python fallback remains the comparison point and the Rust path stays opt-in.
 
 ### Bulk Write Profile Comparison
 
@@ -264,7 +266,7 @@ Observed on a changed-copy workload with mixed unchanged and changed blocks:
   - `flush_seconds=1.158987`
   - `finalization_seconds=2.316664`
 
-This benchmark did not show a meaningful end-to-end win for the Rust packer on this host. The Rust path was slightly better on the internal persist/flush accounting, but the overall elapsed time stayed effectively flat, so the Python fallback remains the comparison point even though the Rust packer is enabled by default.
+This benchmark did not show a meaningful end-to-end win for the Rust packer on this host. The Rust path was slightly better on the internal persist/flush accounting, but the overall elapsed time stayed effectively flat, so the Python fallback remains the comparison point even though the Rust packer stays enabled by default.
 
 ### PostgreSQL Session Cost
 
