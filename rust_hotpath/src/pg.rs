@@ -791,8 +791,7 @@ impl DbRepo {
         let file_id = CString::new(file_id.to_string())
             .map_err(|_| "file id contains NUL byte".to_string())?;
 
-        unsafe {
-            let conn = connect(&self.conninfo)?;
+        self.with_cached_connection(|conn| unsafe {
             let result = {
                 let param_values = [file_id.as_ptr()];
                 let param_lengths = [file_id.as_bytes().len() as c_int];
@@ -847,9 +846,8 @@ impl DbRepo {
                     }
                 }
             };
-            PQfinish(conn);
             result
-        }
+        })
     }
 
     pub fn promote_hardlink_to_primary(&self, file_id: u64) -> Result<bool, String> {
@@ -985,8 +983,7 @@ impl DbRepo {
         )
         .map_err(|_| "SQL contains NUL byte".to_string())?;
 
-        unsafe {
-            let conn = connect(&self.conninfo)?;
+        self.with_cached_connection(|conn| unsafe {
             let result = {
                 transactional(conn, |conn| {
                     let res = if let Some(parent_id) = target_parent_id {
@@ -1036,9 +1033,8 @@ impl DbRepo {
                     Ok(value)
                 })
             };
-            PQfinish(conn);
             result
-        }
+        })
     }
 
     pub fn create_symlink(
@@ -1076,8 +1072,7 @@ impl DbRepo {
         )
         .map_err(|_| "SQL contains NUL byte".to_string())?;
 
-        unsafe {
-            let conn = connect(&self.conninfo)?;
+        self.with_cached_connection(|conn| unsafe {
             let result = transactional(conn, |conn| {
                 let res = if let Some(parent_id) = target_parent_id {
                     let parent_id = CString::new(parent_id.to_string())
@@ -1119,9 +1114,8 @@ impl DbRepo {
                 }
                 Ok(value)
             });
-            PQfinish(conn);
             result
-        }
+        })
     }
 
     pub fn create_directory(
@@ -1159,8 +1153,7 @@ impl DbRepo {
         )
         .map_err(|_| "SQL contains NUL byte".to_string())?;
 
-        unsafe {
-            let conn = connect(&self.conninfo)?;
+        self.with_cached_connection(|conn| unsafe {
             let result = transactional(conn, |conn| {
                 let res = if let Some(parent_id) = target_parent_id {
                     let parent_id = CString::new(parent_id.to_string())
@@ -1202,9 +1195,8 @@ impl DbRepo {
                 }
                 Ok(value)
             });
-            PQfinish(conn);
             result
-        }
+        })
     }
 
     pub fn create_file(
@@ -1242,8 +1234,7 @@ impl DbRepo {
         )
         .map_err(|_| "SQL contains NUL byte".to_string())?;
 
-        unsafe {
-            let conn = connect(&self.conninfo)?;
+        self.with_cached_connection(|conn| unsafe {
             let result = transactional(conn, |conn| {
                 let res = if let Some(parent_id) = target_parent_id {
                     let parent_id = CString::new(parent_id.to_string())
@@ -1285,9 +1276,8 @@ impl DbRepo {
                 }
                 Ok(value)
             });
-            PQfinish(conn);
             result
-        }
+        })
     }
 
     pub fn create_special_file(
@@ -1338,8 +1328,7 @@ impl DbRepo {
         )
         .map_err(|_| "SQL contains NUL byte".to_string())?;
 
-        unsafe {
-            let conn = connect(&self.conninfo)?;
+        self.with_cached_connection(|conn| unsafe {
             let result = transactional(conn, |conn| {
                 let res = if let Some(parent_id) = target_parent_id {
                     let parent_id = CString::new(parent_id.to_string())
@@ -1396,9 +1385,8 @@ impl DbRepo {
                 }
                 Ok(id_file)
             });
-            PQfinish(conn);
             result
-        }
+        })
     }
 
     pub fn count_file_links(&self, file_id: u64) -> Result<u64, String> {
@@ -1407,8 +1395,7 @@ impl DbRepo {
         let file_id = CString::new(file_id.to_string())
             .map_err(|_| "file id contains NUL byte".to_string())?;
 
-        unsafe {
-            let conn = connect(&self.conninfo)?;
+        self.with_cached_connection(|conn| unsafe {
             let result = {
                 let param_values = [file_id.as_ptr()];
                 let param_lengths = [file_id.as_bytes().len() as c_int];
@@ -1450,9 +1437,8 @@ impl DbRepo {
                     }
                 }
             };
-            PQfinish(conn);
             result
-        }
+        })
     }
 
     pub fn path_has_children(&self, directory_id: u64) -> Result<bool, String> {
@@ -1480,8 +1466,7 @@ impl DbRepo {
         let directory_id = CString::new(directory_id.to_string())
             .map_err(|_| "directory id contains NUL byte".to_string())?;
 
-        unsafe {
-            let conn = connect(&self.conninfo)?;
+        self.with_cached_connection(|conn| unsafe {
             let result = {
                 let param_values = [directory_id.as_ptr()];
                 let param_lengths = [directory_id.as_bytes().len() as c_int];
@@ -1514,9 +1499,8 @@ impl DbRepo {
                     }
                 }
             };
-            PQfinish(conn);
             result
-        }
+        })
     }
 
     pub fn get_symlink_id(&self, path: &str) -> Result<Option<u64>, String> {
@@ -1531,8 +1515,7 @@ impl DbRepo {
             .map(|value| CString::new(value.to_string()).map_err(|_| "parent id contains NUL byte".to_string()))
             .transpose()?;
 
-        unsafe {
-            let conn = connect(&self.conninfo)?;
+        self.with_cached_connection(|conn| unsafe {
             let result = {
                 let sql = if parent_id_text.is_some() {
                     CString::new(
@@ -1611,9 +1594,8 @@ impl DbRepo {
                     }
                 }
             };
-            PQfinish(conn);
             result
-        }
+        })
     }
 
     pub fn resolve_path(&self, path: &str) -> Result<ResolvedPath, String> {
@@ -1693,8 +1675,7 @@ impl DbRepo {
             )
         };
 
-        unsafe {
-            let conn = connect(&self.conninfo)?;
+        self.with_cached_connection(|conn| unsafe {
             let result = {
                 let param_values: Vec<*const c_char> = params.iter().map(|value| value.as_ptr()).collect();
                 let param_lengths: Vec<c_int> = params.iter().map(|value| value.as_bytes().len() as c_int).collect();
@@ -1739,12 +1720,11 @@ impl DbRepo {
                     }
                 }
             };
-            PQfinish(conn);
             result.map(|entry| ResolvedPath {
                 parent_id,
                 kind: entry.as_ref().map(|(kind, _)| kind.clone()),
                 entry_id: entry.map(|(_, entry_id)| entry_id),
             })
-        }
+        })
     }
 }
