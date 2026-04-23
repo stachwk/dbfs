@@ -69,11 +69,12 @@ class DBFS(Operations):
             pool_max_connections=pool_max_connections,
             synchronous_commit=self.synchronous_commit,
         )
+        self._startup_snapshot = self.backend.python_to_rust_pg_startup_snapshot()
         self.pool_max_connections = self.backend.pool_max_connections
         self.connection_pool = self.backend.connection_pool
         self.xattr_acl = XattrAclSupport(self)
         self.default_block_size = 4096
-        self.block_size = self.load_block_size()
+        self.block_size = self.load_block_size(self._startup_snapshot)
         self.default_max_fs_size_bytes = 10 * 1024**3
         self.write_flush_threshold_bytes = self.resolve_write_flush_threshold_bytes()
         self.read_cache_max_blocks = self.resolve_read_cache_max_blocks()
@@ -97,7 +98,7 @@ class DBFS(Operations):
         self.metadata_cache_ttl_seconds = self.resolve_metadata_cache_ttl_seconds()
         self.statfs_cache_ttl_seconds = self.resolve_statfs_cache_ttl_seconds()
         self.requested_role = (role or "auto").lower()
-        self.role = self.resolve_runtime_role(self.requested_role)
+        self.role = self.resolve_runtime_role(self.requested_role, self._startup_snapshot)
         self.read_only = self.role == "replica"
         self.lock_backend = self.resolve_lock_backend()
         self.lock_lease_ttl_seconds = self.resolve_lock_lease_ttl_seconds()
@@ -149,11 +150,11 @@ class DBFS(Operations):
         self.logging = logging
         self.FuseOSError = FuseOSError
         self.repository = NamespaceRepository(self)
-        if not self.backend.schema_is_initialized():
+        if not self.schema_is_initialized(self._startup_snapshot):
             raise RuntimeError(
                 "DBFS schema is not initialized. Run `make init` first, or restore the schema-admin secret and rerun init/upgrade."
             )
-        schema_version = self.backend.schema_version()
+        schema_version = self.schema_version(self._startup_snapshot)
         if schema_version != SCHEMA_VERSION:
             raise RuntimeError(
                 f"DBFS schema version mismatch: database has {schema_version}, code expects {SCHEMA_VERSION}. "
@@ -680,11 +681,14 @@ class DBFS(Operations):
     def _describe_conflicting_lock(self, state, requested_type):
         return self.locking._describe_conflicting_lock(state, requested_type)
 
-    def resolve_runtime_role(self, requested_role):
+    def resolve_runtime_role(self, requested_role, startup_snapshot=None):
         if requested_role in {"primary", "replica"}:
             return requested_role
 
         try:
+            snapshot = startup_snapshot or getattr(self, "_startup_snapshot", None)
+            if snapshot and snapshot.get("is_in_recovery") is not None:
+                return "replica" if snapshot.get("is_in_recovery") else "primary"
             return "replica" if self.backend.is_in_recovery() else "primary"
         except Exception as exc:
             logging.warning("Unable to detect DBFS role from PostgreSQL; defaulting to primary: %s", exc)
@@ -946,12 +950,56 @@ class DBFS(Operations):
     def get_config_value(self, key, default=None):
         return self.backend.get_config_value(key, default)
 
-    def load_block_size(self):
+    def load_block_size(self, startup_snapshot=None):
+        snapshot = startup_snapshot or getattr(self, "_startup_snapshot", None)
+        if snapshot and snapshot.get("block_size_found"):
+            try:
+                return max(1, int(snapshot.get("block_size", self.default_block_size)))
+            except Exception:
+                return self.default_block_size
         try:
             block_size = self.get_config_value("block_size", self.default_block_size)
             return max(1, int(block_size))
         except Exception:
             return self.default_block_size
+
+    def schema_version(self, startup_snapshot=None):
+        snapshot = startup_snapshot or getattr(self, "_startup_snapshot", None)
+        if snapshot and snapshot.get("schema_version_found"):
+            try:
+                return int(snapshot.get("schema_version"))
+            except Exception:
+                pass
+
+        rust_value = self.backend.schema_version()
+        if rust_value is not None:
+            return rust_value
+
+        with self.connection() as conn, conn.cursor() as cur:
+            cur.execute("SELECT version FROM schema_version ORDER BY applied_at DESC LIMIT 1")
+            result = cur.fetchone()
+            return int(result[0]) if result else None
+
+    def schema_is_initialized(self, startup_snapshot=None):
+        snapshot = startup_snapshot or getattr(self, "_startup_snapshot", None)
+        if snapshot and snapshot.get("schema_is_initialized") is not None:
+            return bool(snapshot.get("schema_is_initialized"))
+
+        rust_value = self.backend.schema_is_initialized()
+        if rust_value is not None:
+            return rust_value
+
+        with self.connection() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    to_regclass('public.directories') IS NOT NULL
+                    AND to_regclass('public.files') IS NOT NULL
+                    AND to_regclass('public.schema_version') IS NOT NULL
+                """
+            )
+            result = cur.fetchone()
+            return bool(result[0]) if result else False
 
     def get_file_id(self, path):
         return self.repository.get_file_id(path)

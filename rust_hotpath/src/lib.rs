@@ -1,5 +1,6 @@
 use std::sync::OnceLock;
 
+pub mod pg;
 pub mod ffi;
 
 fn crc32_table() -> &'static [u32; 256] {

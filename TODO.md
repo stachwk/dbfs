@@ -13,6 +13,27 @@ This document records the small set of open follow-ups plus completed work, clos
 - Treat namespace mutation cleanup (`unlink`/`rename`/`rmdir`, xattrs, cache invalidation, epoch bumps) as a future Rust repository/backend rewrite if it ever moves out of Python; do not split it into one-off FFI helpers.
 - When schema changes actually hit a limit or compatibility failure, add a concrete migration file plus a regression test instead of widening the schema bootstrap path ad hoc.
 
+## Extent Engine Direction
+
+- Keep the logical filesystem model at 4 KiB blocks for now.
+- Make Rust the owner of the extent and overlay engine.
+- Move PostgreSQL away from storing thousands of 4 KiB blocks directly and toward dynamic extents.
+- Move SQL/query execution from Python into Rust so the persistence path becomes Python -> Rust -> PostgreSQL, not Python -> PostgreSQL directly.
+- Keep Python as the orchestration layer for FUSE callbacks, reconnect retries, ACL, journal, and runtime config.
+- Capture the next architectural step explicitly:
+  - `logical_block_size = 4k`
+  - `persist model = extents`
+  - `persist extent classes = 4k..4MiB`
+  - `payload stores only used bytes`
+  - `Rust returns PersistPlan`
+  - `Python executes transaction`
+- Next concrete step:
+  - prove a minimal Rust repository/query boundary with one scalar PostgreSQL query path (`Python -> Rust -> PostgreSQL`) before moving broader SQL ownership,
+  - write a small extent-engine proof of concept with a new `data_extents` table,
+  - implement one simple write/read path for extents without full merge/split logic,
+  - benchmark `4k`, `64k`, `1M`, `4M`, and `copy_file_range`,
+  - only then migrate `truncate`, `copy`, `flush/release`, workers, and the old `data_blocks` layout.
+
 ## Target Architecture
 
 ### Warstwa 1 - Python zostaje jako orchestrator

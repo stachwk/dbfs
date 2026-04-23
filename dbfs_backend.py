@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import ctypes
 import os
-from contextlib import contextmanager
 from collections.abc import Mapping
+from contextlib import contextmanager
+from pathlib import Path
 
 import psycopg2
 import psycopg2.pool
+from psycopg2.extensions import make_dsn
 
 from dbfs_config import load_config_parser
 from dbfs_pg_tls import resolve_pg_connection_params
@@ -42,6 +45,514 @@ class PostgresBackend:
             self.connection_pool = psycopg2.pool.ThreadedConnectionPool(1, self.pool_max_connections, **self.dsn)
         else:
             self.connection_pool = psycopg2.pool.ThreadedConnectionPool(1, self.pool_max_connections, self.dsn)
+        self._rust_pg_repo_handle = None
+
+    def rust_hotpath_lib_path(self):
+        raw_value = os.environ.get("DBFS_RUST_HOTPATH_LIB")
+        candidates = []
+        if raw_value:
+            candidates.append(Path(raw_value))
+        candidates.extend(
+            [
+                Path("/usr/local/lib/libdbfs-2.so"),
+                Path("/usr/local/lib/libdbfs_rust_hotpath.so"),
+                Path(__file__).resolve().parent / "rust_hotpath" / "target" / "debug" / "libdbfs_rust_hotpath.so",
+                Path(__file__).resolve().parent / "rust_hotpath" / "target" / "release" / "libdbfs_rust_hotpath.so",
+            ]
+        )
+        for candidate in candidates:
+            if candidate.is_file():
+                return str(candidate)
+        return None
+
+    def _load_rust_hotpath_lib(self):
+        cached = getattr(self, "_rust_hotpath_lib_handle", None)
+        if cached is not None:
+            return cached
+
+        lib_path = self.rust_hotpath_lib_path()
+        if lib_path is None:
+            return None
+
+        try:
+            lib = ctypes.CDLL(lib_path)
+        except OSError:
+            return None
+
+        lib.dbfs_pg_query_scalar_text.argtypes = [
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_ubyte)),
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        lib.dbfs_pg_query_scalar_text.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_new.argtypes = [
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_void_p),
+        ]
+        lib.dbfs_rust_pg_repo_new.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_free.argtypes = [ctypes.c_void_p]
+        lib.dbfs_rust_pg_repo_free.restype = None
+        lib.dbfs_rust_pg_repo_query_scalar_text.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_ubyte)),
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        lib.dbfs_rust_pg_repo_query_scalar_text.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_get_config_value.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_ubyte)),
+            ctypes.POINTER(ctypes.c_size_t),
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_get_config_value.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_is_in_recovery.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_is_in_recovery.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_schema_version.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_uint32),
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_schema_version.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_schema_is_initialized.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_schema_is_initialized.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_bootstrap_snapshot.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_uint32),
+            ctypes.POINTER(ctypes.c_ubyte),
+            ctypes.POINTER(ctypes.c_ubyte),
+            ctypes.POINTER(ctypes.c_uint32),
+            ctypes.POINTER(ctypes.c_ubyte),
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_bootstrap_snapshot.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_get_dir_id.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_get_dir_id.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_get_file_id.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_get_file_id.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_get_file_mode_value.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_ubyte)),
+            ctypes.POINTER(ctypes.c_size_t),
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_get_file_mode_value.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_get_hardlink_id.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_get_hardlink_id.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_get_symlink_id.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_get_symlink_id.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_get_hardlink_file_id.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_get_hardlink_file_id.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_count_file_links.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_count_file_links.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_path_has_children.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_path_has_children.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_resolve_path.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_ubyte),
+            ctypes.POINTER(ctypes.c_ubyte),
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_resolve_path.restype = ctypes.c_int
+        lib.dbfs_free_bytes.argtypes = [ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t]
+        lib.dbfs_free_bytes.restype = None
+
+        self._rust_hotpath_lib_handle = lib
+        return lib
+
+    def _load_rust_pg_repo(self):
+        cached = getattr(self, "_rust_pg_repo_handle", None)
+        if cached is not None:
+            return cached
+
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        conninfo = self._dsn_conninfo_string().encode("utf-8")
+        repo = ctypes.c_void_p()
+        status = lib.dbfs_rust_pg_repo_new(conninfo, len(conninfo), ctypes.byref(repo))
+        if status != 0 or not repo.value:
+            return None
+
+        self._rust_pg_repo_handle = repo
+        return repo
+
+    def _dsn_conninfo_string(self):
+        if isinstance(self.dsn, Mapping):
+            return make_dsn("", **self.dsn)
+        return str(self.dsn)
+
+    def python_to_rust_pg_query_scalar_text(self, sql):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        sql_bytes = sql.encode("utf-8")
+        out_ptr = ctypes.POINTER(ctypes.c_ubyte)()
+        out_len = ctypes.c_size_t()
+        lib = self._load_rust_hotpath_lib()
+        status = lib.dbfs_rust_pg_repo_query_scalar_text(
+            repo,
+            sql_bytes,
+            len(sql_bytes),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+        )
+        if status != 0 or not out_ptr:
+            return None
+
+        try:
+            return ctypes.string_at(out_ptr, out_len.value).decode("utf-8").strip()
+        finally:
+            lib.dbfs_free_bytes(out_ptr, out_len)
+
+    def python_to_rust_pg_get_config_value(self, key):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        key_bytes = str(key).encode("utf-8")
+        out_ptr = ctypes.POINTER(ctypes.c_ubyte)()
+        out_len = ctypes.c_size_t()
+        out_found = ctypes.c_ubyte()
+        lib = self._load_rust_hotpath_lib()
+        status = lib.dbfs_rust_pg_repo_get_config_value(
+            repo,
+            key_bytes,
+            len(key_bytes),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+            ctypes.byref(out_found),
+        )
+        if status != 0 or not out_found.value:
+            return None
+
+        try:
+            return ctypes.string_at(out_ptr, out_len.value).decode("utf-8")
+        finally:
+            lib.dbfs_free_bytes(out_ptr, out_len)
+
+    def python_to_rust_pg_is_in_recovery(self):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        lib = self._load_rust_hotpath_lib()
+        out_value = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_is_in_recovery(repo, ctypes.byref(out_value))
+        if status != 0:
+            return None
+        return bool(out_value.value)
+
+    def python_to_rust_pg_schema_version(self):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        lib = self._load_rust_hotpath_lib()
+        out_value = ctypes.c_uint32()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_schema_version(repo, ctypes.byref(out_value), ctypes.byref(out_found))
+        if status != 0 or not out_found.value:
+            return None
+        return int(out_value.value)
+
+    def python_to_rust_pg_schema_is_initialized(self):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        lib = self._load_rust_hotpath_lib()
+        out_value = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_schema_is_initialized(repo, ctypes.byref(out_value))
+        if status != 0:
+            return None
+        return bool(out_value.value)
+
+    def python_to_rust_pg_startup_snapshot(self):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        lib = self._load_rust_hotpath_lib()
+        out_block_size = ctypes.c_uint32()
+        out_block_size_found = ctypes.c_ubyte()
+        out_is_in_recovery = ctypes.c_ubyte()
+        out_schema_version = ctypes.c_uint32()
+        out_schema_version_found = ctypes.c_ubyte()
+        out_schema_is_initialized = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_bootstrap_snapshot(
+            repo,
+            ctypes.byref(out_block_size),
+            ctypes.byref(out_block_size_found),
+            ctypes.byref(out_is_in_recovery),
+            ctypes.byref(out_schema_version),
+            ctypes.byref(out_schema_version_found),
+            ctypes.byref(out_schema_is_initialized),
+        )
+        if status != 0:
+            return None
+        return {
+            "block_size": int(out_block_size.value),
+            "block_size_found": bool(out_block_size_found.value),
+            "is_in_recovery": bool(out_is_in_recovery.value),
+            "schema_version": int(out_schema_version.value),
+            "schema_version_found": bool(out_schema_version_found.value),
+            "schema_is_initialized": bool(out_schema_is_initialized.value),
+        }
+
+    def python_to_rust_namespace_get_dir_id(self, path):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        path_bytes = str(path).encode("utf-8")
+        lib = self._load_rust_hotpath_lib()
+        out_value = ctypes.c_uint64()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_get_dir_id(
+            repo,
+            path_bytes,
+            len(path_bytes),
+            ctypes.byref(out_value),
+            ctypes.byref(out_found),
+        )
+        if status != 0 or not out_found.value:
+            return None
+        return int(out_value.value)
+
+    def python_to_rust_namespace_get_file_id(self, path):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        path_bytes = str(path).encode("utf-8")
+        lib = self._load_rust_hotpath_lib()
+        out_value = ctypes.c_uint64()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_get_file_id(
+            repo,
+            path_bytes,
+            len(path_bytes),
+            ctypes.byref(out_value),
+            ctypes.byref(out_found),
+        )
+        if status != 0 or not out_found.value:
+            return None
+        return int(out_value.value)
+
+    def python_to_rust_namespace_get_file_mode_value(self, path):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        path_bytes = str(path).encode("utf-8")
+        lib = self._load_rust_hotpath_lib()
+        out_ptr = ctypes.POINTER(ctypes.c_ubyte)()
+        out_len = ctypes.c_size_t()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_get_file_mode_value(
+            repo,
+            path_bytes,
+            len(path_bytes),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+            ctypes.byref(out_found),
+        )
+        if status != 0 or not out_found.value:
+            return None
+
+        try:
+            return ctypes.string_at(out_ptr, out_len.value).decode("utf-8")
+        finally:
+            lib.dbfs_free_bytes(out_ptr, out_len)
+
+    def python_to_rust_namespace_get_hardlink_id(self, path):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        path_bytes = str(path).encode("utf-8")
+        lib = self._load_rust_hotpath_lib()
+        out_value = ctypes.c_uint64()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_get_hardlink_id(
+            repo,
+            path_bytes,
+            len(path_bytes),
+            ctypes.byref(out_value),
+            ctypes.byref(out_found),
+        )
+        if status != 0 or not out_found.value:
+            return None
+        return int(out_value.value)
+
+    def python_to_rust_namespace_get_symlink_id(self, path):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        path_bytes = str(path).encode("utf-8")
+        lib = self._load_rust_hotpath_lib()
+        out_value = ctypes.c_uint64()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_get_symlink_id(
+            repo,
+            path_bytes,
+            len(path_bytes),
+            ctypes.byref(out_value),
+            ctypes.byref(out_found),
+        )
+        if status != 0 or not out_found.value:
+            return None
+        return int(out_value.value)
+
+    def python_to_rust_namespace_get_hardlink_file_id(self, hardlink_id):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        lib = self._load_rust_hotpath_lib()
+        out_value = ctypes.c_uint64()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_get_hardlink_file_id(
+            repo,
+            int(hardlink_id),
+            ctypes.byref(out_value),
+            ctypes.byref(out_found),
+        )
+        if status != 0 or not out_found.value:
+            return None
+        return int(out_value.value)
+
+    def python_to_rust_namespace_count_file_links(self, file_id):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        lib = self._load_rust_hotpath_lib()
+        out_value = ctypes.c_uint64()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_count_file_links(
+            repo,
+            int(file_id),
+            ctypes.byref(out_value),
+            ctypes.byref(out_found),
+        )
+        if status != 0 or not out_found.value:
+            return None
+        return int(out_value.value)
+
+    def python_to_rust_storage_path_has_children(self, directory_id):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        lib = self._load_rust_hotpath_lib()
+        out_value = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_path_has_children(
+            repo,
+            int(directory_id),
+            ctypes.byref(out_value),
+        )
+        if status != 0:
+            return None
+        return bool(out_value.value)
+
+    def python_to_rust_namespace_resolve_path(self, path):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        path_bytes = str(path).encode("utf-8")
+        lib = self._load_rust_hotpath_lib()
+        out_parent_id = ctypes.c_uint64()
+        out_parent_found = ctypes.c_ubyte()
+        out_kind = ctypes.c_ubyte()
+        out_entry_id = ctypes.c_uint64()
+        out_entry_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_resolve_path(
+            repo,
+            path_bytes,
+            len(path_bytes),
+            ctypes.byref(out_parent_id),
+            ctypes.byref(out_parent_found),
+            ctypes.byref(out_kind),
+            ctypes.byref(out_entry_id),
+            ctypes.byref(out_entry_found),
+        )
+        if status != 0:
+            return None
+        kind_map = {
+            0: None,
+            1: "hardlink",
+            2: "symlink",
+            3: "file",
+            4: "dir",
+        }
+        return (
+            int(out_parent_id.value) if out_parent_found.value else None,
+            kind_map.get(int(out_kind.value)),
+            int(out_entry_id.value) if out_entry_found.value else None,
+        )
 
     def resolve_pool_max_connections(self, pool_max_connections):
         try:
@@ -106,6 +617,14 @@ class PostgresBackend:
                 self.connection_pool.putconn(raw_conn)
 
     def close(self):
+        lib = getattr(self, "_rust_hotpath_lib_handle", None)
+        repo = getattr(self, "_rust_pg_repo_handle", None)
+        if lib is not None and repo is not None:
+            try:
+                lib.dbfs_rust_pg_repo_free(repo)
+            except Exception:
+                pass
+        self._rust_pg_repo_handle = None
         self.connection_pool.closeall()
         self._session_initialized_connection_ids.clear()
 
@@ -123,18 +642,40 @@ class PostgresBackend:
             pass
 
     def get_config_value(self, key, default=None):
+        rust_value = self.python_to_rust_pg_get_config_value(key)
+        if rust_value is not None:
+            return rust_value
+
         with self.connection() as conn, conn.cursor() as cur:
             cur.execute("SELECT value FROM config WHERE key = %s", (key,))
             result = cur.fetchone()
             return result[0] if result else default
 
     def is_in_recovery(self):
+        rust_value = self.python_to_rust_pg_is_in_recovery()
+        if rust_value is not None:
+            return rust_value
+
         with self.connection() as conn, conn.cursor() as cur:
             cur.execute("SELECT pg_is_in_recovery()")
             result = cur.fetchone()
             return bool(result[0]) if result else False
 
+    def schema_version(self):
+        rust_value = self.python_to_rust_pg_schema_version()
+        if rust_value is not None:
+            return rust_value
+
+        with self.connection() as conn, conn.cursor() as cur:
+            cur.execute("SELECT version FROM schema_version ORDER BY applied_at DESC LIMIT 1")
+            result = cur.fetchone()
+            return int(result[0]) if result else None
+
     def schema_is_initialized(self):
+        rust_value = self.python_to_rust_pg_schema_is_initialized()
+        if rust_value is not None:
+            return rust_value
+
         with self.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 """
@@ -146,9 +687,3 @@ class PostgresBackend:
             )
             result = cur.fetchone()
             return bool(result[0]) if result else False
-
-    def schema_version(self):
-        with self.connection() as conn, conn.cursor() as cur:
-            cur.execute("SELECT version FROM schema_version ORDER BY applied_at DESC LIMIT 1")
-            result = cur.fetchone()
-            return int(result[0]) if result else None

@@ -161,7 +161,7 @@ class StorageSupport:
         if not missing:
             return []
 
-        stepped = self._sorted_contiguous_ranges_rust_ffi(missing)
+        stepped = self.python_to_rust_hotpath_sorted_contiguous_ranges(missing)
         if stepped is not None:
             return stepped
 
@@ -220,7 +220,7 @@ class StorageSupport:
             workers_read_min_blocks = max(1, int(getattr(self.owner, "workers_read_min_blocks", 8) or 8))
             contiguous_ranges = self._missing_block_ranges(missing)
 
-            plan = self._read_missing_range_worker_plan_rust_ffi(
+            plan = self.python_to_rust_hotpath_read_missing_range_worker_plan(
                 workers_read,
                 workers_read_min_blocks,
                 len(missing),
@@ -289,7 +289,7 @@ class StorageSupport:
         stale_rows = []
         for file_id, block_index, data, used_len in block_rows:
             if used_len >= block_size:
-                crc_value = self._crc32_rust_ffi(data)
+                crc_value = self.python_to_rust_hotpath_crc32(data)
                 if crc_value is None:
                     crc_value = binascii.crc32(bytes(data)) & 0xFFFFFFFF
                 crc_rows.append((file_id, block_index, crc_value))
@@ -319,10 +319,10 @@ class StorageSupport:
                 (file_id, block_index),
             )
 
-    def rust_hotpath_persist_pad_enabled(self):
+    def python_to_rust_hotpath_persist_pad_enabled(self):
         return bool(getattr(self.owner, "rust_hotpath_persist_pad", True))
 
-    def rust_hotpath_persist_pad_bin_path(self):
+    def python_to_rust_hotpath_persist_pad_bin_path(self):
         raw_value = os.environ.get("DBFS_RUST_HOTPATH_PERSIST_PAD_BIN")
         candidates = []
         if raw_value:
@@ -342,10 +342,10 @@ class StorageSupport:
                 return str(candidate)
         return None
 
-    def rust_hotpath_read_assemble_enabled(self):
+    def python_to_rust_hotpath_read_assemble_enabled(self):
         return bool(getattr(self.owner, "rust_hotpath_read_assemble", True))
 
-    def rust_hotpath_read_assemble_bin_path(self):
+    def python_to_rust_hotpath_read_assemble_bin_path(self):
         raw_value = os.environ.get("DBFS_RUST_HOTPATH_READ_ASSEMBLE_BIN")
         candidates = []
         if raw_value:
@@ -597,7 +597,7 @@ class StorageSupport:
         self._rust_hotpath_lib_handle = lib
         return lib
 
-    def _read_sequence_step_rust_ffi(self, previous, offset):
+    def python_to_rust_hotpath_read_sequence_step(self, previous, offset):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
             return None
@@ -613,7 +613,7 @@ class StorageSupport:
         )
         return bool(result.sequential), int(result.streak)
 
-    def _read_ahead_blocks_rust_ffi(self, read_ahead_blocks, sequential_read_ahead_blocks, streak, read_cache_limit_blocks, sequential):
+    def python_to_rust_hotpath_read_ahead_blocks(self, read_ahead_blocks, sequential_read_ahead_blocks, streak, read_cache_limit_blocks, sequential):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
             return None
@@ -628,7 +628,7 @@ class StorageSupport:
             )
         )
 
-    def _read_fetch_bounds_rust_ffi(self, total_blocks, requested_first, requested_last, sequential, streak):
+    def python_to_rust_hotpath_read_fetch_bounds(self, total_blocks, requested_first, requested_last, sequential, streak):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
             return None
@@ -650,7 +650,7 @@ class StorageSupport:
             return None
         return int(out.fetch_first), int(out.fetch_last)
 
-    def _read_slice_plan_rust_ffi(self, file_size, offset, size, block_size, sequential, streak):
+    def python_to_rust_hotpath_read_slice_plan(self, file_size, offset, size, block_size, sequential, streak):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
             return None
@@ -673,7 +673,7 @@ class StorageSupport:
             return None
         return int(out.total_blocks), int(out.fetch_first), int(out.fetch_last)
 
-    def _block_transfer_plan_rust_ffi(self, length, block_size, requested_workers, workers_min_blocks, minimum_one):
+    def python_to_rust_hotpath_block_transfer_plan(self, length, block_size, requested_workers, workers_min_blocks, minimum_one):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
             return None
@@ -687,14 +687,14 @@ class StorageSupport:
         )
         return int(result.total_blocks), bool(result.parallel), int(result.workers)
 
-    def _block_transfer_total_blocks_rust_ffi(self, length, block_size, minimum_one):
-        plan = self._block_transfer_plan_rust_ffi(length, block_size, 1, 1, minimum_one)
+    def python_to_rust_hotpath_block_transfer_total_blocks(self, length, block_size, minimum_one):
+        plan = self.python_to_rust_hotpath_block_transfer_plan(length, block_size, 1, 1, minimum_one)
         if plan is None:
             return None
         return int(plan[0])
 
-    def _read_missing_range_worker_count_rust_ffi(self, workers_read, workers_read_min_blocks, missing_len, contiguous_ranges_len):
-        plan = self._parallel_worker_plan_rust_ffi(
+    def python_to_rust_hotpath_read_missing_range_worker_count(self, workers_read, workers_read_min_blocks, missing_len, contiguous_ranges_len):
+        plan = self.python_to_rust_hotpath_parallel_worker_plan(
             workers_read,
             workers_read_min_blocks,
             missing_len,
@@ -704,15 +704,15 @@ class StorageSupport:
             return None
         return plan[1]
 
-    def _read_missing_range_worker_plan_rust_ffi(self, workers_read, workers_read_min_blocks, missing_len, contiguous_ranges_len):
-        return self._parallel_worker_plan_rust_ffi(
+    def python_to_rust_hotpath_read_missing_range_worker_plan(self, workers_read, workers_read_min_blocks, missing_len, contiguous_ranges_len):
+        return self.python_to_rust_hotpath_parallel_worker_plan(
             workers_read,
             workers_read_min_blocks,
             missing_len,
             contiguous_ranges_len,
         )
 
-    def _block_count_for_length_rust_ffi(self, length, block_size, minimum_one):
+    def python_to_rust_hotpath_block_count_for_length(self, length, block_size, minimum_one):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
             return None
@@ -726,14 +726,14 @@ class StorageSupport:
         )
 
     def _block_count_for_length(self, length, block_size, minimum_one):
-        count = self._block_count_for_length_rust_ffi(length, block_size, minimum_one)
+        count = self.python_to_rust_hotpath_block_count_for_length(length, block_size, minimum_one)
         if count is not None:
             return count
         if block_size <= 0 or length <= 0:
             return 1 if minimum_one else 0
         return max(1 if minimum_one else 0, (int(length) + int(block_size) - 1) // int(block_size))
 
-    def _dirty_block_size_rust_ffi(self, file_size, block_index, block_size):
+    def python_to_rust_hotpath_dirty_block_size(self, file_size, block_index, block_size):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
             return None
@@ -746,8 +746,8 @@ class StorageSupport:
             )
         )
 
-    def _write_copy_worker_count_rust_ffi(self, total_blocks, workers_write, workers_write_min_blocks):
-        plan = self._parallel_worker_plan_rust_ffi(
+    def python_to_rust_hotpath_write_copy_worker_count(self, total_blocks, workers_write, workers_write_min_blocks):
+        plan = self.python_to_rust_hotpath_parallel_worker_plan(
             workers_write,
             workers_write_min_blocks,
             total_blocks,
@@ -757,15 +757,15 @@ class StorageSupport:
             return None
         return plan[1]
 
-    def _write_copy_worker_plan_rust_ffi(self, total_blocks, workers_write, workers_write_min_blocks):
-        return self._parallel_worker_plan_rust_ffi(
+    def python_to_rust_hotpath_write_copy_worker_plan(self, total_blocks, workers_write, workers_write_min_blocks):
+        return self.python_to_rust_hotpath_parallel_worker_plan(
             workers_write,
             workers_write_min_blocks,
             total_blocks,
             total_blocks,
         )
 
-    def _write_copy_plan_rust_ffi(self, length, block_size, workers_write, workers_write_min_blocks):
+    def python_to_rust_hotpath_write_copy_plan(self, length, block_size, workers_write, workers_write_min_blocks):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
             return None
@@ -791,7 +791,7 @@ class StorageSupport:
         )
 
     def _block_transfer_plan(self, length, block_size, requested_workers, workers_min_blocks, minimum_one):
-        plan = self._block_transfer_plan_rust_ffi(
+        plan = self.python_to_rust_hotpath_block_transfer_plan(
             length,
             block_size,
             requested_workers,
@@ -813,7 +813,7 @@ class StorageSupport:
 
     def _write_transfer_plan(self, length, block_size, workers_write, workers_write_min_blocks):
         base_plan = self._block_transfer_plan(length, block_size, workers_write, workers_write_min_blocks, True)
-        plan = self._write_copy_plan_rust_ffi(length, block_size, workers_write, workers_write_min_blocks)
+        plan = self.python_to_rust_hotpath_write_copy_plan(length, block_size, workers_write, workers_write_min_blocks)
         if plan is None:
             total_blocks = base_plan.total_blocks
             skip_unchanged_blocks = bool(getattr(self.owner, "copy_dedupe_enabled", False))
@@ -839,7 +839,7 @@ class StorageSupport:
             self._copy_dedupe_crc_table_enabled(),
         )
 
-    def _parallel_worker_count_rust_ffi(self, requested_workers, minimum_items_for_parallel, total_items, parallel_groups):
+    def python_to_rust_hotpath_parallel_worker_count(self, requested_workers, minimum_items_for_parallel, total_items, parallel_groups):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
             return None
@@ -853,7 +853,7 @@ class StorageSupport:
             )
         )
 
-    def _parallel_worker_plan_rust_ffi(self, requested_workers, minimum_items_for_parallel, total_items, parallel_groups):
+    def python_to_rust_hotpath_parallel_worker_plan(self, requested_workers, minimum_items_for_parallel, total_items, parallel_groups):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
             return None
@@ -866,7 +866,7 @@ class StorageSupport:
         )
         return bool(result.parallel), int(result.workers)
 
-    def _sorted_contiguous_ranges_rust_ffi(self, values):
+    def python_to_rust_hotpath_sorted_contiguous_ranges(self, values):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
             return None
@@ -893,7 +893,7 @@ class StorageSupport:
         finally:
             lib.dbfs_free_ranges(out_ptr, out_len)
 
-    def _dirty_block_ranges_plan_rust_ffi(self, file_size, block_size, dirty_blocks):
+    def python_to_rust_hotpath_dirty_block_ranges_plan(self, file_size, block_size, dirty_blocks):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
             return None
@@ -922,7 +922,7 @@ class StorageSupport:
         finally:
             lib.dbfs_free_ranges(out_ptr, out_len)
 
-    def _copy_segments_rust_ffi(self, off_in, off_out, length, block_size, workers):
+    def python_to_rust_hotpath_copy_segments(self, off_in, off_out, length, block_size, workers):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
             return None
@@ -957,7 +957,7 @@ class StorageSupport:
         buffer = ctypes.create_string_buffer(data, len(data))
         return buffer, ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte))
 
-    def _crc32_rust_ffi(self, data):
+    def python_to_rust_hotpath_crc32(self, data):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
             return None
@@ -969,7 +969,7 @@ class StorageSupport:
         buffer = ctypes.create_string_buffer(data, len(data))
         return int(lib.dbfs_crc32(ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte)), len(data)))
 
-    def _persist_block_payload_rust_ffi(self, payload, used_len, block_size):
+    def python_to_rust_hotpath_persist_block_payload(self, payload, used_len, block_size):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
             return None
@@ -994,7 +994,7 @@ class StorageSupport:
         finally:
             lib.dbfs_free_bytes(out_ptr, out_len)
 
-    def _assemble_blocks_rust_ffi(self, file_id, first_block, last_block):
+    def python_to_rust_hotpath_assemble_blocks(self, file_id, first_block, last_block):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
             return None
@@ -1034,7 +1034,7 @@ class StorageSupport:
         finally:
             lib.dbfs_free_bytes(out_ptr, out_len)
 
-    def _pack_changed_copy_ranges_rust_ffi(self, dst_offset, total_len, block_size, changed_mask):
+    def python_to_rust_hotpath_pack_changed_copy_ranges(self, dst_offset, total_len, block_size, changed_mask):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
             return None
@@ -1061,7 +1061,7 @@ class StorageSupport:
         finally:
             lib.dbfs_free_ranges(out_ptr, out_len)
 
-    def _copy_dedupe_rust_ffi(self, dst_offset, payload, block_size, current_bytes):
+    def python_to_rust_hotpath_copy_dedupe(self, dst_offset, payload, block_size, current_bytes):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
             return None
@@ -1090,12 +1090,12 @@ class StorageSupport:
             lib.dbfs_free_ranges(out_ptr, out_len)
 
     def _persist_block_payload(self, payload, used_len, block_size):
-        if self.rust_hotpath_persist_pad_enabled():
-            ffi_result = self._persist_block_payload_rust_ffi(payload, used_len, block_size)
+        if self.python_to_rust_hotpath_persist_pad_enabled():
+            ffi_result = self.python_to_rust_hotpath_persist_block_payload(payload, used_len, block_size)
             if ffi_result is not None and len(ffi_result) == max(1, int(block_size)):
                 return ffi_result
 
-            helper = self.rust_hotpath_persist_pad_bin_path()
+            helper = self.python_to_rust_hotpath_persist_pad_bin_path()
             if helper is not None:
                 try:
                     completed = subprocess.run(
@@ -1142,7 +1142,7 @@ class StorageSupport:
                 continue
 
         current = self._read_copy_destination_chunk(file_id, block_index * self.owner.block_size, self.owner.block_size)
-        crc_value = self._crc32_rust_ffi(current)
+        crc_value = self.python_to_rust_hotpath_crc32(current)
         if crc_value is None:
             crc_value = binascii.crc32(bytes(current)) & 0xFFFFFFFF
         conn = None
@@ -1170,12 +1170,12 @@ class StorageSupport:
     def _assemble_blocks(self, file_id, first_block, last_block):
         block_size = self.owner.block_size
         block_map = self._fetch_block_range(file_id, first_block, last_block)
-        if self.rust_hotpath_read_assemble_enabled():
-            ffi_result = self._assemble_blocks_rust_ffi(file_id, first_block, last_block)
+        if self.python_to_rust_hotpath_read_assemble_enabled():
+            ffi_result = self.python_to_rust_hotpath_assemble_blocks(file_id, first_block, last_block)
             if ffi_result is not None:
                 return ffi_result
 
-            helper = self.rust_hotpath_read_assemble_bin_path()
+            helper = self.python_to_rust_hotpath_read_assemble_bin_path()
             if helper is not None:
                 try:
                     input_data = "\n".join(
@@ -1210,7 +1210,7 @@ class StorageSupport:
     def _record_read_sequence(self, file_id, offset, end_offset):
         with self.owner._read_sequence_guard:
             previous = self.owner._read_sequence_state.get(file_id)
-            stepped = self._read_sequence_step_rust_ffi(previous, offset)
+            stepped = self.python_to_rust_hotpath_read_sequence_step(previous, offset)
             if stepped is None:
                 sequential = bool(previous and previous.get("last_end") == offset)
                 streak = (int(previous.get("streak", 0)) + 1) if sequential and previous else 0
@@ -1234,7 +1234,7 @@ class StorageSupport:
         block_size = self.owner.block_size
         sequential, streak = self._record_read_sequence(file_id, offset, end_offset)
 
-        plan = self._read_slice_plan_rust_ffi(file_size, offset, size, block_size, sequential, streak)
+        plan = self.python_to_rust_hotpath_read_slice_plan(file_size, offset, size, block_size, sequential, streak)
         if plan is None:
             total_blocks = self._block_transfer_plan(file_size, block_size, 1, 1, False).total_blocks
             if total_blocks == 0:
@@ -1242,7 +1242,7 @@ class StorageSupport:
 
             requested_first = offset // block_size
             requested_last = max(requested_first, (end_offset - 1) // block_size)
-            stepped = self._read_fetch_bounds_rust_ffi(total_blocks, requested_first, requested_last, sequential, streak)
+            stepped = self.python_to_rust_hotpath_read_fetch_bounds(total_blocks, requested_first, requested_last, sequential, streak)
             if stepped is None:
                 if total_blocks <= self.small_file_threshold_blocks():
                     fetch_first = 0
@@ -1250,7 +1250,7 @@ class StorageSupport:
                 else:
                     fetch_first = requested_first
                     read_ahead_blocks = self.read_ahead_blocks()
-                    stepped_read_ahead = self._read_ahead_blocks_rust_ffi(
+                    stepped_read_ahead = self.python_to_rust_hotpath_read_ahead_blocks(
                         read_ahead_blocks,
                         self.sequential_read_ahead_blocks(),
                         streak,
@@ -1277,8 +1277,8 @@ class StorageSupport:
 
         block_map = self._fetch_block_range(file_id, fetch_first, fetch_last)
 
-        if self.rust_hotpath_read_assemble_enabled():
-            helper = self.rust_hotpath_read_assemble_bin_path()
+        if self.python_to_rust_hotpath_read_assemble_enabled():
+            helper = self.python_to_rust_hotpath_read_assemble_bin_path()
             if helper is not None:
                 try:
                     input_data = "\n".join(
@@ -1318,6 +1318,10 @@ class StorageSupport:
         return raw[start_offset:end_offset_in_raw]
 
     def path_has_children(self, directory_id):
+        rust_value = self.owner.backend.python_to_rust_storage_path_has_children(directory_id)
+        if rust_value is not None:
+            return rust_value
+
         with self.owner.db_connection() as conn, conn.cursor() as cur:
             cur.execute(
                 """
@@ -1459,10 +1463,10 @@ class StorageSupport:
 
         file_size = int(state["file_size"])
         block_size = self.owner.block_size
-        plan = self._dirty_block_ranges_plan_rust_ffi(file_size, block_size, dirty_blocks)
+        plan = self.python_to_rust_hotpath_dirty_block_ranges_plan(file_size, block_size, dirty_blocks)
         if plan is None:
             total_blocks = self._block_transfer_plan(file_size, block_size, 1, 1, False).total_blocks
-            ordered_dirty_ranges = self._sorted_contiguous_ranges_rust_ffi(dirty_blocks)
+            ordered_dirty_ranges = self.python_to_rust_hotpath_sorted_contiguous_ranges(dirty_blocks)
             if ordered_dirty_ranges is None:
                 ordered_dirty_ranges = []
                 ordered_dirty_blocks = sorted(dirty_blocks)
@@ -1663,7 +1667,7 @@ class StorageSupport:
 
     def _dirty_block_size(self, file_size, block_index):
         block_size = self.owner.block_size
-        size = self._dirty_block_size_rust_ffi(file_size, block_index, block_size)
+        size = self.python_to_rust_hotpath_dirty_block_size(file_size, block_index, block_size)
         if size is not None:
             return size
         block_start = block_index * block_size
@@ -1815,14 +1819,14 @@ class StorageSupport:
         if length <= 0:
             return []
 
-        if self.rust_hotpath_copy_plan_enabled():
-            segments = self._copy_segments_rust_ffi(
+        if self.python_to_rust_hotpath_copy_plan_enabled():
+            segments = self.python_to_rust_hotpath_copy_segments(
                 off_in, off_out, length, block_size, workers
             )
             if segments is not None:
                 return segments
 
-            helper = self.rust_hotpath_copy_plan_bin_path()
+            helper = self.python_to_rust_hotpath_copy_plan_bin_path()
             if helper is not None:
                 try:
                     completed = subprocess.run(
@@ -1867,10 +1871,10 @@ class StorageSupport:
 
         return segments
 
-    def rust_hotpath_copy_plan_enabled(self):
+    def python_to_rust_hotpath_copy_plan_enabled(self):
         return bool(getattr(self.owner, "rust_hotpath_copy_plan", False))
 
-    def rust_hotpath_copy_plan_bin_path(self):
+    def python_to_rust_hotpath_copy_plan_bin_path(self):
         raw_value = os.environ.get("DBFS_RUST_HOTPATH_COPY_PLAN_BIN")
         candidates = []
         if raw_value:
@@ -1896,10 +1900,10 @@ class StorageSupport:
             current += b"\x00" * (length - len(current))
         return current
 
-    def rust_hotpath_copy_pack_enabled(self):
+    def python_to_rust_hotpath_copy_pack_enabled(self):
         return bool(getattr(self.owner, "rust_hotpath_copy_pack", False))
 
-    def rust_hotpath_copy_pack_bin_path(self):
+    def python_to_rust_hotpath_copy_pack_bin_path(self):
         raw_value = os.environ.get("DBFS_RUST_HOTPATH_COPY_PACK_BIN")
         candidates = []
         if raw_value:
@@ -1919,10 +1923,10 @@ class StorageSupport:
                 return str(candidate)
         return None
 
-    def rust_hotpath_copy_dedupe_enabled(self):
+    def python_to_rust_hotpath_copy_dedupe_enabled(self):
         return bool(getattr(self.owner, "rust_hotpath_copy_dedupe", False))
 
-    def rust_hotpath_copy_dedupe_bin_path(self):
+    def python_to_rust_hotpath_copy_dedupe_bin_path(self):
         raw_value = os.environ.get("DBFS_RUST_HOTPATH_COPY_DEDUPE_BIN")
         candidates = []
         if raw_value:
@@ -1943,14 +1947,14 @@ class StorageSupport:
         return None
 
     def _pack_changed_copy_ranges(self, dst_offset, total_len, block_size, changed_mask):
-        if self.rust_hotpath_copy_pack_enabled():
-            ffi_result = self._pack_changed_copy_ranges_rust_ffi(
+        if self.python_to_rust_hotpath_copy_pack_enabled():
+            ffi_result = self.python_to_rust_hotpath_pack_changed_copy_ranges(
                 dst_offset, total_len, block_size, changed_mask
             )
             if ffi_result is not None:
                 return ffi_result
 
-            helper = self.rust_hotpath_copy_pack_bin_path()
+            helper = self.python_to_rust_hotpath_copy_pack_bin_path()
             if helper is not None:
                 mask_arg = ",".join("1" if changed else "0" for changed in changed_mask)
                 try:
@@ -2012,8 +2016,8 @@ class StorageSupport:
         total_blocks = plan.total_blocks
         dedupe_enabled = plan.dedupe_enabled
 
-        if dedupe_enabled and self.rust_hotpath_copy_dedupe_enabled():
-            ffi_ranges = self._copy_dedupe_rust_ffi(
+        if dedupe_enabled and self.python_to_rust_hotpath_copy_dedupe_enabled():
+            ffi_ranges = self.python_to_rust_hotpath_copy_dedupe(
                 dst_offset,
                 payload,
                 block_size,
@@ -2037,7 +2041,7 @@ class StorageSupport:
                     bytes_written += rel_end - rel_start
                 return bytes_written
 
-            helper = self.rust_hotpath_copy_dedupe_bin_path()
+            helper = self.python_to_rust_hotpath_copy_dedupe_bin_path()
             if helper is not None:
                 try:
                     input_lines = []
@@ -2088,7 +2092,7 @@ class StorageSupport:
             dst_chunk_offset = dst_offset + rel_offset
             block_index = dst_chunk_offset // block_size
             if dedupe_enabled and use_crc_table and len(chunk) == block_size and block_index not in dirty_blocks:
-                source_crc = self._crc32_rust_ffi(chunk)
+                source_crc = self.python_to_rust_hotpath_crc32(chunk)
                 if source_crc is None:
                     source_crc = binascii.crc32(bytes(chunk)) & 0xFFFFFFFF
                 dest_crc = self._copy_block_crc(dst_file_id, block_index)

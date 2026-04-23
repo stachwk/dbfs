@@ -4,8 +4,9 @@ use std::slice;
 use crate::{
     assemble_read_slice, block_count_for_length, block_transfer_plan, copy_segments, crc32_bytes,
     dirty_block_size, pack_changed_ranges, pad_block_bytes, parallel_worker_count,
-    parallel_worker_plan, read_ahead_blocks, read_fetch_bounds, read_missing_range_worker_count,
-    read_slice_plan, sorted_contiguous_ranges, write_copy_plan, write_copy_worker_count,
+    parallel_worker_plan, pg::DbRepo, read_ahead_blocks, read_fetch_bounds,
+    read_missing_range_worker_count, read_slice_plan, sorted_contiguous_ranges, write_copy_plan,
+    write_copy_worker_count,
 };
 
 #[repr(C)]
@@ -51,6 +52,38 @@ pub struct DbfsReadSlicePlan {
     pub total_blocks: u64,
     pub fetch_first: u64,
     pub fetch_last: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct DbfsTextQueryResult {
+    pub found: u8,
+}
+
+#[repr(C)]
+pub struct DbfsPgRepo {
+    pub repo: DbRepo,
+}
+
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct DbfsPgBootstrapSnapshot {
+    pub block_size: u32,
+    pub block_size_found: u8,
+    pub is_in_recovery: u8,
+    pub schema_version: u32,
+    pub schema_version_found: u8,
+    pub schema_is_initialized: u8,
+}
+
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct DbfsPgResolvedPath {
+    pub parent_id: u64,
+    pub parent_found: u8,
+    pub kind: u8,
+    pub entry_id: u64,
+    pub entry_found: u8,
 }
 
 #[repr(C)]
@@ -277,6 +310,757 @@ pub extern "C" fn dbfs_read_assemble(
             &parsed_blocks,
         );
         write_boxed_output(output, out_ptr, out_len)
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_new(
+    conninfo_ptr: *const u8,
+    conninfo_len: usize,
+    out_repo: *mut *mut DbfsPgRepo,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if out_repo.is_null() {
+            return 1;
+        }
+        let conninfo = match slice_from_raw(conninfo_ptr, conninfo_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let conninfo = match std::str::from_utf8(conninfo) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        let repo = match DbRepo::new(conninfo) {
+            Ok(repo) => repo,
+            Err(_) => return 3,
+        };
+        let boxed = Box::new(DbfsPgRepo { repo });
+        *out_repo = Box::into_raw(boxed);
+        0
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_free(repo_ptr: *mut DbfsPgRepo) {
+    if repo_ptr.is_null() {
+        return;
+    }
+    unsafe {
+        let _ = Box::from_raw(repo_ptr);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_query_scalar_text(
+    repo_ptr: *mut DbfsPgRepo,
+    sql_ptr: *const u8,
+    sql_len: usize,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let sql = match slice_from_raw(sql_ptr, sql_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let sql = match std::str::from_utf8(sql) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        let value = match (*repo_ptr).repo.query_scalar_text(sql) {
+            Ok(value) => value.into_bytes(),
+            Err(_) => return 3,
+        };
+        write_boxed_output(value, out_ptr, out_len)
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_get_config_value(
+    repo_ptr: *mut DbfsPgRepo,
+    key_ptr: *const u8,
+    key_len: usize,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+    out_found: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_found.is_null() {
+            return 1;
+        }
+        let key = match slice_from_raw(key_ptr, key_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let key = match std::str::from_utf8(key) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.query_config_value(key) {
+            Ok(Some(value)) => {
+                *out_found = 1;
+                write_boxed_output(value.into_bytes(), out_ptr, out_len)
+            }
+            Ok(None) => {
+                *out_found = 0;
+                if !out_ptr.is_null() {
+                    *out_ptr = std::ptr::null_mut();
+                }
+                if !out_len.is_null() {
+                    *out_len = 0;
+                }
+                0
+            }
+            Err(_) => {
+                *out_found = 0;
+                3
+            }
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_is_in_recovery(
+    repo_ptr: *mut DbfsPgRepo,
+    out_value: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_value.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.is_in_recovery() {
+            Ok(value) => {
+                *out_value = if value { 1 } else { 0 };
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_schema_version(
+    repo_ptr: *mut DbfsPgRepo,
+    out_value: *mut u32,
+    out_found: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_value.is_null() || out_found.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.schema_version() {
+            Ok(Some(value)) => {
+                *out_value = value;
+                *out_found = 1;
+                0
+            }
+            Ok(None) => {
+                *out_found = 0;
+                0
+            }
+            Err(_) => {
+                *out_found = 0;
+                3
+            }
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_schema_is_initialized(
+    repo_ptr: *mut DbfsPgRepo,
+    out_value: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_value.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.schema_is_initialized() {
+            Ok(value) => {
+                *out_value = if value { 1 } else { 0 };
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_bootstrap_snapshot(
+    repo_ptr: *mut DbfsPgRepo,
+    out_block_size: *mut u32,
+    out_block_size_found: *mut u8,
+    out_is_in_recovery: *mut u8,
+    out_schema_version: *mut u32,
+    out_schema_version_found: *mut u8,
+    out_schema_is_initialized: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null()
+            || out_block_size.is_null()
+            || out_block_size_found.is_null()
+            || out_is_in_recovery.is_null()
+            || out_schema_version.is_null()
+            || out_schema_version_found.is_null()
+            || out_schema_is_initialized.is_null()
+        {
+            return 1;
+        }
+        match (*repo_ptr).repo.startup_snapshot() {
+            Ok(snapshot) => {
+                *out_block_size = snapshot.block_size.unwrap_or(0);
+                *out_block_size_found = if snapshot.block_size.is_some() { 1 } else { 0 };
+                *out_is_in_recovery = if snapshot.is_in_recovery { 1 } else { 0 };
+                *out_schema_version = snapshot.schema_version.unwrap_or(0);
+                *out_schema_version_found = if snapshot.schema_version.is_some() { 1 } else { 0 };
+                *out_schema_is_initialized = if snapshot.schema_is_initialized { 1 } else { 0 };
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_get_dir_id(
+    repo_ptr: *mut DbfsPgRepo,
+    path_ptr: *const u8,
+    path_len: usize,
+    out_value: *mut u64,
+    out_found: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_found.is_null() {
+            return 1;
+        }
+        let path = match slice_from_raw(path_ptr, path_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let path = match std::str::from_utf8(path) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.get_dir_id(path) {
+            Ok(Some(value)) => {
+                if !out_value.is_null() {
+                    *out_value = value;
+                }
+                *out_found = 1;
+                0
+            }
+            Ok(None) => {
+                *out_found = 0;
+                if !out_value.is_null() {
+                    *out_value = 0;
+                }
+                0
+            }
+            Err(_) => {
+                *out_found = 0;
+                3
+            }
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_get_file_id(
+    repo_ptr: *mut DbfsPgRepo,
+    path_ptr: *const u8,
+    path_len: usize,
+    out_value: *mut u64,
+    out_found: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_found.is_null() {
+            return 1;
+        }
+        let path = match slice_from_raw(path_ptr, path_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let path = match std::str::from_utf8(path) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.get_file_id(path) {
+            Ok(Some(value)) => {
+                if !out_value.is_null() {
+                    *out_value = value;
+                }
+                *out_found = 1;
+                0
+            }
+            Ok(None) => {
+                *out_found = 0;
+                if !out_value.is_null() {
+                    *out_value = 0;
+                }
+                0
+            }
+            Err(_) => {
+                *out_found = 0;
+                3
+            }
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_count_file_links(
+    repo_ptr: *mut DbfsPgRepo,
+    file_id: u64,
+    out_value: *mut u64,
+    out_found: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_found.is_null() || out_value.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.count_file_links(file_id) {
+            Ok(value) => {
+                *out_value = value;
+                *out_found = 1;
+                0
+            }
+            Err(_) => {
+                *out_found = 0;
+                3
+            }
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_path_has_children(
+    repo_ptr: *mut DbfsPgRepo,
+    directory_id: u64,
+    out_value: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_value.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.path_has_children(directory_id) {
+            Ok(value) => {
+                *out_value = if value { 1 } else { 0 };
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_get_file_mode_value(
+    repo_ptr: *mut DbfsPgRepo,
+    path_ptr: *const u8,
+    path_len: usize,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+    out_found: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_found.is_null() {
+            return 1;
+        }
+        let path = match slice_from_raw(path_ptr, path_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let path = match std::str::from_utf8(path) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.get_file_mode_value(path) {
+            Ok(Some(value)) => {
+                *out_found = 1;
+                write_boxed_output(value.into_bytes(), out_ptr, out_len)
+            }
+            Ok(None) => {
+                *out_found = 0;
+                if !out_ptr.is_null() {
+                    *out_ptr = std::ptr::null_mut();
+                }
+                if !out_len.is_null() {
+                    *out_len = 0;
+                }
+                0
+            }
+            Err(_) => {
+                *out_found = 0;
+                3
+            }
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_get_hardlink_id(
+    repo_ptr: *mut DbfsPgRepo,
+    path_ptr: *const u8,
+    path_len: usize,
+    out_value: *mut u64,
+    out_found: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_found.is_null() {
+            return 1;
+        }
+        let path = match slice_from_raw(path_ptr, path_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let path = match std::str::from_utf8(path) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.get_hardlink_id(path) {
+            Ok(Some(value)) => {
+                if out_value.is_null() {
+                    return 1;
+                }
+                *out_value = value;
+                *out_found = 1;
+                0
+            }
+            Ok(None) => {
+                *out_found = 0;
+                0
+            }
+            Err(_) => {
+                *out_found = 0;
+                3
+            }
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_get_symlink_id(
+    repo_ptr: *mut DbfsPgRepo,
+    path_ptr: *const u8,
+    path_len: usize,
+    out_value: *mut u64,
+    out_found: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_found.is_null() {
+            return 1;
+        }
+        let path = match slice_from_raw(path_ptr, path_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let path = match std::str::from_utf8(path) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.get_symlink_id(path) {
+            Ok(Some(value)) => {
+                if out_value.is_null() {
+                    return 1;
+                }
+                *out_value = value;
+                *out_found = 1;
+                0
+            }
+            Ok(None) => {
+                *out_found = 0;
+                0
+            }
+            Err(_) => {
+                *out_found = 0;
+                3
+            }
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_get_hardlink_file_id(
+    repo_ptr: *mut DbfsPgRepo,
+    hardlink_id: u64,
+    out_value: *mut u64,
+    out_found: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_found.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.get_hardlink_file_id(hardlink_id) {
+            Ok(Some(value)) => {
+                if out_value.is_null() {
+                    return 1;
+                }
+                *out_value = value;
+                *out_found = 1;
+                0
+            }
+            Ok(None) => {
+                *out_found = 0;
+                0
+            }
+            Err(_) => {
+                *out_found = 0;
+                3
+            }
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_resolve_path(
+    repo_ptr: *mut DbfsPgRepo,
+    path_ptr: *const u8,
+    path_len: usize,
+    out_parent_id: *mut u64,
+    out_parent_found: *mut u8,
+    out_kind: *mut u8,
+    out_entry_id: *mut u64,
+    out_entry_found: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null()
+            || out_parent_found.is_null()
+            || out_kind.is_null()
+            || out_entry_found.is_null()
+        {
+            return 1;
+        }
+        let path = match slice_from_raw(path_ptr, path_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let path = match std::str::from_utf8(path) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.resolve_path(path) {
+            Ok(resolved) => {
+                if let Some(parent_id) = resolved.parent_id {
+                    if !out_parent_id.is_null() {
+                        *out_parent_id = parent_id;
+                    }
+                    *out_parent_found = 1;
+                } else {
+                    if !out_parent_id.is_null() {
+                        *out_parent_id = 0;
+                    }
+                    *out_parent_found = 0;
+                }
+                *out_kind = match resolved.kind.as_deref() {
+                    Some("hardlink") => 1,
+                    Some("symlink") => 2,
+                    Some("file") => 3,
+                    Some("dir") => 4,
+                    _ => 0,
+                };
+                if let Some(entry_id) = resolved.entry_id {
+                    if !out_entry_id.is_null() {
+                        *out_entry_id = entry_id;
+                    }
+                    *out_entry_found = 1;
+                } else {
+                    if !out_entry_id.is_null() {
+                        *out_entry_id = 0;
+                    }
+                    *out_entry_found = 0;
+                }
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_pg_query_scalar_text(
+    conninfo_ptr: *const u8,
+    conninfo_len: usize,
+    sql_ptr: *const u8,
+    sql_len: usize,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        let conninfo = match slice_from_raw(conninfo_ptr, conninfo_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let sql = match slice_from_raw(sql_ptr, sql_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let conninfo = match std::str::from_utf8(conninfo) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        let sql = match std::str::from_utf8(sql) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        let repo = match DbRepo::new(conninfo) {
+            Ok(repo) => repo,
+            Err(_) => return 3,
+        };
+        let value = match repo.query_scalar_text(sql) {
+            Ok(value) => value.into_bytes(),
+            Err(_) => return 3,
+        };
+        write_boxed_output(value, out_ptr, out_len)
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_pg_get_config_value(
+    conninfo_ptr: *const u8,
+    conninfo_len: usize,
+    key_ptr: *const u8,
+    key_len: usize,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+    out_found: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if out_found.is_null() {
+            return 1;
+        }
+        let conninfo = match slice_from_raw(conninfo_ptr, conninfo_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let key = match slice_from_raw(key_ptr, key_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let conninfo = match std::str::from_utf8(conninfo) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        let key = match std::str::from_utf8(key) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        let repo = match DbRepo::new(conninfo) {
+            Ok(repo) => repo,
+            Err(_) => return 3,
+        };
+        match repo.query_config_value(key) {
+            Ok(Some(value)) => {
+                *out_found = 1;
+                write_boxed_output(value.into_bytes(), out_ptr, out_len)
+            }
+            Ok(None) => {
+                *out_found = 0;
+                if !out_ptr.is_null() {
+                    *out_ptr = std::ptr::null_mut();
+                }
+                if !out_len.is_null() {
+                    *out_len = 0;
+                }
+                0
+            }
+            Err(_) => {
+                *out_found = 0;
+                3
+            }
+        }
     });
 
     match result {

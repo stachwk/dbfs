@@ -37,6 +37,11 @@ class NamespaceRepositoryLookup:
         if path in self._dir_id_cache:
             return self._dir_id_cache[path]
 
+        rust_value = dbfs.backend.python_to_rust_namespace_get_dir_id(path)
+        if rust_value is not None:
+            self._dir_id_cache[path] = rust_value
+            return rust_value
+
         with dbfs.db_connection() as conn, conn.cursor() as cur:
             cur.execute(
                 """
@@ -73,6 +78,12 @@ class NamespaceRepositoryLookup:
         self._refresh_lookup_cache()
         if path in self._entry_cache:
             return self._entry_cache[path]
+
+        rust_value = dbfs.backend.python_to_rust_namespace_resolve_path(path)
+        if rust_value is not None:
+            value = rust_value
+            self._entry_cache[path] = value
+            return value
 
         parent_path = os.path.dirname(path)
         name = os.path.basename(path)
@@ -144,6 +155,11 @@ class NamespaceRepositoryLookup:
         if path in self._file_id_cache:
             return self._file_id_cache[path]
 
+        rust_value = dbfs.backend.python_to_rust_namespace_get_file_id(path)
+        if rust_value is not None:
+            self._file_id_cache[path] = rust_value
+            return rust_value
+
         parent_path = os.path.dirname(path)
         file_name = os.path.basename(path)
         parent_id = self.get_dir_id(parent_path)
@@ -187,6 +203,11 @@ class NamespaceRepositoryLookup:
         self._refresh_lookup_cache()
         if path in self._file_mode_cache:
             return self._file_mode_cache[path]
+
+        rust_value = dbfs.backend.python_to_rust_namespace_get_file_mode_value(path)
+        if rust_value is not None:
+            self._file_mode_cache[path] = rust_value
+            return rust_value
 
         parent_path = os.path.dirname(path)
         file_name = os.path.basename(path)
@@ -232,6 +253,11 @@ class NamespaceRepositoryLookup:
         if path in self._hardlink_id_cache:
             return self._hardlink_id_cache[path]
 
+        rust_value = dbfs.backend.python_to_rust_namespace_get_hardlink_id(path)
+        if rust_value is not None:
+            self._hardlink_id_cache[path] = rust_value
+            return rust_value
+
         parent_path = os.path.dirname(path)
         link_name = os.path.basename(path)
         parent_id = self.get_dir_id(parent_path)
@@ -255,6 +281,10 @@ class NamespaceRepositoryLookup:
 
     def get_hardlink_file_id(self, hardlink_id):
         dbfs = self.dbfs
+        rust_value = dbfs.backend.python_to_rust_namespace_get_hardlink_file_id(hardlink_id)
+        if rust_value is not None:
+            return rust_value
+
         with dbfs.db_connection() as conn, conn.cursor() as cur:
             cur.execute("SELECT id_file FROM hardlinks WHERE id_hardlink = %s", (hardlink_id,))
             result = cur.fetchone()
@@ -266,6 +296,11 @@ class NamespaceRepositoryLookup:
         self._refresh_lookup_cache()
         if path in self._symlink_id_cache:
             return self._symlink_id_cache[path]
+
+        rust_value = dbfs.backend.python_to_rust_namespace_get_symlink_id(path)
+        if rust_value is not None:
+            self._symlink_id_cache[path] = rust_value
+            return rust_value
 
         parent_path = os.path.dirname(path)
         link_name = os.path.basename(path)
@@ -307,6 +342,10 @@ class NamespaceRepositoryLookup:
 
     def count_file_links(self, file_id):
         dbfs = self.dbfs
+        rust_value = dbfs.backend.python_to_rust_namespace_count_file_links(file_id)
+        if rust_value is not None:
+            return rust_value
+
         with dbfs.db_connection() as conn, conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM hardlinks WHERE id_file = %s", (file_id,))
             return 1 + cur.fetchone()[0]
