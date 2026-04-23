@@ -113,6 +113,23 @@ class DbfsPersistBlockPlanEntry(ctypes.Structure):
     ]
 
 
+class DbfsPersistBlockInput(ctypes.Structure):
+    _fields_ = [
+        ("block_index", ctypes.c_uint64),
+        ("ptr", ctypes.POINTER(ctypes.c_ubyte)),
+        ("len", ctypes.c_size_t),
+        ("used_len", ctypes.c_uint64),
+    ]
+
+
+class DbfsPersistCrcPlanEntry(ctypes.Structure):
+    _fields_ = [
+        ("block_index", ctypes.c_uint64),
+        ("has_crc", ctypes.c_ubyte),
+        ("crc32", ctypes.c_uint32),
+    ]
+
+
 class DbfsWriteTransferPlan:
     __slots__ = ("total_blocks", "dedupe_enabled", "parallel", "workers", "use_crc_table")
 
@@ -654,11 +671,24 @@ class StorageSupport:
             ctypes.POINTER(ctypes.c_size_t),
         ]
         lib.dbfs_persist_block_plan.restype = ctypes.c_int
+        lib.dbfs_persist_block_crc_plan.argtypes = [
+            ctypes.c_uint64,
+            ctypes.POINTER(DbfsPersistBlockInput),
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.POINTER(DbfsPersistCrcPlanEntry)),
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        lib.dbfs_persist_block_crc_plan.restype = ctypes.c_int
         lib.dbfs_free_persist_blocks.argtypes = [
             ctypes.POINTER(DbfsPersistBlockPlanEntry),
             ctypes.c_size_t,
         ]
         lib.dbfs_free_persist_blocks.restype = None
+        lib.dbfs_free_persist_crc_rows.argtypes = [
+            ctypes.POINTER(DbfsPersistCrcPlanEntry),
+            ctypes.c_size_t,
+        ]
+        lib.dbfs_free_persist_crc_rows.restype = None
 
         self._rust_hotpath_lib_handle = lib
         return lib
@@ -1054,6 +1084,55 @@ class StorageSupport:
             return int(out_total_blocks.value), bool(out_truncate_only.value), blocks
         finally:
             lib.dbfs_free_persist_blocks(out_ptr, out_len)
+
+    def python_to_rust_hotpath_persist_block_crc_plan(self, block_size, block_rows):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        if not block_rows:
+            return []
+
+        payload_buffers = []
+        inputs = []
+        for block_index, data, used_len in block_rows:
+            payload = bytes(data)
+            buffer = ctypes.create_string_buffer(payload, len(payload))
+            payload_buffers.append(buffer)
+            inputs.append(
+                DbfsPersistBlockInput(
+                    block_index=ctypes.c_uint64(int(block_index)),
+                    ptr=ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte)),
+                    len=ctypes.c_size_t(len(payload)),
+                    used_len=ctypes.c_uint64(int(used_len)),
+                )
+            )
+
+        inputs_array = (DbfsPersistBlockInput * len(inputs))(*inputs)
+        out_ptr = ctypes.POINTER(DbfsPersistCrcPlanEntry)()
+        out_len = ctypes.c_size_t()
+
+        rc = lib.dbfs_persist_block_crc_plan(
+            ctypes.c_uint64(int(block_size)),
+            inputs_array,
+            ctypes.c_size_t(len(inputs)),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+        )
+        if rc != 0:
+            return None
+
+        try:
+            return [
+                (
+                    int(out_ptr[i].block_index),
+                    bool(out_ptr[i].has_crc),
+                    int(out_ptr[i].crc32),
+                )
+                for i in range(out_len.value)
+            ]
+        finally:
+            lib.dbfs_free_persist_crc_rows(out_ptr, out_len)
 
     def python_to_rust_hotpath_copy_segments(self, off_in, off_out, length, block_size, workers):
         lib = self._load_rust_hotpath_lib()
@@ -1665,11 +1744,54 @@ class StorageSupport:
                             blocks_written += 1
 
                         if block_rows:
+                            crc_plan = self.python_to_rust_hotpath_persist_block_crc_plan(block_size, [
+                                (block_index, data, used_len) for _, block_index, data, used_len in block_rows
+                            ])
+                            if crc_plan is None:
+                                crc_plan = []
+                            crc_rows = []
+                            stale_rows = []
+                            crc_plan_by_block = {block_index: (has_crc, crc32) for block_index, has_crc, crc32 in crc_plan}
+                            for file_id_row, block_index, data, used_len in block_rows:
+                                has_crc, crc_value = crc_plan_by_block.get(block_index, (used_len >= block_size, None))
+                                if has_crc:
+                                    if crc_value is None:
+                                        crc_value = self.python_to_rust_hotpath_crc32(data)
+                                        if crc_value is None:
+                                            crc_value = binascii.crc32(bytes(data)) & 0xFFFFFFFF
+                                    crc_rows.append((file_id_row, block_index, crc_value))
+                                else:
+                                    stale_rows.append((file_id_row, block_index))
+
                             self._persist_block_chunks(
                                 cur,
                                 ((file_id, block_index, data) for file_id, block_index, data, _ in block_rows),
                             )
-                            self._persist_copy_block_crc_rows(cur, block_rows, block_size)
+                            if crc_rows:
+                                chunk_size = max(1, int(getattr(self.owner, "persist_buffer_chunk_blocks", self.PERSIST_BUFFER_CHUNK_BLOCKS) or self.PERSIST_BUFFER_CHUNK_BLOCKS))
+                                execute_values(
+                                    cur,
+                                    """
+                                    INSERT INTO copy_block_crc (id_file, _order, crc32)
+                                    VALUES %s
+                                    ON CONFLICT (id_file, _order)
+                                    DO UPDATE SET crc32 = EXCLUDED.crc32, updated_at = NOW()
+                                    """,
+                                    crc_rows,
+                                    page_size=chunk_size,
+                                )
+                            if stale_rows:
+                                execute_values(
+                                    cur,
+                                    """
+                                    DELETE FROM copy_block_crc
+                                    USING (VALUES %s) AS stale(id_file, _order)
+                                    WHERE copy_block_crc.id_file = stale.id_file
+                                      AND copy_block_crc._order = stale._order
+                                    """,
+                                    stale_rows,
+                                    page_size=max(1, int(getattr(self.owner, "persist_buffer_chunk_blocks", self.PERSIST_BUFFER_CHUNK_BLOCKS) or self.PERSIST_BUFFER_CHUNK_BLOCKS)),
+                                )
 
                     cur.execute(
                         """

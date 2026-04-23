@@ -143,11 +143,35 @@ pub struct DbfsPersistBlockPlanEntry {
 
 #[repr(C)]
 #[derive(Debug, PartialEq, Eq)]
+pub struct DbfsPersistBlockInput {
+    pub block_index: u64,
+    pub ptr: *const u8,
+    pub len: usize,
+    pub used_len: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct DbfsPersistCrcPlanEntry {
+    pub block_index: u64,
+    pub has_crc: u8,
+    pub crc32: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct DbfsPersistBlockPlan {
     pub total_blocks: u64,
     pub truncate_only: u8,
     pub blocks_ptr: *mut DbfsPersistBlockPlanEntry,
     pub blocks_len: usize,
+}
+
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct DbfsPersistCrcPlan {
+    pub rows_ptr: *mut DbfsPersistCrcPlanEntry,
+    pub rows_len: usize,
 }
 
 unsafe fn slice_from_raw<'a>(ptr: *const u8, len: usize) -> Option<&'a [u8]> {
@@ -1963,6 +1987,53 @@ pub extern "C" fn dbfs_persist_block_plan(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn dbfs_persist_block_crc_plan(
+    block_size: u64,
+    blocks_ptr: *const DbfsPersistBlockInput,
+    blocks_len: usize,
+    out_ptr: *mut *mut DbfsPersistCrcPlanEntry,
+    out_len: *mut usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if blocks_len == 0 {
+            return write_boxed_output(Vec::<DbfsPersistCrcPlanEntry>::new(), out_ptr, out_len);
+        }
+        if blocks_ptr.is_null() {
+            return 1;
+        }
+        let blocks = slice::from_raw_parts(blocks_ptr, blocks_len);
+        let mut rows = Vec::with_capacity(blocks.len());
+        let block_size = block_size.max(1);
+        for block in blocks {
+            let data = match slice_from_raw(block.ptr, block.len) {
+                Some(slice) => slice,
+                None => return 1,
+            };
+            let used_len = block.used_len.min(block_size);
+            if used_len >= block_size {
+                rows.push(DbfsPersistCrcPlanEntry {
+                    block_index: block.block_index,
+                    has_crc: 1,
+                    crc32: crc32_bytes(data),
+                });
+            } else {
+                rows.push(DbfsPersistCrcPlanEntry {
+                    block_index: block.block_index,
+                    has_crc: 0,
+                    crc32: 0,
+                });
+            }
+        }
+        write_boxed_output(rows, out_ptr, out_len)
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn dbfs_free_copy_segments(ptr: *mut DbfsCopySegment, len: usize) {
     if ptr.is_null() || len == 0 {
         return;
@@ -1996,6 +2067,17 @@ pub extern "C" fn dbfs_free_persist_blocks(ptr: *mut DbfsPersistBlockPlanEntry, 
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn dbfs_free_persist_crc_rows(ptr: *mut DbfsPersistCrcPlanEntry, len: usize) {
+    if ptr.is_null() || len == 0 {
+        return;
+    }
+
+    unsafe {
+        let _ = Vec::from_raw_parts(ptr, len, len);
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn dbfs_free_bytes(ptr: *mut u8, len: usize) {
     if ptr.is_null() || len == 0 {
         return;
@@ -2011,15 +2093,18 @@ mod tests {
     use super::{
         dbfs_block_count_for_length, dbfs_copy_dedupe, dbfs_copy_pack, dbfs_copy_plan,
         dbfs_crc32, dbfs_free_bytes, dbfs_free_copy_segments, dbfs_free_persist_blocks,
+        dbfs_free_persist_crc_rows,
         dbfs_free_ranges, dbfs_persist_block_plan, dbfs_persist_pad, dbfs_read_assemble,
         dbfs_read_ahead_blocks, dbfs_read_fetch_bounds, dbfs_read_missing_range_worker_count,
         dbfs_read_sequence_step, dbfs_read_slice_plan, dbfs_sorted_contiguous_ranges,
         dbfs_block_transfer_plan, dbfs_dirty_block_ranges_plan, dbfs_logical_resize_plan,
-        dbfs_parallel_worker_count, dbfs_parallel_worker_plan, dbfs_persist_layout_plan,
+        dbfs_parallel_worker_count, dbfs_parallel_worker_plan, dbfs_persist_block_crc_plan,
+        dbfs_persist_layout_plan,
         dbfs_write_copy_plan, dbfs_write_copy_worker_count,
         dbfs_rust_pg_repo_promote_hardlink_to_primary, DbfsBlockTransferPlan, DbfsCopySegment,
-        DbfsLogicalResizePlan, DbfsParallelWorkerPlan, DbfsPersistBlockPlanEntry,
-        DbfsRange, DbfsReadBlock, DbfsReadBounds, DbfsReadSlicePlan, DbfsWriteCopyPlan,
+        DbfsLogicalResizePlan, DbfsParallelWorkerPlan, DbfsPersistBlockInput,
+        DbfsPersistBlockPlanEntry, DbfsPersistCrcPlanEntry, DbfsRange, DbfsReadBlock,
+        DbfsReadBounds, DbfsReadSlicePlan, DbfsWriteCopyPlan, crc32_bytes,
     };
 
     #[test]
@@ -2311,6 +2396,65 @@ mod tests {
             ]
         );
         dbfs_free_persist_blocks(out_ptr, out_len);
+    }
+
+    #[test]
+    fn exports_persist_block_crc_plan() {
+        let full = vec![0xABu8; 4096];
+        let partial = vec![0xCDu8; 3];
+        let inputs = [
+            DbfsPersistBlockInput {
+                block_index: 3,
+                ptr: full.as_ptr(),
+                len: full.len(),
+                used_len: 4096,
+            },
+            DbfsPersistBlockInput {
+                block_index: 4,
+                ptr: partial.as_ptr(),
+                len: partial.len(),
+                used_len: 3,
+            },
+            DbfsPersistBlockInput {
+                block_index: 7,
+                ptr: full.as_ptr(),
+                len: full.len(),
+                used_len: 4096,
+            },
+        ];
+        let mut out_ptr: *mut DbfsPersistCrcPlanEntry = std::ptr::null_mut();
+        let mut out_len: usize = 0;
+
+        let status = dbfs_persist_block_crc_plan(
+            4096,
+            inputs.as_ptr(),
+            inputs.len(),
+            &mut out_ptr,
+            &mut out_len,
+        );
+        assert_eq!(status, 0);
+        let rows = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(
+            rows,
+            &[
+                DbfsPersistCrcPlanEntry {
+                    block_index: 3,
+                    has_crc: 1,
+                    crc32: crc32_bytes(&full),
+                },
+                DbfsPersistCrcPlanEntry {
+                    block_index: 4,
+                    has_crc: 0,
+                    crc32: 0,
+                },
+                DbfsPersistCrcPlanEntry {
+                    block_index: 7,
+                    has_crc: 1,
+                    crc32: crc32_bytes(&full),
+                },
+            ]
+        );
+        dbfs_free_persist_crc_rows(out_ptr, out_len);
     }
 
     #[test]
