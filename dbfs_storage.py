@@ -99,6 +99,13 @@ class DbfsLogicalResizePlan(ctypes.Structure):
     ]
 
 
+class DbfsPersistLayoutPlan(ctypes.Structure):
+    _fields_ = [
+        ("total_blocks", ctypes.c_uint64),
+        ("truncate_only", ctypes.c_ubyte),
+    ]
+
+
 class DbfsWriteTransferPlan:
     __slots__ = ("total_blocks", "dedupe_enabled", "parallel", "workers", "use_crc_table")
 
@@ -616,6 +623,18 @@ class StorageSupport:
             ctypes.POINTER(ctypes.c_size_t),
         ]
         lib.dbfs_dirty_block_ranges_plan.restype = ctypes.c_int
+        lib.dbfs_persist_layout_plan.argtypes = [
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_ubyte,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_ubyte),
+            ctypes.POINTER(ctypes.POINTER(DbfsRange)),
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        lib.dbfs_persist_layout_plan.restype = ctypes.c_int
 
         self._rust_hotpath_lib_handle = lib
         return lib
@@ -942,6 +961,38 @@ class StorageSupport:
         try:
             ranges = [(int(out_ptr[i].start), int(out_ptr[i].end)) for i in range(out_len.value)]
             return int(out_total_blocks.value), ranges
+        finally:
+            lib.dbfs_free_ranges(out_ptr, out_len)
+
+    def python_to_rust_hotpath_persist_layout_plan(self, file_size, block_size, truncate_pending, dirty_blocks):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        dirty_blocks = [int(block_index) for block_index in dirty_blocks]
+        dirty_array = (ctypes.c_uint64 * len(dirty_blocks))(*dirty_blocks) if dirty_blocks else None
+        out_total_blocks = ctypes.c_uint64()
+        out_truncate_only = ctypes.c_ubyte()
+        out_ptr = ctypes.POINTER(DbfsRange)()
+        out_len = ctypes.c_size_t()
+
+        rc = lib.dbfs_persist_layout_plan(
+            ctypes.c_uint64(int(file_size)),
+            ctypes.c_uint64(int(block_size)),
+            ctypes.c_ubyte(1 if truncate_pending else 0),
+            dirty_array,
+            ctypes.c_size_t(len(dirty_blocks)),
+            ctypes.byref(out_total_blocks),
+            ctypes.byref(out_truncate_only),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+        )
+        if rc != 0:
+            return None
+
+        try:
+            ranges = [(int(out_ptr[i].start), int(out_ptr[i].end)) for i in range(out_len.value)]
+            return int(out_total_blocks.value), bool(out_truncate_only.value), ranges
         finally:
             lib.dbfs_free_ranges(out_ptr, out_len)
 
@@ -1487,7 +1538,7 @@ class StorageSupport:
 
         file_size = int(state["file_size"])
         block_size = self.owner.block_size
-        plan = self.python_to_rust_hotpath_dirty_block_ranges_plan(file_size, block_size, dirty_blocks)
+        plan = self.python_to_rust_hotpath_persist_layout_plan(file_size, block_size, truncate_pending, dirty_blocks)
         if plan is None:
             total_blocks = self._block_transfer_plan(file_size, block_size, 1, 1, False).total_blocks
             ordered_dirty_ranges = self.python_to_rust_hotpath_sorted_contiguous_ranges(dirty_blocks)
@@ -1504,9 +1555,9 @@ class StorageSupport:
                         ordered_dirty_ranges.append((range_start, range_end))
                         range_start = range_end = block_index
                     ordered_dirty_ranges.append((range_start, range_end))
+            truncate_only = bool(truncate_pending and not dirty_blocks)
         else:
-            total_blocks, ordered_dirty_ranges = plan
-        truncate_only = bool(truncate_pending and not dirty_blocks)
+            total_blocks, truncate_only, ordered_dirty_ranges = plan
         blocks_written = 0
 
         started = time.perf_counter()

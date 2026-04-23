@@ -308,6 +308,31 @@ pub fn logical_resize_plan(old_size: u64, new_size: u64, block_size: u64) -> Log
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct PersistLayoutPlan {
+    pub total_blocks: u64,
+    pub truncate_only: bool,
+    pub ordered_dirty_ranges: Vec<(u64, u64)>,
+}
+
+pub fn persist_layout_plan(
+    file_size: u64,
+    block_size: u64,
+    truncate_pending: bool,
+    dirty_blocks: &[u64],
+) -> PersistLayoutPlan {
+    let block_size = block_size.max(1);
+    let total_blocks = block_count_for_length(file_size, block_size, false);
+    let ordered_dirty_ranges = sorted_contiguous_ranges(dirty_blocks);
+    let truncate_only = truncate_pending && dirty_blocks.is_empty();
+
+    PersistLayoutPlan {
+        total_blocks,
+        truncate_only,
+        ordered_dirty_ranges,
+    }
+}
+
 pub fn block_transfer_plan(
     length: u64,
     block_size: u64,
@@ -452,8 +477,8 @@ mod tests {
         assemble_read_slice, block_count_for_length, copy_segments, dirty_block_size,
         logical_resize_plan, pack_changed_copy_pairs, block_transfer_plan, pack_changed_ranges, pad_block_bytes,
         parallel_worker_count, parallel_worker_plan, sorted_contiguous_ranges,
-        read_ahead_blocks, read_fetch_bounds, read_missing_range_worker_count, read_slice_plan,
-        write_copy_dedupe_plan, write_copy_plan, write_copy_worker_count,
+        persist_layout_plan, read_ahead_blocks, read_fetch_bounds, read_missing_range_worker_count,
+        read_slice_plan, write_copy_dedupe_plan, write_copy_plan, write_copy_worker_count,
     };
     use crate::LogicalResizePlan;
 
@@ -636,6 +661,25 @@ mod tests {
                 tail_valid_len: 0,
             }
         );
+    }
+
+    #[test]
+    fn plans_persist_layout() {
+        let plan = persist_layout_plan(65536, 4096, true, &[7, 3, 4, 10, 11, 11, 8]);
+        assert_eq!(plan.total_blocks, 16);
+        assert!(!plan.truncate_only);
+        assert_eq!(
+            plan.ordered_dirty_ranges,
+            vec![(3, 4), (7, 8), (10, 11)]
+        );
+    }
+
+    #[test]
+    fn plans_persist_layout_truncate_only() {
+        let plan = persist_layout_plan(4096, 4096, true, &[]);
+        assert_eq!(plan.total_blocks, 1);
+        assert!(plan.truncate_only);
+        assert!(plan.ordered_dirty_ranges.is_empty());
     }
 
     #[test]

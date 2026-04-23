@@ -4,7 +4,7 @@ use std::slice;
 use crate::{
     assemble_read_slice, block_count_for_length, block_transfer_plan, copy_segments, crc32_bytes,
     dirty_block_size, logical_resize_plan, pack_changed_ranges, pad_block_bytes, parallel_worker_count,
-    parallel_worker_plan, pg::DbRepo, read_ahead_blocks, read_fetch_bounds,
+    parallel_worker_plan, persist_layout_plan, pg::DbRepo, read_ahead_blocks, read_fetch_bounds,
     read_missing_range_worker_count, read_slice_plan, sorted_contiguous_ranges, write_copy_plan,
     write_copy_worker_count,
 };
@@ -125,6 +125,13 @@ pub struct DbfsLogicalResizePlan {
     pub has_partial_tail: u8,
     pub tail_block_index: u64,
     pub tail_valid_len: u64,
+}
+
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct DbfsPersistLayoutPlan {
+    pub total_blocks: u64,
+    pub truncate_only: u8,
 }
 
 unsafe fn slice_from_raw<'a>(ptr: *const u8, len: usize) -> Option<&'a [u8]> {
@@ -1855,6 +1862,47 @@ pub extern "C" fn dbfs_dirty_block_ranges_plan(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn dbfs_persist_layout_plan(
+    file_size: u64,
+    block_size: u64,
+    truncate_pending: u8,
+    dirty_ptr: *const u64,
+    dirty_len: usize,
+    out_total_blocks: *mut u64,
+    out_truncate_only: *mut u8,
+    out_ptr: *mut *mut DbfsRange,
+    out_len: *mut usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if out_total_blocks.is_null() || out_truncate_only.is_null() {
+            return 1;
+        }
+        let dirty = if dirty_len == 0 {
+            &[][..]
+        } else {
+            if dirty_ptr.is_null() {
+                return 1;
+            }
+            slice::from_raw_parts(dirty_ptr, dirty_len)
+        };
+        let plan = persist_layout_plan(file_size, block_size, truncate_pending != 0, dirty);
+        *out_total_blocks = plan.total_blocks;
+        *out_truncate_only = if plan.truncate_only { 1 } else { 0 };
+        let ranges = plan
+            .ordered_dirty_ranges
+            .into_iter()
+            .map(|(start, end)| DbfsRange { start, end })
+            .collect::<Vec<_>>();
+        write_boxed_output(ranges, out_ptr, out_len)
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn dbfs_free_copy_segments(ptr: *mut DbfsCopySegment, len: usize) {
     if ptr.is_null() || len == 0 {
         return;
@@ -1896,10 +1944,11 @@ mod tests {
         dbfs_read_missing_range_worker_count, dbfs_read_sequence_step, dbfs_read_slice_plan,
         dbfs_sorted_contiguous_ranges, dbfs_block_transfer_plan, dbfs_dirty_block_ranges_plan,
         dbfs_logical_resize_plan, dbfs_parallel_worker_count, dbfs_parallel_worker_plan,
+        dbfs_persist_layout_plan,
         dbfs_write_copy_plan, dbfs_write_copy_worker_count,
         dbfs_rust_pg_repo_promote_hardlink_to_primary, DbfsBlockTransferPlan, DbfsCopySegment,
-        DbfsLogicalResizePlan, DbfsParallelWorkerPlan, DbfsRange, DbfsReadBlock, DbfsReadBounds,
-        DbfsReadSlicePlan, DbfsWriteCopyPlan,
+        DbfsLogicalResizePlan, DbfsParallelWorkerPlan, DbfsRange,
+        DbfsReadBlock, DbfsReadBounds, DbfsReadSlicePlan, DbfsWriteCopyPlan,
     };
 
     #[test]
@@ -2110,6 +2159,40 @@ mod tests {
         );
         assert_eq!(status, 0);
         assert_eq!(total_blocks, 16);
+        let ranges = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
+        assert_eq!(
+            ranges,
+            &[
+                DbfsRange { start: 3, end: 4 },
+                DbfsRange { start: 7, end: 8 },
+                DbfsRange { start: 10, end: 11 },
+            ]
+        );
+        dbfs_free_ranges(out_ptr, out_len);
+    }
+
+    #[test]
+    fn exports_persist_layout_plan() {
+        let dirty = [7u64, 3, 4, 10, 11, 11, 8];
+        let mut total_blocks = 0u64;
+        let mut truncate_only = 0u8;
+        let mut out_ptr: *mut DbfsRange = std::ptr::null_mut();
+        let mut out_len: usize = 0;
+
+        let status = dbfs_persist_layout_plan(
+            65536,
+            4096,
+            1,
+            dirty.as_ptr(),
+            dirty.len(),
+            &mut total_blocks,
+            &mut truncate_only,
+            &mut out_ptr,
+            &mut out_len,
+        );
+        assert_eq!(status, 0);
+        assert_eq!(total_blocks, 16);
+        assert_eq!(truncate_only, 0);
         let ranges = unsafe { std::slice::from_raw_parts(out_ptr, out_len) };
         assert_eq!(
             ranges,
