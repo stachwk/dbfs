@@ -28,7 +28,7 @@ Projekt skupia się na:
 - Zmiany schematu żyją teraz w `migrations/` z sekwencyjnymi wersjami, jawnym eksportem `mkfs.dbfs.py status` i ścieżką upgrade ze starszych stanów schematu.
 - Obecna wersja DBFS jest zdefiniowna w dbfs_version.py, a `dbfs_bootstrap.py --version` i `mkfs.dbfs.py --version` wypisują tę samą wartość.
 - Prace nad wydajnością są już w kodzie, a aktualne baseline'y benchmarków są zapisane w `BENCHMARKS.md`.
-- Rustowy hot-path działa teraz głównie przez `libdbfs-2.so` i obejmuje planner, changed-run packing, padding bloków, składanie odczytu, logical resize planner dla `truncate()`/`fallocate()` oraz pierwsze lookupi/mutacje repo. Changed-copy dedupe zostaje opt-in, bo potrafi zauważalnie spowolnić workloady kopiujące. Zainstalowane binarki `dbfs-*` nadal są dostępne do porównań i rollbacku, ale nie są już główną ścieżką hot-path.
+- Rustowy hot-path działa teraz głównie przez `libdbfs-2.so` i obejmuje planner, changed-run packing, padding bloków, składanie odczytu, logical resize planner dla `truncate()`/`fallocate()` oraz pierwsze lookupi/mutacje repo. Changed-copy dedupe zostaje opt-in, bo potrafi zauważalnie spowolnić workloady kopiujące. Repo nie instaluje już osobnych helper-binarek w normalnym flow; współdzielona biblioteka jest główną ścieżką hot-path.
 - Lokalny stack Docker Compose preloaduje `pg_stat_statements`, więc analiza zapytań i profilowanie runtime mogą korzystać z trwałych statystyk PostgreSQL.
 - `TODO.md` służy teraz jako log decyzji i notatek, a nie aktywny backlog implementacyjny.
 
@@ -221,7 +221,7 @@ make install-config-user
 make mount-user
 ```
 
-`make install-on-root` łączy `install-config`, `pip-install`, `install-root-scripts`, `install-rust-hotpath` i `install-mount-helper` w jeden krok dla instalacji typu root-style. To instaluje config, pakiet, `libdbfs-2.so`, polecenia `dbfs-bootstrap`/`mkfs.dbfs`, helpery `dbfs-*` oraz helper mounta.
+`make install-on-root` łączy `install-config`, `pip-install`, `install-root-scripts`, `install-rust-hotpath` i `install-mount-helper` w jeden krok dla instalacji typu root-style. To instaluje config, pakiet, `libdbfs-2.so`, polecenia `dbfs-bootstrap`/`mkfs.dbfs` oraz helper mounta.
 
 `make install-on-root-venv` to odpowiednik `make venv` + `make install-on-root`.
 
@@ -229,7 +229,7 @@ make mount-user
 
 1. Skonfiguruj `/etc/dbfs/dbfs_config.ini` albo lokalny `dbfs_config.ini`.
 1. Opcjonalnie uruchom `make install-config`, żeby skopiować `dbfs_config.ini` do `/etc/dbfs/dbfs_config.ini`.
-1. Dla instalacji typu root-style uruchom `make install-on-root`, żeby zainstalować config, pakiet pip, `libdbfs-2.so`, helpery `dbfs-*` i helper mounta jednym krokiem.
+1. Dla instalacji typu root-style uruchom `make install-on-root`, żeby zainstalować config, pakiet pip, `libdbfs-2.so` i helper mounta jednym krokiem.
 1. Dla lokalnego developmentu możesz uruchomić `make install-config-user`, żeby zainstalować `dbfs_config.ini` do `~/.config/dbfs/dbfs_config.ini` bez `sudo`.
 1. `make config-show` pokazuje, którego pliku konfiguracyjnego DBFS użyje, a `make mount-user` wymusza user-level `~/.config/dbfs/dbfs_config.ini`.
 1. Zainicjalizuj schemat:
