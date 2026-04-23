@@ -269,8 +269,11 @@ pub struct LogicalResizePlan {
     pub old_size: u64,
     pub new_size: u64,
     pub block_size: u64,
+    pub old_total_blocks: u64,
+    pub new_total_blocks: u64,
     pub shrinking: bool,
     pub has_valid_blocks: bool,
+    pub delete_from_block: u64,
     pub max_valid_block: u64,
     pub has_partial_tail: bool,
     pub tail_block_index: u64,
@@ -281,17 +284,23 @@ pub fn logical_resize_plan(old_size: u64, new_size: u64, block_size: u64) -> Log
     let block_size = block_size.max(1);
     let shrinking = new_size < old_size;
     let has_valid_blocks = new_size > 0;
+    let old_total_blocks = block_count_for_length(old_size, block_size, false);
+    let new_total_blocks = block_count_for_length(new_size, block_size, false);
     let max_valid_block = if has_valid_blocks { (new_size - 1) / block_size } else { 0 };
     let tail_valid_len = if has_valid_blocks { new_size % block_size } else { 0 };
     let has_partial_tail = has_valid_blocks && tail_valid_len != 0;
     let tail_block_index = if has_partial_tail { new_size / block_size } else { 0 };
+    let delete_from_block = if shrinking { new_total_blocks } else { old_total_blocks };
 
     LogicalResizePlan {
         old_size,
         new_size,
         block_size,
+        old_total_blocks,
+        new_total_blocks,
         shrinking,
         has_valid_blocks,
+        delete_from_block,
         max_valid_block,
         has_partial_tail,
         tail_block_index,
@@ -582,8 +591,11 @@ mod tests {
                 old_size: 10,
                 new_size: 0,
                 block_size: 4,
+                old_total_blocks: 3,
+                new_total_blocks: 0,
                 shrinking: true,
                 has_valid_blocks: false,
+                delete_from_block: 0,
                 max_valid_block: 0,
                 has_partial_tail: false,
                 tail_block_index: 0,
@@ -596,8 +608,11 @@ mod tests {
                 old_size: 10,
                 new_size: 6,
                 block_size: 4,
+                old_total_blocks: 3,
+                new_total_blocks: 2,
                 shrinking: true,
                 has_valid_blocks: true,
+                delete_from_block: 2,
                 max_valid_block: 1,
                 has_partial_tail: true,
                 tail_block_index: 1,
@@ -610,8 +625,11 @@ mod tests {
                 old_size: 10,
                 new_size: 16,
                 block_size: 4,
+                old_total_blocks: 3,
+                new_total_blocks: 4,
                 shrinking: false,
                 has_valid_blocks: true,
+                delete_from_block: 3,
                 max_valid_block: 3,
                 has_partial_tail: false,
                 tail_block_index: 0,

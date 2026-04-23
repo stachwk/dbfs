@@ -87,8 +87,11 @@ class DbfsLogicalResizePlan(ctypes.Structure):
         ("old_size", ctypes.c_uint64),
         ("new_size", ctypes.c_uint64),
         ("block_size", ctypes.c_uint64),
+        ("old_total_blocks", ctypes.c_uint64),
+        ("new_total_blocks", ctypes.c_uint64),
         ("shrinking", ctypes.c_ubyte),
         ("has_valid_blocks", ctypes.c_ubyte),
+        ("delete_from_block", ctypes.c_uint64),
         ("max_valid_block", ctypes.c_uint64),
         ("has_partial_tail", ctypes.c_ubyte),
         ("tail_block_index", ctypes.c_uint64),
@@ -1704,12 +1707,15 @@ class StorageSupport:
         plan.old_size = old_size
         plan.new_size = new_size
         plan.block_size = block_size
+        plan.old_total_blocks = self._block_count_for_length(old_size, block_size, False)
+        plan.new_total_blocks = self._block_count_for_length(new_size, block_size, False)
         plan.shrinking = 1 if new_size < old_size else 0
         plan.has_valid_blocks = 1 if new_size > 0 else 0
         plan.max_valid_block = ((new_size - 1) // block_size) if new_size > 0 else 0
         plan.has_partial_tail = 1 if (new_size > 0 and (new_size % block_size) != 0) else 0
         plan.tail_block_index = (new_size // block_size) if plan.has_partial_tail else 0
         plan.tail_valid_len = (new_size % block_size) if plan.has_partial_tail else 0
+        plan.delete_from_block = int(plan.new_total_blocks if plan.shrinking else plan.old_total_blocks)
         return plan
 
     def python_to_rust_hotpath_logical_resize_plan(self, old_size, new_size, block_size):
@@ -1842,12 +1848,12 @@ class StorageSupport:
         state["file_size"] = int(plan.new_size)
 
         # Usun bloki calkowicie poza nowym EOF
-        if plan.has_valid_blocks:
-            max_valid_block = int(plan.max_valid_block)
+        delete_from_block = int(plan.delete_from_block)
+        if delete_from_block > 0:
             stale_blocks = [
                 block_index
                 for block_index in list(state["overlay_blocks"].keys())
-                if block_index > max_valid_block
+                if block_index >= delete_from_block
             ]
         else:
             stale_blocks = list(state["overlay_blocks"].keys())
