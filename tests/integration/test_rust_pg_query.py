@@ -130,8 +130,9 @@ def main():
                 assert rust_hardlink_file_id == rust_file_id, (rust_hardlink_file_id, rust_file_id)
                 assert backend.python_to_rust_namespace_count_file_links(rust_file_id) == 2
 
-                rust_promoted = backend.python_to_rust_namespace_promote_hardlink_to_primary(rust_file_id)
-                assert rust_promoted is True, rust_promoted
+                fs.release(file_name, file_fh)
+                file_fh = None
+                fs.unlink(file_name)
                 assert fs.get_file_id(file_name) is None
                 assert fs.get_file_id(hardlink_name) == rust_file_id
                 assert fs.get_hardlink_id(hardlink_name) is None
@@ -165,7 +166,8 @@ def main():
                     if fs.get_symlink_id(f"{namespace_name}/payload-link-rust.symlink") is not None:
                         fs.unlink(f"{namespace_name}/payload-link-rust.symlink")
             finally:
-                fs.release(file_name, file_fh)
+                if file_fh is not None:
+                    fs.release(file_name, file_fh)
                 fs.unlink(file_cleanup_name)
                 fs.unlink(rust_created_file_name)
         finally:
