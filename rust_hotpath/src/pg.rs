@@ -1162,6 +1162,117 @@ impl DbRepo {
         }
     }
 
+    pub fn create_special_file(
+        &self,
+        target_parent_id: Option<u64>,
+        target_name: &str,
+        mode: u32,
+        uid: u32,
+        gid: u32,
+        inode_seed: &str,
+        file_kind: &str,
+        rdev_major: u32,
+        rdev_minor: u32,
+    ) -> Result<u64, String> {
+        let target_name = CString::new(target_name).map_err(|_| "target name contains NUL byte".to_string())?;
+        let uid = CString::new(uid.to_string()).map_err(|_| "uid contains NUL byte".to_string())?;
+        let gid = CString::new(gid.to_string()).map_err(|_| "gid contains NUL byte".to_string())?;
+        let inode_seed = CString::new(inode_seed).map_err(|_| "inode seed contains NUL byte".to_string())?;
+        let mode = CString::new(format!("{:o}", mode)).map_err(|_| "mode contains NUL byte".to_string())?;
+        let file_kind = CString::new(file_kind).map_err(|_| "file kind contains NUL byte".to_string())?;
+        let rdev_major = CString::new(rdev_major.to_string()).map_err(|_| "rdev major contains NUL byte".to_string())?;
+        let rdev_minor = CString::new(rdev_minor.to_string()).map_err(|_| "rdev minor contains NUL byte".to_string())?;
+        let sql_touch_parent = CString::new(
+            "UPDATE directories SET modification_date = NOW(), change_date = NOW() WHERE id_directory = $1",
+        )
+        .map_err(|_| "SQL contains NUL byte".to_string())?;
+        let sql_null_parent = CString::new(
+            "
+            INSERT INTO files (id_directory, name, size, mode, uid, gid, inode_seed, change_date, modification_date, access_date, creation_date)
+            VALUES (NULL, $1, 0, $2, $3, $4, $5, NOW(), NOW(), NOW(), NOW())
+            RETURNING id_file
+            ",
+        )
+        .map_err(|_| "SQL contains NUL byte".to_string())?;
+        let sql_parent = CString::new(
+            "
+            INSERT INTO files (id_directory, name, size, mode, uid, gid, inode_seed, change_date, modification_date, access_date, creation_date)
+            VALUES ($6, $1, 0, $2, $3, $4, $5, NOW(), NOW(), NOW(), NOW())
+            RETURNING id_file
+            ",
+        )
+        .map_err(|_| "SQL contains NUL byte".to_string())?;
+        let sql_special = CString::new(
+            "
+            INSERT INTO special_files (id_file, file_type, rdev_major, rdev_minor)
+            VALUES ($1, $2, $3, $4)
+            ",
+        )
+        .map_err(|_| "SQL contains NUL byte".to_string())?;
+
+        unsafe {
+            let conn = connect(&self.conninfo)?;
+            let result = transactional(conn, |conn| {
+                let res = if let Some(parent_id) = target_parent_id {
+                    let parent_id = CString::new(parent_id.to_string())
+                        .map_err(|_| "parent id contains NUL byte".to_string())?;
+                    let params = [&target_name, &mode, &uid, &gid, &inode_seed, &parent_id];
+                    exec_params(conn, &sql_parent, &params)?
+                } else {
+                    let params = [&target_name, &mode, &uid, &gid, &inode_seed];
+                    exec_params(conn, &sql_null_parent, &params)?
+                };
+                let id_file = match PQresultStatus(res) {
+                    PGRES_TUPLES_OK => {
+                        let rows = PQntuples(res);
+                        let cols = PQnfields(res);
+                        let value = if rows < 1 || cols < 1 {
+                            None
+                        } else {
+                            let value_ptr = PQgetvalue(res, 0, 0);
+                            if value_ptr.is_null() {
+                                None
+                            } else {
+                                CStr::from_ptr(value_ptr).to_string_lossy().trim().parse::<u64>().ok()
+                            }
+                        };
+                        PQclear(res);
+                        value.ok_or_else(|| "failed to create special file".to_string())?
+                    }
+                    _ => {
+                        PQclear(res);
+                        return Err(conn_error(conn));
+                    }
+                };
+
+                let id_file_text = CString::new(id_file.to_string())
+                    .map_err(|_| "file id contains NUL byte".to_string())?;
+                let special_params = [&id_file_text, &file_kind, &rdev_major, &rdev_minor];
+                let res = exec_params(conn, &sql_special, &special_params)?;
+                match PQresultStatus(res) {
+                    PGRES_COMMAND_OK => {
+                        PQclear(res);
+                    }
+                    _ => {
+                        PQclear(res);
+                        return Err(conn_error(conn));
+                    }
+                }
+
+                if let Some(parent_id) = target_parent_id {
+                    let parent_id = CString::new(parent_id.to_string())
+                        .map_err(|_| "parent id contains NUL byte".to_string())?;
+                    let params = [&parent_id];
+                    let res = exec_params(conn, &sql_touch_parent, &params)?;
+                    PQclear(res);
+                }
+                Ok(id_file)
+            });
+            PQfinish(conn);
+            result
+        }
+    }
+
     pub fn count_file_links(&self, file_id: u64) -> Result<u64, String> {
         let sql = CString::new("SELECT 1 + COUNT(*) FROM hardlinks WHERE id_file = $1")
             .map_err(|_| "SQL contains NUL byte".to_string())?;

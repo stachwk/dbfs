@@ -230,6 +230,25 @@ class PostgresBackend:
             ctypes.POINTER(ctypes.c_ubyte),
         ]
         lib.dbfs_rust_pg_repo_create_file.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_create_special_file.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+            ctypes.c_ubyte,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_create_special_file.restype = ctypes.c_int
         lib.dbfs_rust_pg_repo_create_symlink.argtypes = [
             ctypes.c_void_p,
             ctypes.c_uint64,
@@ -627,6 +646,39 @@ class PostgresBackend:
             ctypes.c_uint32(int(gid)),
             inode_seed_bytes,
             len(inode_seed_bytes),
+            ctypes.byref(out_value),
+            ctypes.byref(out_found),
+        )
+        if status != 0 or not out_found.value:
+            return None
+        return int(out_value.value)
+
+    def python_to_rust_namespace_create_special_file(self, target_parent_id, target_name, mode, uid, gid, inode_seed, file_kind, rdev_major, rdev_minor):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        target_name_bytes = str(target_name).encode("utf-8")
+        inode_seed_bytes = str(inode_seed).encode("utf-8")
+        file_kind_bytes = str(file_kind).encode("utf-8")
+        lib = self._load_rust_hotpath_lib()
+        out_value = ctypes.c_uint64()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_create_special_file(
+            repo,
+            int(target_parent_id or 0),
+            ctypes.c_ubyte(1 if target_parent_id is not None else 0),
+            target_name_bytes,
+            len(target_name_bytes),
+            ctypes.c_uint32(int(mode)),
+            ctypes.c_uint32(int(uid)),
+            ctypes.c_uint32(int(gid)),
+            inode_seed_bytes,
+            len(inode_seed_bytes),
+            file_kind_bytes,
+            len(file_kind_bytes),
+            ctypes.c_uint32(int(rdev_major)),
+            ctypes.c_uint32(int(rdev_minor)),
             ctypes.byref(out_value),
             ctypes.byref(out_found),
         )

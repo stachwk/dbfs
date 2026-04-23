@@ -261,9 +261,54 @@ class NamespaceRepositoryCreateMutations:
         if parent_path != "/" and self.get_dir_id(parent_path) is None:
             raise dbfs.FuseOSError(errno.ENOENT)
 
+        uid, gid = dbfs.creation_uid_gid(parent_path)
+        inode_seed = dbfs.generate_inode_seed()
+        if file_type in {stat.S_IFCHR, stat.S_IFBLK}:
+            major = os.major(dev) if hasattr(os, "major") else 0
+            minor = os.minor(dev) if hasattr(os, "minor") else 0
+            rust_file_id = dbfs.backend.python_to_rust_namespace_create_special_file(
+                parent_id,
+                file_name,
+                mode,
+                uid,
+                gid,
+                inode_seed,
+                "char" if file_type == stat.S_IFCHR else "block",
+                major,
+                minor,
+            )
+        elif file_type == stat.S_IFIFO:
+            rust_file_id = dbfs.backend.python_to_rust_namespace_create_special_file(
+                parent_id,
+                file_name,
+                mode,
+                uid,
+                gid,
+                inode_seed,
+                "fifo",
+                0,
+                0,
+            )
+        else:
+            rust_file_id = dbfs.backend.python_to_rust_namespace_create_file(
+                parent_id,
+                file_name,
+                mode,
+                uid,
+                gid,
+                inode_seed,
+            )
+        if rust_file_id is not None:
+            with dbfs.db_connection() as conn, conn.cursor() as cur:
+                dbfs.copy_default_acl_to_child(parent_path, path, child_is_dir=False, cur=cur, owner_key=("file", rust_file_id))
+                dbfs.append_journal_event(cur, "mknod", path, file_id=rust_file_id, directory_id=parent_id)
+                conn.commit()
+            dbfs.touch_namespace_epoch()
+            dbfs.invalidate_metadata_cache(include_statfs=True)
+            return 0
+
         with dbfs.db_connection() as conn, conn.cursor() as cur:
             try:
-                uid, gid = dbfs.creation_uid_gid(parent_path)
                 file_ctime = dbfs.ctime_column("files")
                 cur.execute(
                     """
