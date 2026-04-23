@@ -947,6 +947,68 @@ pub extern "C" fn dbfs_rust_pg_repo_create_hardlink(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_create_directory(
+    repo_ptr: *mut DbfsPgRepo,
+    target_parent_id: u64,
+    target_parent_found: u8,
+    target_name_ptr: *const u8,
+    target_name_len: usize,
+    mode: u32,
+    uid: u32,
+    gid: u32,
+    inode_seed_ptr: *const u8,
+    inode_seed_len: usize,
+    out_value: *mut u64,
+    out_found: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_found.is_null() {
+            return 1;
+        }
+        let target_name = match slice_from_raw(target_name_ptr, target_name_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let target_name = match std::str::from_utf8(target_name) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        let inode_seed = match slice_from_raw(inode_seed_ptr, inode_seed_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let inode_seed = match std::str::from_utf8(inode_seed) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        let parent_id = if target_parent_found != 0 {
+            Some(target_parent_id)
+        } else {
+            None
+        };
+        match (*repo_ptr).repo.create_directory(parent_id, target_name, mode, uid, gid, inode_seed) {
+            Ok(value) => {
+                if out_value.is_null() {
+                    return 1;
+                }
+                *out_value = value;
+                *out_found = 1;
+                0
+            }
+            Err(_) => {
+                *out_found = 0;
+                3
+            }
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn dbfs_rust_pg_repo_create_symlink(
     repo_ptr: *mut DbfsPgRepo,
     target_parent_id: u64,

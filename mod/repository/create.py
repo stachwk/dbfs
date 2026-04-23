@@ -23,10 +23,28 @@ class NamespaceRepositoryCreateMutations:
         if parent_path != "/" and self.get_dir_id(parent_path) is None:
             raise dbfs.FuseOSError(errno.ENOENT)
 
+        uid, gid = dbfs.creation_uid_gid(parent_path)
+        inherited_mode = dbfs.inherited_directory_mode(parent_path, mode)
+        inode_seed = dbfs.generate_inode_seed()
+        rust_dir_id = dbfs.backend.python_to_rust_namespace_create_directory(
+            parent_id,
+            dir_name,
+            inherited_mode,
+            uid,
+            gid,
+            inode_seed,
+        )
+        if rust_dir_id is not None:
+            with dbfs.db_connection() as conn, conn.cursor() as cur:
+                dbfs.copy_default_acl_to_child(parent_path, path, child_is_dir=True, cur=cur, owner_key=("dir", rust_dir_id))
+                dbfs.append_journal_event(cur, "mkdir", path, directory_id=rust_dir_id)
+                conn.commit()
+            dbfs.touch_namespace_epoch()
+            dbfs.invalidate_metadata_cache(include_statfs=True)
+            return
+
         with dbfs.db_connection() as conn, conn.cursor() as cur:
             try:
-                uid, gid = dbfs.creation_uid_gid(parent_path)
-                inherited_mode = dbfs.inherited_directory_mode(parent_path, mode)
                 dir_ctime = dbfs.ctime_column("directories")
                 cur.execute(
                     f"INSERT INTO directories (id_parent, name, mode, uid, gid, inode_seed, {dir_ctime}, creation_date, modification_date, access_date) VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW(), NOW(), NOW()) RETURNING id_directory",

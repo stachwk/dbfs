@@ -70,6 +70,18 @@ def main():
             rust_resolved_dir = backend.python_to_rust_namespace_resolve_path(namespace_name)
             assert rust_resolved_dir == (None, "dir", rust_dir_id), rust_resolved_dir
 
+            rust_created_dir_name = f"{namespace_name}/rust-created-dir"
+            rust_created_dir_id = backend.python_to_rust_namespace_create_directory(
+                rust_dir_id,
+                "rust-created-dir",
+                0o755,
+                *fs.current_uid_gid(),
+                fs.generate_inode_seed(),
+            )
+            assert rust_created_dir_id is not None, rust_created_dir_id
+            assert fs.get_dir_id(rust_created_dir_name) == rust_created_dir_id
+            fs.rmdir(rust_created_dir_name)
+
             file_name = f"{namespace_name}/payload.txt"
             file_fh = fs.create(file_name, 0o644)
             try:
