@@ -334,6 +334,17 @@ class PostgresBackend:
             ctypes.POINTER(ctypes.c_ubyte),
         ]
         lib.dbfs_rust_pg_repo_resolve_path.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_fetch_xattr_value.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_ubyte)),
+            ctypes.POINTER(ctypes.c_size_t),
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_fetch_xattr_value.restype = ctypes.c_int
         lib.dbfs_free_bytes.argtypes = [ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t]
         lib.dbfs_free_bytes.restype = None
 
@@ -947,6 +958,36 @@ class PostgresBackend:
             kind_map.get(int(out_kind.value)),
             int(out_entry_id.value) if out_entry_found.value else None,
         )
+
+    def python_to_rust_xattr_fetch_value(self, path, name):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        path_bytes = str(path).encode("utf-8")
+        name_bytes = str(name).encode("utf-8")
+        lib = self._load_rust_hotpath_lib()
+        out_ptr = ctypes.POINTER(ctypes.c_ubyte)()
+        out_len = ctypes.c_size_t()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_fetch_xattr_value(
+            repo,
+            path_bytes,
+            len(path_bytes),
+            name_bytes,
+            len(name_bytes),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+            ctypes.byref(out_found),
+        )
+        if status != 0 or not out_found.value:
+            return None
+
+        try:
+            return ctypes.string_at(out_ptr, out_len.value)
+        finally:
+            if out_ptr:
+                lib.dbfs_free_bytes(out_ptr, out_len)
 
     def resolve_pool_max_connections(self, pool_max_connections):
         try:

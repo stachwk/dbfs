@@ -1555,6 +1555,75 @@ pub extern "C" fn dbfs_rust_pg_repo_resolve_path(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_fetch_xattr_value(
+    repo_ptr: *mut DbfsPgRepo,
+    path_ptr: *const u8,
+    path_len: usize,
+    name_ptr: *const u8,
+    name_len: usize,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+    out_found: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_found.is_null() {
+            return 1;
+        }
+        let path = match slice_from_raw(path_ptr, path_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let path = match std::str::from_utf8(path) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        let name = match slice_from_raw(name_ptr, name_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let name = match std::str::from_utf8(name) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.fetch_xattr_value(path, name) {
+            Ok(Some(value)) => {
+                *out_found = 1;
+                if value.is_empty() {
+                    if !out_ptr.is_null() {
+                        *out_ptr = std::ptr::null_mut();
+                    }
+                    if !out_len.is_null() {
+                        *out_len = 0;
+                    }
+                    0
+                } else {
+                    write_boxed_output(value, out_ptr, out_len)
+                }
+            }
+            Ok(None) => {
+                *out_found = 0;
+                if !out_ptr.is_null() {
+                    *out_ptr = std::ptr::null_mut();
+                }
+                if !out_len.is_null() {
+                    *out_len = 0;
+                }
+                0
+            }
+            Err(_) => {
+                *out_found = 0;
+                3
+            }
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn dbfs_pg_query_scalar_text(
     conninfo_ptr: *const u8,
     conninfo_len: usize,

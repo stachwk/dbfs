@@ -1,4 +1,6 @@
 use crate::crc32_bytes;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine;
 use std::ffi::{CStr, CString};
 use std::fmt::Write as _;
 use std::os::raw::{c_char, c_int, c_uint};
@@ -1898,6 +1900,95 @@ impl DbRepo {
                 kind: entry.as_ref().map(|(kind, _)| kind.clone()),
                 entry_id: entry.map(|(_, entry_id)| entry_id),
             })
+        })
+    }
+
+    pub fn fetch_xattr_value(&self, path: &str, name: &str) -> Result<Option<Vec<u8>>, String> {
+        let resolved = self.resolve_path(path)?;
+        let (owner_kind, owner_id) = match resolved.kind.as_deref() {
+            Some("hardlink") => {
+                let file_id = self.get_file_id(path)?;
+                match file_id {
+                    Some(file_id) => ("file".to_string(), file_id),
+                    None => return Ok(None),
+                }
+            }
+            Some("file") => match resolved.entry_id {
+                Some(entry_id) => ("file".to_string(), entry_id),
+                None => return Ok(None),
+            },
+            Some("dir") => ("dir".to_string(), resolved.entry_id.unwrap_or(0)),
+            Some("symlink") => match resolved.entry_id {
+                Some(entry_id) => ("symlink".to_string(), entry_id),
+                None => return Ok(None),
+            },
+            _ => return Ok(None),
+        };
+
+        let sql = CString::new(
+            "SELECT encode(value, 'base64') FROM xattrs WHERE owner_kind = $1 AND owner_id = $2 AND name = $3",
+        )
+        .map_err(|_| "SQL contains NUL byte".to_string())?;
+        let owner_kind = CString::new(owner_kind).map_err(|_| "owner kind contains NUL byte".to_string())?;
+        let owner_id = CString::new(owner_id.to_string()).map_err(|_| "owner id contains NUL byte".to_string())?;
+        let name = CString::new(name).map_err(|_| "xattr name contains NUL byte".to_string())?;
+
+        self.with_cached_connection(|conn| unsafe {
+            let result = {
+                let param_values = [owner_kind.as_ptr(), owner_id.as_ptr(), name.as_ptr()];
+                let param_lengths = [
+                    owner_kind.as_bytes().len() as c_int,
+                    owner_id.as_bytes().len() as c_int,
+                    name.as_bytes().len() as c_int,
+                ];
+                let param_formats = [0 as c_int; 3];
+                let res = PQexecParams(
+                    conn,
+                    sql.as_ptr(),
+                    3,
+                    std::ptr::null(),
+                    param_values.as_ptr(),
+                    param_lengths.as_ptr(),
+                    param_formats.as_ptr(),
+                    0,
+                );
+                if res.is_null() {
+                    Err(conn_error(conn))
+                } else {
+                    match PQresultStatus(res) {
+                        PGRES_TUPLES_OK => {
+                            let rows = PQntuples(res);
+                            let cols = PQnfields(res);
+                            let encoded = if rows < 1 || cols < 1 {
+                                None
+                            } else {
+                                let value_ptr = PQgetvalue(res, 0, 0);
+                                if value_ptr.is_null() {
+                                    None
+                                } else {
+                                    Some(CStr::from_ptr(value_ptr).to_string_lossy().to_string())
+                                }
+                            };
+                            PQclear(res);
+                            let value = match encoded {
+                                None => None,
+                                Some(encoded) => {
+                                    let decoded = BASE64_STANDARD
+                                        .decode(encoded.trim())
+                                        .map_err(|err| format!("invalid xattr payload returned by PostgreSQL: {err}"))?;
+                                    Some(decoded)
+                                }
+                            };
+                            Ok(value)
+                        }
+                        _ => {
+                            PQclear(res);
+                            Err(conn_error(conn))
+                        }
+                    }
+                }
+            };
+            result
         })
     }
 }

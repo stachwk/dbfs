@@ -34,6 +34,15 @@ def load_dbfs_runtime_config(file_path):
     return runtime
 
 
+class RustPersistBlockInput(ctypes.Structure):
+    _fields_ = [
+        ("block_index", ctypes.c_uint64),
+        ("ptr", ctypes.POINTER(ctypes.c_ubyte)),
+        ("len", ctypes.c_size_t),
+        ("used_len", ctypes.c_uint64),
+    ]
+
+
 class PostgresBackend:
     def __init__(self, dsn, db_config, pool_max_connections=10, synchronous_commit="on"):
         self.dsn = dsn
@@ -187,6 +196,120 @@ class PostgresBackend:
             ctypes.POINTER(ctypes.c_ubyte),
         ]
         lib.dbfs_rust_pg_repo_get_hardlink_file_id.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_create_hardlink.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_ubyte,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_create_hardlink.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_create_directory.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+            ctypes.c_ubyte,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_create_directory.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_create_file.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+            ctypes.c_ubyte,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_create_file.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_create_special_file.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+            ctypes.c_ubyte,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_create_special_file.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_create_symlink.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+            ctypes.c_ubyte,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_create_symlink.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_choose_primary_hardlink.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_ubyte),
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_ubyte)),
+            ctypes.POINTER(ctypes.c_size_t),
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_choose_primary_hardlink.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_promote_hardlink_to_primary.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_promote_hardlink_to_primary.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_persist_copy_block_crc_rows.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.POINTER(RustPersistBlockInput),
+            ctypes.c_size_t,
+        ]
+        lib.dbfs_rust_pg_repo_persist_copy_block_crc_rows.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_persist_file_blocks.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_ubyte,
+            ctypes.POINTER(RustPersistBlockInput),
+            ctypes.c_size_t,
+        ]
+        lib.dbfs_rust_pg_repo_persist_file_blocks.restype = ctypes.c_int
         lib.dbfs_rust_pg_repo_count_file_links.argtypes = [
             ctypes.c_void_p,
             ctypes.c_uint64,
@@ -211,6 +334,17 @@ class PostgresBackend:
             ctypes.POINTER(ctypes.c_ubyte),
         ]
         lib.dbfs_rust_pg_repo_resolve_path.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_fetch_xattr_value.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_ubyte)),
+            ctypes.POINTER(ctypes.c_size_t),
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_fetch_xattr_value.restype = ctypes.c_int
         lib.dbfs_free_bytes.argtypes = [ctypes.POINTER(ctypes.c_ubyte), ctypes.c_size_t]
         lib.dbfs_free_bytes.restype = None
 
@@ -483,6 +617,277 @@ class PostgresBackend:
             return None
         return int(out_value.value)
 
+    def python_to_rust_namespace_create_hardlink(self, source_file_id, target_parent_id, target_name, uid, gid):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        target_name_bytes = str(target_name).encode("utf-8")
+        lib = self._load_rust_hotpath_lib()
+        out_value = ctypes.c_uint64()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_create_hardlink(
+            repo,
+            int(source_file_id),
+            int(target_parent_id or 0),
+            ctypes.c_ubyte(1 if target_parent_id is not None else 0),
+            target_name_bytes,
+            len(target_name_bytes),
+            ctypes.c_uint32(int(uid)),
+            ctypes.c_uint32(int(gid)),
+            ctypes.byref(out_value),
+            ctypes.byref(out_found),
+        )
+        if status != 0 or not out_found.value:
+            return None
+        return int(out_value.value)
+
+    def python_to_rust_namespace_create_directory(self, target_parent_id, target_name, mode, uid, gid, inode_seed):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        target_name_bytes = str(target_name).encode("utf-8")
+        inode_seed_bytes = str(inode_seed).encode("utf-8")
+        lib = self._load_rust_hotpath_lib()
+        out_value = ctypes.c_uint64()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_create_directory(
+            repo,
+            int(target_parent_id or 0),
+            ctypes.c_ubyte(1 if target_parent_id is not None else 0),
+            target_name_bytes,
+            len(target_name_bytes),
+            ctypes.c_uint32(int(mode)),
+            ctypes.c_uint32(int(uid)),
+            ctypes.c_uint32(int(gid)),
+            inode_seed_bytes,
+            len(inode_seed_bytes),
+            ctypes.byref(out_value),
+            ctypes.byref(out_found),
+        )
+        if status != 0 or not out_found.value:
+            return None
+        return int(out_value.value)
+
+    def python_to_rust_namespace_create_file(self, target_parent_id, target_name, mode, uid, gid, inode_seed):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        target_name_bytes = str(target_name).encode("utf-8")
+        inode_seed_bytes = str(inode_seed).encode("utf-8")
+        lib = self._load_rust_hotpath_lib()
+        out_value = ctypes.c_uint64()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_create_file(
+            repo,
+            int(target_parent_id or 0),
+            ctypes.c_ubyte(1 if target_parent_id is not None else 0),
+            target_name_bytes,
+            len(target_name_bytes),
+            ctypes.c_uint32(int(mode)),
+            ctypes.c_uint32(int(uid)),
+            ctypes.c_uint32(int(gid)),
+            inode_seed_bytes,
+            len(inode_seed_bytes),
+            ctypes.byref(out_value),
+            ctypes.byref(out_found),
+        )
+        if status != 0 or not out_found.value:
+            return None
+        return int(out_value.value)
+
+    def python_to_rust_namespace_create_special_file(self, target_parent_id, target_name, mode, uid, gid, inode_seed, file_kind, rdev_major, rdev_minor):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        target_name_bytes = str(target_name).encode("utf-8")
+        inode_seed_bytes = str(inode_seed).encode("utf-8")
+        file_kind_bytes = str(file_kind).encode("utf-8")
+        lib = self._load_rust_hotpath_lib()
+        out_value = ctypes.c_uint64()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_create_special_file(
+            repo,
+            int(target_parent_id or 0),
+            ctypes.c_ubyte(1 if target_parent_id is not None else 0),
+            target_name_bytes,
+            len(target_name_bytes),
+            ctypes.c_uint32(int(mode)),
+            ctypes.c_uint32(int(uid)),
+            ctypes.c_uint32(int(gid)),
+            inode_seed_bytes,
+            len(inode_seed_bytes),
+            file_kind_bytes,
+            len(file_kind_bytes),
+            ctypes.c_uint32(int(rdev_major)),
+            ctypes.c_uint32(int(rdev_minor)),
+            ctypes.byref(out_value),
+            ctypes.byref(out_found),
+        )
+        if status != 0 or not out_found.value:
+            return None
+        return int(out_value.value)
+
+    def python_to_rust_namespace_create_symlink(self, target_parent_id, target_name, target, uid, gid, inode_seed):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        target_name_bytes = str(target_name).encode("utf-8")
+        target_bytes = str(target).encode("utf-8")
+        inode_seed_bytes = str(inode_seed).encode("utf-8")
+        lib = self._load_rust_hotpath_lib()
+        out_value = ctypes.c_uint64()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_create_symlink(
+            repo,
+            int(target_parent_id or 0),
+            ctypes.c_ubyte(1 if target_parent_id is not None else 0),
+            target_name_bytes,
+            len(target_name_bytes),
+            target_bytes,
+            len(target_bytes),
+            ctypes.c_uint32(int(uid)),
+            ctypes.c_uint32(int(gid)),
+            inode_seed_bytes,
+            len(inode_seed_bytes),
+            ctypes.byref(out_value),
+            ctypes.byref(out_found),
+        )
+        if status != 0 or not out_found.value:
+            return None
+        return int(out_value.value)
+
+    def python_to_rust_namespace_choose_primary_hardlink(self, file_id):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        lib = self._load_rust_hotpath_lib()
+        out_hardlink_id = ctypes.c_uint64()
+        out_parent_id = ctypes.c_uint64()
+        out_parent_found = ctypes.c_ubyte()
+        out_ptr = ctypes.POINTER(ctypes.c_ubyte)()
+        out_len = ctypes.c_size_t()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_choose_primary_hardlink(
+            repo,
+            int(file_id),
+            ctypes.byref(out_hardlink_id),
+            ctypes.byref(out_parent_id),
+            ctypes.byref(out_parent_found),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+            ctypes.byref(out_found),
+        )
+        if status != 0 or not out_found.value:
+            return None
+
+        try:
+            name = ctypes.string_at(out_ptr, out_len.value).decode("utf-8")
+        finally:
+            lib.dbfs_free_bytes(out_ptr, out_len)
+
+        parent_id = int(out_parent_id.value) if out_parent_found.value else None
+        return int(out_hardlink_id.value), parent_id, name
+
+    def python_to_rust_namespace_promote_hardlink_to_primary(self, file_id):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        lib = self._load_rust_hotpath_lib()
+        out_promoted = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_promote_hardlink_to_primary(
+            repo,
+            int(file_id),
+            ctypes.byref(out_promoted),
+        )
+        if status != 0:
+            return None
+        return bool(out_promoted.value)
+
+    def python_to_rust_pg_repo_persist_copy_block_crc_rows(self, file_id, block_size, block_rows):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        if not block_rows:
+            return True
+
+        payload_buffers = []
+        inputs = []
+        for _, block_index, data, used_len in block_rows:
+            payload = bytes(data)
+            buffer = ctypes.create_string_buffer(payload, len(payload))
+            payload_buffers.append(buffer)
+            inputs.append(
+                RustPersistBlockInput(
+                    block_index=ctypes.c_uint64(int(block_index)),
+                    ptr=ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte)),
+                    len=ctypes.c_size_t(len(payload)),
+                    used_len=ctypes.c_uint64(int(used_len)),
+                )
+            )
+
+        inputs_array = (RustPersistBlockInput * len(inputs))(*inputs)
+        status = lib.dbfs_rust_pg_repo_persist_copy_block_crc_rows(
+            repo,
+            int(file_id),
+            int(block_size),
+            inputs_array,
+            len(inputs),
+        )
+        if status != 0:
+            return None
+        return True
+
+    def python_to_rust_pg_repo_persist_file_blocks(self, file_id, file_size, block_size, total_blocks, truncate_pending, block_rows):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        payload_buffers = []
+        inputs = []
+        for _, block_index, data, used_len in block_rows:
+            payload = bytes(data)
+            buffer = ctypes.create_string_buffer(payload, len(payload))
+            payload_buffers.append(buffer)
+            inputs.append(
+                RustPersistBlockInput(
+                    block_index=ctypes.c_uint64(int(block_index)),
+                    ptr=ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte)),
+                    len=ctypes.c_size_t(len(payload)),
+                    used_len=ctypes.c_uint64(int(used_len)),
+                )
+            )
+
+        inputs_array = (RustPersistBlockInput * len(inputs))(*inputs) if inputs else None
+        status = lib.dbfs_rust_pg_repo_persist_file_blocks(
+            repo,
+            int(file_id),
+            int(file_size),
+            int(block_size),
+            int(total_blocks),
+            ctypes.c_ubyte(1 if truncate_pending else 0),
+            inputs_array,
+            len(inputs),
+        )
+        if status != 0:
+            return None
+        return True
+
     def python_to_rust_namespace_count_file_links(self, file_id):
         repo = self._load_rust_pg_repo()
         if repo is None:
@@ -553,6 +958,36 @@ class PostgresBackend:
             kind_map.get(int(out_kind.value)),
             int(out_entry_id.value) if out_entry_found.value else None,
         )
+
+    def python_to_rust_xattr_fetch_value(self, path, name):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        path_bytes = str(path).encode("utf-8")
+        name_bytes = str(name).encode("utf-8")
+        lib = self._load_rust_hotpath_lib()
+        out_ptr = ctypes.POINTER(ctypes.c_ubyte)()
+        out_len = ctypes.c_size_t()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_fetch_xattr_value(
+            repo,
+            path_bytes,
+            len(path_bytes),
+            name_bytes,
+            len(name_bytes),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+            ctypes.byref(out_found),
+        )
+        if status != 0 or not out_found.value:
+            return None
+
+        try:
+            return ctypes.string_at(out_ptr, out_len.value)
+        finally:
+            if out_ptr:
+                lib.dbfs_free_bytes(out_ptr, out_len)
 
     def resolve_pool_max_connections(self, pool_max_connections):
         try:

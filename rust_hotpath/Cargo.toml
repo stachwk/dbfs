@@ -7,3 +7,6 @@ edition = "2021"
 name = "dbfs_rust_hotpath"
 path = "src/lib.rs"
 crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+base64 = "0.22.1"

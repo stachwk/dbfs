@@ -166,6 +166,11 @@ def main():
                 assert rust_file_links == 1, rust_file_links
                 assert backend.python_to_rust_storage_path_has_children(rust_dir_id) is True
 
+                user_value = b"rust-pg-xattr"
+                fs.setxattr(file_name, "user.comment", user_value, 0)
+                assert fs.getxattr(file_name, "user.comment") == user_value
+                assert backend.python_to_rust_xattr_fetch_value(file_name, "user.comment") == user_value
+
                 hardlink_name = f"{namespace_name}/payload-link.txt"
                 fs.link(hardlink_name, file_name)
                 rust_hardlink_id = backend.python_to_rust_namespace_get_hardlink_id(hardlink_name)
@@ -183,6 +188,7 @@ def main():
                 assert rust_hardlink_file_id == python_hardlink_file_id, (rust_hardlink_file_id, python_hardlink_file_id)
                 assert rust_hardlink_file_id == rust_file_id, (rust_hardlink_file_id, rust_file_id)
                 assert backend.python_to_rust_namespace_count_file_links(rust_file_id) == 2
+                assert backend.python_to_rust_xattr_fetch_value(hardlink_name, "user.comment") == user_value
 
                 fs.release(file_name, file_fh)
                 file_fh = None

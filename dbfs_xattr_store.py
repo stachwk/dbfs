@@ -52,6 +52,13 @@ class XattrStore:
         return owner_kind, int(owner_id)
 
     def fetch_xattr_value(self, path, name, cur=None):
+        backend = getattr(self.owner, "backend", None)
+        rust_fetch = getattr(backend, "python_to_rust_xattr_fetch_value", None)
+        if rust_fetch is not None:
+            rust_value = rust_fetch(path, name)
+            if rust_value is not None:
+                return rust_value
+
         owner_key = self.resolve_xattr_owner(path)
         if owner_key is None:
             return None
