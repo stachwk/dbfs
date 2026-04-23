@@ -94,12 +94,14 @@ def main():
                     python_hardlink_id = fs.get_hardlink_id(hardlink_name)
                     rust_hardlink_mode = backend.python_to_rust_namespace_get_file_mode_value(hardlink_name)
                     python_hardlink_mode = fs.get_file_mode_value(hardlink_name)
+                    rust_primary_hardlink = backend.python_to_rust_namespace_choose_primary_hardlink(rust_file_id)
                     rust_hardlink_file_id = backend.python_to_rust_namespace_get_hardlink_file_id(rust_hardlink_id)
                     python_hardlink_file_id = fs.get_hardlink_file_id(python_hardlink_id)
                     assert rust_hardlink_id == python_hardlink_id, (rust_hardlink_id, python_hardlink_id)
                     assert rust_hardlink_id is not None, rust_hardlink_id
                     assert rust_hardlink_mode == "644", rust_hardlink_mode
                     assert python_hardlink_mode == "644", python_hardlink_mode
+                    assert rust_primary_hardlink == (rust_hardlink_id, rust_dir_id, "payload-link.txt"), rust_primary_hardlink
                     assert rust_hardlink_file_id == python_hardlink_file_id, (rust_hardlink_file_id, python_hardlink_file_id)
                     assert rust_hardlink_file_id == rust_file_id, (rust_hardlink_file_id, rust_file_id)
                     assert backend.python_to_rust_namespace_count_file_links(rust_file_id) == 2

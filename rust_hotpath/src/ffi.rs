@@ -895,6 +895,76 @@ pub extern "C" fn dbfs_rust_pg_repo_get_hardlink_file_id(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_choose_primary_hardlink(
+    repo_ptr: *mut DbfsPgRepo,
+    file_id: u64,
+    out_hardlink_id: *mut u64,
+    out_parent_id: *mut u64,
+    out_parent_found: *mut u8,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+    out_found: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_found.is_null() || out_parent_found.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.choose_primary_hardlink(file_id) {
+            Ok(Some((hardlink_id, parent_id, name))) => {
+                if out_hardlink_id.is_null() {
+                    return 1;
+                }
+                *out_hardlink_id = hardlink_id;
+                match parent_id {
+                    Some(value) => {
+                        if out_parent_id.is_null() {
+                            return 1;
+                        }
+                        *out_parent_id = value;
+                        *out_parent_found = 1;
+                    }
+                    None => {
+                        *out_parent_found = 0;
+                        if !out_parent_id.is_null() {
+                            *out_parent_id = 0;
+                        }
+                    }
+                }
+                *out_found = 1;
+                write_boxed_output(name.into_bytes(), out_ptr, out_len)
+            }
+            Ok(None) => {
+                *out_found = 0;
+                *out_parent_found = 0;
+                if !out_hardlink_id.is_null() {
+                    *out_hardlink_id = 0;
+                }
+                if !out_parent_id.is_null() {
+                    *out_parent_id = 0;
+                }
+                if !out_ptr.is_null() {
+                    *out_ptr = std::ptr::null_mut();
+                }
+                if !out_len.is_null() {
+                    *out_len = 0;
+                }
+                0
+            }
+            Err(_) => {
+                *out_found = 0;
+                *out_parent_found = 0;
+                3
+            }
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn dbfs_rust_pg_repo_resolve_path(
     repo_ptr: *mut DbfsPgRepo,
     path_ptr: *const u8,

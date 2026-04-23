@@ -187,6 +187,17 @@ class PostgresBackend:
             ctypes.POINTER(ctypes.c_ubyte),
         ]
         lib.dbfs_rust_pg_repo_get_hardlink_file_id.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_choose_primary_hardlink.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_ubyte),
+            ctypes.POINTER(ctypes.POINTER(ctypes.c_ubyte)),
+            ctypes.POINTER(ctypes.c_size_t),
+            ctypes.POINTER(ctypes.c_ubyte),
+        ]
+        lib.dbfs_rust_pg_repo_choose_primary_hardlink.restype = ctypes.c_int
         lib.dbfs_rust_pg_repo_count_file_links.argtypes = [
             ctypes.c_void_p,
             ctypes.c_uint64,
@@ -482,6 +493,39 @@ class PostgresBackend:
         if status != 0 or not out_found.value:
             return None
         return int(out_value.value)
+
+    def python_to_rust_namespace_choose_primary_hardlink(self, file_id):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        lib = self._load_rust_hotpath_lib()
+        out_hardlink_id = ctypes.c_uint64()
+        out_parent_id = ctypes.c_uint64()
+        out_parent_found = ctypes.c_ubyte()
+        out_ptr = ctypes.POINTER(ctypes.c_ubyte)()
+        out_len = ctypes.c_size_t()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_choose_primary_hardlink(
+            repo,
+            int(file_id),
+            ctypes.byref(out_hardlink_id),
+            ctypes.byref(out_parent_id),
+            ctypes.byref(out_parent_found),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+            ctypes.byref(out_found),
+        )
+        if status != 0 or not out_found.value:
+            return None
+
+        try:
+            name = ctypes.string_at(out_ptr, out_len.value).decode("utf-8")
+        finally:
+            lib.dbfs_free_bytes(out_ptr, out_len)
+
+        parent_id = int(out_parent_id.value) if out_parent_found.value else None
+        return int(out_hardlink_id.value), parent_id, name
 
     def python_to_rust_namespace_count_file_links(self, file_id):
         repo = self._load_rust_pg_repo()

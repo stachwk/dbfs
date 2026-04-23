@@ -681,6 +681,84 @@ impl DbRepo {
         }
     }
 
+    pub fn choose_primary_hardlink(
+        &self,
+        file_id: u64,
+    ) -> Result<Option<(u64, Option<u64>, String)>, String> {
+        let sql = CString::new(
+            "
+            SELECT id_hardlink, id_directory, name
+            FROM hardlinks
+            WHERE id_file = $1
+            ORDER BY id_hardlink ASC
+            LIMIT 1
+            ",
+        )
+        .map_err(|_| "SQL contains NUL byte".to_string())?;
+        let file_id = CString::new(file_id.to_string())
+            .map_err(|_| "file id contains NUL byte".to_string())?;
+
+        unsafe {
+            let conn = connect(&self.conninfo)?;
+            let result = {
+                let param_values = [file_id.as_ptr()];
+                let param_lengths = [file_id.as_bytes().len() as c_int];
+                let param_formats = [0 as c_int];
+                let res = PQexecParams(
+                    conn,
+                    sql.as_ptr(),
+                    1,
+                    std::ptr::null(),
+                    param_values.as_ptr(),
+                    param_lengths.as_ptr(),
+                    param_formats.as_ptr(),
+                    0,
+                );
+                if res.is_null() {
+                    Err(conn_error(conn))
+                } else {
+                    match PQresultStatus(res) {
+                        PGRES_TUPLES_OK => {
+                            let rows = PQntuples(res);
+                            let cols = PQnfields(res);
+                            let value = if rows < 1 || cols < 3 {
+                                None
+                            } else {
+                                let hardlink_ptr = PQgetvalue(res, 0, 0);
+                                let parent_ptr = PQgetvalue(res, 0, 1);
+                                let name_ptr = PQgetvalue(res, 0, 2);
+                                if hardlink_ptr.is_null() || parent_ptr.is_null() || name_ptr.is_null() {
+                                    None
+                                } else {
+                                    let hardlink_id = CStr::from_ptr(hardlink_ptr)
+                                        .to_string_lossy()
+                                        .trim()
+                                        .parse::<u64>()
+                                        .ok();
+                                    let parent_id = CStr::from_ptr(parent_ptr)
+                                        .to_string_lossy()
+                                        .trim()
+                                        .parse::<u64>()
+                                        .ok();
+                                    let name = CStr::from_ptr(name_ptr).to_string_lossy().to_string();
+                                    hardlink_id.map(|hardlink_id| (hardlink_id, parent_id, name))
+                                }
+                            };
+                            PQclear(res);
+                            Ok(value)
+                        }
+                        _ => {
+                            PQclear(res);
+                            Err(conn_error(conn))
+                        }
+                    }
+                }
+            };
+            PQfinish(conn);
+            result
+        }
+    }
+
     pub fn count_file_links(&self, file_id: u64) -> Result<u64, String> {
         let sql = CString::new("SELECT 1 + COUNT(*) FROM hardlinks WHERE id_file = $1")
             .map_err(|_| "SQL contains NUL byte".to_string())?;
