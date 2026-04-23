@@ -1,5 +1,6 @@
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_uint};
+use std::sync::Mutex;
 
 #[repr(C)]
 struct PGconn {
@@ -155,6 +156,7 @@ where
 
 pub struct DbRepo {
     conninfo: String,
+    cached_conn: Mutex<Option<usize>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -179,13 +181,53 @@ impl DbRepo {
         }
         Ok(Self {
             conninfo: conninfo.to_string(),
+            cached_conn: Mutex::new(None),
         })
+    }
+
+    fn with_cached_connection<T, F>(&self, f: F) -> Result<T, String>
+    where
+        F: FnOnce(*mut PGconn) -> Result<T, String>,
+    {
+        let conn = {
+            let mut cached = self
+                .cached_conn
+                .lock()
+                .map_err(|_| "connection cache is poisoned".to_string())?;
+            match cached.take() {
+                Some(value) => value as *mut PGconn,
+                None => connect(&self.conninfo)?,
+            }
+        };
+
+        let result = f(conn);
+        match result {
+            Ok(value) => {
+                let mut cached = self
+                    .cached_conn
+                    .lock()
+                    .map_err(|_| "connection cache is poisoned".to_string())?;
+                if cached.is_none() {
+                    *cached = Some(conn as usize);
+                } else {
+                    unsafe {
+                        PQfinish(conn);
+                    }
+                }
+                Ok(value)
+            }
+            Err(err) => {
+                unsafe {
+                    PQfinish(conn);
+                }
+                Err(err)
+            }
+        }
     }
 
     pub fn query_scalar_text(&self, sql: &str) -> Result<String, String> {
         let sql = CString::new(sql).map_err(|_| "SQL contains NUL byte".to_string())?;
-        unsafe {
-            let conn = connect(&self.conninfo)?;
+        self.with_cached_connection(|conn| unsafe {
             let result = {
                 let res = PQexec(conn, sql.as_ptr());
                 if res.is_null() {
@@ -194,9 +236,8 @@ impl DbRepo {
                     fetch_single_text(res)
                 }
             };
-            PQfinish(conn);
             result
-        }
+        })
     }
 
     pub fn query_config_value(&self, key: &str) -> Result<Option<String>, String> {
@@ -204,8 +245,7 @@ impl DbRepo {
             .map_err(|_| "SQL contains NUL byte".to_string())?;
         let key = CString::new(key).map_err(|_| "config key contains NUL byte".to_string())?;
 
-        unsafe {
-            let conn = connect(&self.conninfo)?;
+        self.with_cached_connection(|conn| unsafe {
             let result = {
                 let param_values = [key.as_ptr()];
                 let param_lengths = [key.as_bytes().len() as c_int];
@@ -247,9 +287,8 @@ impl DbRepo {
                     }
                 }
             };
-            PQfinish(conn);
             result
-        }
+        })
     }
 
     pub fn is_in_recovery(&self) -> Result<bool, String> {
@@ -327,8 +366,7 @@ impl DbRepo {
         .map_err(|_| "SQL contains NUL byte".to_string())?;
         let path = CString::new(path).map_err(|_| "path contains NUL byte".to_string())?;
 
-        unsafe {
-            let conn = connect(&self.conninfo)?;
+        self.with_cached_connection(|conn| unsafe {
             let result = {
                 let param_values = [path.as_ptr()];
                 let param_lengths = [path.as_bytes().len() as c_int];
@@ -371,9 +409,8 @@ impl DbRepo {
                     }
                 }
             };
-            PQfinish(conn);
             result
-        }
+        })
     }
 
     pub fn get_file_id(&self, path: &str) -> Result<Option<u64>, String> {
@@ -389,8 +426,7 @@ impl DbRepo {
             .map(|value| CString::new(value.to_string()).map_err(|_| "parent id contains NUL byte".to_string()))
             .transpose()?;
 
-        unsafe {
-            let conn = connect(&self.conninfo)?;
+        self.with_cached_connection(|conn| unsafe {
             let result = {
                 let sql = if has_parent {
                     CString::new(
@@ -476,9 +512,8 @@ impl DbRepo {
                     }
                 }
             };
-            PQfinish(conn);
             result
-        }
+        })
     }
 
     pub fn get_file_mode_value(&self, path: &str) -> Result<Option<String>, String> {

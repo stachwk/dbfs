@@ -584,7 +584,8 @@ test-rust-hotpath-read-assemble:
 	$(VENV_PYTHON) tests/integration/test_rust_hotpath_read_assemble.py
 
 test-rust-pg-query: init
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_rust_pg_query.py
+	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
+	DBFS_RUST_HOTPATH_LIB=$(CURDIR)/rust_hotpath/target/debug/libdbfs_rust_hotpath.so POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_rust_pg_query.py
 
 test-rust-hotpath-copy-pack-benchmark: init
 	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib --bin dbfs-copy-pack
