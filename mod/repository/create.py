@@ -198,9 +198,27 @@ class NamespaceRepositoryCreateMutations:
         if parent_path != "/" and self.get_dir_id(parent_path) is None:
             raise dbfs.FuseOSError(errno.ENOENT)
 
+        uid, gid = dbfs.creation_uid_gid(parent_path)
+        inode_seed = dbfs.generate_inode_seed()
+        rust_file_id = dbfs.backend.python_to_rust_namespace_create_file(
+            parent_id,
+            file_name,
+            mode,
+            uid,
+            gid,
+            inode_seed,
+        )
+        if rust_file_id is not None:
+            with dbfs.db_connection() as conn, conn.cursor() as cur:
+                dbfs.copy_default_acl_to_child(parent_path, path, child_is_dir=False, cur=cur, owner_key=("file", rust_file_id))
+                dbfs.append_journal_event(cur, "create", path, file_id=rust_file_id, directory_id=parent_id)
+                conn.commit()
+            dbfs.touch_namespace_epoch()
+            dbfs.invalidate_metadata_cache(include_statfs=True)
+            return rust_file_id
+
         with dbfs.db_connection() as conn, conn.cursor() as cur:
             try:
-                uid, gid = dbfs.creation_uid_gid(parent_path)
                 file_ctime = dbfs.ctime_column("files")
                 cur.execute(
                     """

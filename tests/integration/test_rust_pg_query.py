@@ -82,6 +82,18 @@ def main():
             assert fs.get_dir_id(rust_created_dir_name) == rust_created_dir_id
             fs.rmdir(rust_created_dir_name)
 
+            rust_created_file_name = f"{namespace_name}/rust-created-file.txt"
+            rust_created_file_id = backend.python_to_rust_namespace_create_file(
+                rust_dir_id,
+                "rust-created-file.txt",
+                0o644,
+                *fs.current_uid_gid(),
+                fs.generate_inode_seed(),
+            )
+            assert rust_created_file_id is not None, rust_created_file_id
+            assert fs.get_file_id(rust_created_file_name) == rust_created_file_id
+            assert fs.get_file_mode_value(rust_created_file_name) == "644"
+
             file_name = f"{namespace_name}/payload.txt"
             file_fh = fs.create(file_name, 0o644)
             try:
@@ -148,6 +160,7 @@ def main():
             finally:
                 fs.release(file_name, file_fh)
                 fs.unlink(file_name)
+                fs.unlink(rust_created_file_name)
         finally:
             fs.rmdir(namespace_name)
     finally:

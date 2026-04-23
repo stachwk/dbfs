@@ -31,6 +31,19 @@ Observed on a mounted DBFS instance:
 - `8 MiB` write: roughly `9.06 MiB/s`
 - `16 MiB` write: roughly `7.83 MiB/s`
 
+Recent `bulk_write` profile write timing with `dd`:
+
+- `bs=4k count=10240`
+  - `bytes=41943040`
+  - `elapsed_s=5.56531`
+  - `throughput_mib_s=7.5`
+- `bs=4M count=100`
+  - `bytes=419430400`
+  - `elapsed_s=19.1294`
+  - `throughput_mib_s=22`
+
+The `4M` batch remains materially faster than the tiny `4k` burst on this profile, which matches the current tuning direction.
+
 ### Recent Throughput Run
 
 Observed on the current default throughput target (`make test-throughput`):
