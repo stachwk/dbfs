@@ -99,14 +99,17 @@ def main() -> None:
         StorageSupport._load_rust_hotpath_lib = original_loader
         subprocess.run = original_run
 
-    assert fallback_written == 8192, fallback_written
-    assert fallback_writes == [(4096, b"B" * 4096), (8192, b"C" * 4096)], fallback_writes
     assert seen["cmd"][0].endswith("dbfs-copy-dedupe"), seen
     assert seen["cmd"][1:] == ["0", "12288", "4096"], seen
     assert seen["check"] is True and seen["capture_output"] is True and seen["text"] is True, seen
     assert "41414141" in seen["input"], seen
     assert "42424242" in seen["input"], seen
     assert "58585858" in seen["input"], seen
+    assert fallback_written == 8192, fallback_written
+    assert fallback_writes in [
+        [(4096, b"B" * 4096), (8192, b"C" * 4096)],
+        [(4096, b"B" * 4096 + b"C" * 4096)],
+    ], fallback_writes
 
     print("OK rust-hotpath-copy-dedupe")
 

@@ -96,6 +96,9 @@ class DBFS(Operations):
         self.rust_hotpath_read_assemble = self.resolve_rust_hotpath_read_assemble()
         self.metadata_cache_ttl_seconds = self.resolve_metadata_cache_ttl_seconds()
         self.statfs_cache_ttl_seconds = self.resolve_statfs_cache_ttl_seconds()
+        self.requested_role = (role or "auto").lower()
+        self.role = self.resolve_runtime_role(self.requested_role)
+        self.read_only = self.role == "replica"
         self.lock_backend = self.resolve_lock_backend()
         self.lock_lease_ttl_seconds = self.resolve_lock_lease_ttl_seconds()
         self.lock_heartbeat_interval_seconds = self.resolve_lock_heartbeat_interval_seconds()
@@ -114,9 +117,6 @@ class DBFS(Operations):
             "release": {"count": 0, "seconds": 0.0, "bytes": 0, "max_seconds": 0.0},
             "fsync": {"count": 0, "seconds": 0.0, "bytes": 0, "max_seconds": 0.0},
         }
-        self.requested_role = (role or "auto").lower()
-        self.role = self.resolve_runtime_role(self.requested_role)
-        self.read_only = self.role == "replica"
         self._path_locks_guard = threading.RLock()
         self._seek_positions = {}
         self._timestamp_touch_guard = threading.RLock()
@@ -404,7 +404,7 @@ class DBFS(Operations):
     def resolve_rust_hotpath_copy_dedupe(self):
         raw_value = os.environ.get("DBFS_RUST_HOTPATH_COPY_DEDUPE")
         if raw_value is None or raw_value == "":
-            return bool(self.runtime_config_getbool("rust_hotpath_copy_dedupe", True))
+            return bool(self.runtime_config_getbool("rust_hotpath_copy_dedupe", False))
         return self.parse_bool_value(raw_value, "DBFS_RUST_HOTPATH_COPY_DEDUPE")
 
     def resolve_rust_hotpath_copy_pack(self):
@@ -466,6 +466,18 @@ class DBFS(Operations):
     def resolve_lock_backend(self):
         raw_value = os.environ.get("DBFS_LOCK_BACKEND")
         configured_value = self.runtime_config_get("lock_backend", "postgres_lease")
+        if self.read_only:
+            if raw_value and raw_value.strip().lower() not in {"memory", "postgres_lease"}:
+                logging.warning(
+                    "DBFS_LOCK_BACKEND=%s is ignored on replica; using memory lock backend",
+                    raw_value,
+                )
+            if configured_value and str(configured_value).strip().lower() not in {"memory", "postgres_lease"}:
+                logging.warning(
+                    "lock_backend=%s is ignored on replica; using memory lock backend",
+                    configured_value,
+                )
+            return "memory"
         if raw_value and raw_value.strip().lower() != "postgres_lease":
             logging.warning("DBFS_LOCK_BACKEND=%s is ignored; postgres_lease is the only supported backend", raw_value)
         if configured_value and str(configured_value).strip().lower() != "postgres_lease":
