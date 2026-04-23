@@ -1304,9 +1304,8 @@ class StorageSupport:
             helper = self.python_to_rust_hotpath_read_assemble_bin_path()
             if helper is not None:
                 try:
-                    zero_block = b"\x00" * block_size
                     input_data = "\n".join(
-                        f"{block_index}|{(bytes(state['overlay_blocks'][block_index]) if state is not None and block_index in state['overlay_blocks'] else block_map.get(block_index, zero_block)).hex()}"
+                        f"{block_index}|{(bytes(state['overlay_blocks'][block_index]) if state is not None and block_index in state['overlay_blocks'] else block_map.get(block_index, b'')).hex()}"
                         for block_index in range(fetch_first, fetch_last + 1)
                     )
                     completed = subprocess.run(
