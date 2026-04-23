@@ -287,6 +287,7 @@ DBFS is controlled by a mix of CLI flags, environment variables, and config file
 | `DBFS_ATTR_TIMEOUT_SECONDS` | Environment | `0` | Controls FUSE attribute cache TTL. |
 | `DBFS_NEGATIVE_TIMEOUT_SECONDS` | Environment | `0` | Controls FUSE negative-entry cache TTL. |
 | `DBFS_SYNCHRONOUS_COMMIT` | Environment | `on` | Controls PostgreSQL `synchronous_commit` per connection. |
+| `DBFS_PG_VISIBLE_PATH` | Environment | unset | Overrides the path DBFS uses to measure PostgreSQL-visible filesystem capacity for `statfs()`. |
 | `DBFS_PERSIST_BUFFER_CHUNK_BLOCKS` | Environment | `128` | Controls how many dirty blocks DBFS batches per `persist_buffer()` SQL call. |
 | `DBFS_PG_SSLMODE`, `DBFS_PG_SSLROOTCERT`, `DBFS_PG_SSLCERT`, `DBFS_PG_SSLKEY` | Environment | unset | Overrides PostgreSQL TLS connection parameters. |
 
@@ -316,6 +317,8 @@ It may also include a `[dbfs]` section with:
 - `workers_write`
 - `workers_write_min_blocks`
 - `persist_buffer_chunk_blocks`
+- `max_fs_size_bytes`
+- `pg_visible_path`
 - `copy_dedupe_enabled`
 - `copy_dedupe_min_blocks`
 - `copy_dedupe_max_blocks`
@@ -498,7 +501,7 @@ The current comparison baselines for throughput, large copy, large multi-block f
 ## Runtime Options
 
 If you need `allow_other`, run the mount with `DBFS_ALLOW_OTHER=1`, but only if your `/etc/fuse.conf` permits it.
-`/etc/dbfs/dbfs_config.ini` can also include a `[dbfs]` section with `pool_max_connections = N` to control how many PostgreSQL connections the filesystem pool may open. The same section can also set storage and read-tuning defaults such as `write_flush_threshold_bytes`, `read_cache_blocks`, `read_ahead_blocks`, `sequential_read_ahead_blocks`, `small_file_read_threshold_blocks`, `metadata_cache_ttl_seconds`, and `statfs_cache_ttl_seconds`. If that file does not exist, DBFS falls back to `dbfs_config.ini` in the project root.
+`/etc/dbfs/dbfs_config.ini` can also include a `[dbfs]` section with `pool_max_connections = N` to control how many PostgreSQL connections the filesystem pool may open. The same section can also set storage and read-tuning defaults such as `write_flush_threshold_bytes`, `max_fs_size_bytes`, `read_cache_blocks`, `read_ahead_blocks`, `sequential_read_ahead_blocks`, `small_file_read_threshold_blocks`, `metadata_cache_ttl_seconds`, and `statfs_cache_ttl_seconds`. `max_fs_size_bytes` accepts plain bytes as well as binary size strings like `50GiB` or `1TiB`, and `pg_visible_path` can point DBFS at the path that PostgreSQL can actually see on disk for `statfs()` capping. If that file does not exist, DBFS falls back to `dbfs_config.ini` in the project root.
 The same section may also set threaded read/write knobs such as `workers_read`, `workers_read_min_blocks`, `workers_write`, and `workers_write_min_blocks`, plus `persist_buffer_chunk_blocks` for larger or smaller `execute_values()` batches during flush. `workers_read` is only used when a read misses split into multiple disjoint block ranges, and `workers_write` is only used for copy operations that can be split into multiple source segments. `block_size` still matters here because the worker heuristics operate in blocks, not in raw bytes, so a smaller or larger block size can change when parallelism becomes worthwhile without directly turning "4 KiB" into "one thread". For rsync-like or repeated copy workloads, `copy_dedupe_enabled` can compare destination blocks and skip unchanged ranges during `copy_file_range()`; `copy_dedupe_min_blocks` is the lower gate, `copy_dedupe_max_blocks` is an optional upper cap for very large files, and `copy_dedupe_crc_table` can keep a PostgreSQL-side CRC cache for those comparisons and populate it lazily on demand. Keep the copy dedupe knobs off by default unless you know the workload benefits from them, and leave `rust_hotpath_copy_dedupe` disabled unless you explicitly want the Rust dedupe path. It can also set `synchronous_commit` to control PostgreSQL session durability per connection; valid values are `on`, `off`, `local`, `remote_write`, and `remote_apply`.
 If you want a production-style preset, set `DBFS_PROFILE=bulk_write`, `DBFS_PROFILE=metadata_heavy`, or `DBFS_PROFILE=pg_locking` before mount. The selected profile overrides the base `[dbfs]` values from `dbfs_config.ini`.
 You can also pass the profile explicitly as `--profile bulk_write` to `dbfs_bootstrap.py` / `dbfs-bootstrap`, or as `-o profile=bulk_write` to `mount.dbfs`.

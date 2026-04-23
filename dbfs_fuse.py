@@ -23,6 +23,7 @@ import threading
 
 from dbfs_backend import PostgresBackend
 from dbfs_backend import load_dbfs_runtime_config, load_dsn_from_config
+from dbfs_config import parse_size_bytes
 from dbfs_schema import SCHEMA_VERSION
 from dbfs_identity import (
     compute_device_id as identity_compute_device_id,
@@ -75,7 +76,7 @@ class DBFS(Operations):
         self.xattr_acl = XattrAclSupport(self)
         self.default_block_size = 4096
         self.block_size = self.load_block_size(self._startup_snapshot)
-        self.default_max_fs_size_bytes = 10 * 1024**3
+        self.default_max_fs_size_bytes = parse_size_bytes("10GiB")
         self.write_flush_threshold_bytes = self.resolve_write_flush_threshold_bytes()
         self.read_cache_max_blocks = self.resolve_read_cache_max_blocks()
         self.read_ahead_blocks = self.resolve_read_ahead_blocks()
@@ -229,6 +230,48 @@ class DBFS(Operations):
         if acl_mode == "on":
             return True
         return False
+
+    def resolve_pg_visible_path(self):
+        env_path = os.environ.get("DBFS_PG_VISIBLE_PATH")
+        if env_path:
+            return env_path.strip()
+
+        runtime_path = self.runtime_config_get("pg_visible_path", None)
+        if runtime_path:
+            return str(runtime_path).strip()
+
+        try:
+            data_directory = self.backend.python_to_rust_pg_query_scalar_text("SHOW data_directory")
+        except Exception:
+            return None
+        if not data_directory:
+            return None
+        return str(data_directory).strip()
+
+    def resolve_pg_visible_fs_total_bytes(self):
+        pg_visible_path = self.resolve_pg_visible_path()
+        if not pg_visible_path:
+            return None
+        try:
+            stats = os.statvfs(pg_visible_path)
+        except Exception:
+            return None
+        return int(stats.f_frsize) * int(stats.f_blocks)
+
+    def resolve_max_fs_size_bytes(self):
+        runtime_value = self.runtime_config_get("max_fs_size_bytes", None)
+        configured_size = parse_size_bytes(runtime_value, default=None)
+        if configured_size is None:
+            configured_size = parse_size_bytes(
+                self.get_config_value("max_fs_size_bytes", self.default_max_fs_size_bytes),
+                default=self.default_max_fs_size_bytes,
+            )
+
+        configured_size = max(1, int(configured_size))
+        pg_visible_size = self.resolve_pg_visible_fs_total_bytes()
+        if pg_visible_size is None:
+            return configured_size
+        return max(1, min(configured_size, int(pg_visible_size)))
 
     def resolve_write_flush_threshold_bytes(self):
         raw_value = os.environ.get("DBFS_WRITE_FLUSH_THRESHOLD_BYTES")
@@ -1898,10 +1941,7 @@ class DBFS(Operations):
 
             cur.execute("SELECT COALESCE(SUM(LENGTH(data)), 0) FROM data_blocks")
             total_data_size = cur.fetchone()[0]
-
-            cur.execute("SELECT value FROM config WHERE key = 'max_fs_size_bytes'")
-            total_size_result = cur.fetchone()
-            max_fs_size_bytes = total_size_result[0] if total_size_result else self.default_max_fs_size_bytes
+            max_fs_size_bytes = self.resolve_max_fs_size_bytes()
 
             max_blocks = max_fs_size_bytes // block_size
             used_blocks = (total_data_size + block_size - 1) // block_size

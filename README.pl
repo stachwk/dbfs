@@ -286,6 +286,7 @@ DBFS jest sterowany przez flagi CLI, zmienne środowiskowe oraz wartości z plik
 | `DBFS_ATTR_TIMEOUT_SECONDS` | Zmienna środowiskowa | `0` | Steruje TTL cache atrybutów w FUSE. |
 | `DBFS_NEGATIVE_TIMEOUT_SECONDS` | Zmienna środowiskowa | `0` | Steruje TTL cache negatywnych wpisów w FUSE. |
 | `DBFS_SYNCHRONOUS_COMMIT` | Zmienna środowiskowa | `on` | Steruje `synchronous_commit` PostgreSQL dla każdego połączenia. |
+| `DBFS_PG_VISIBLE_PATH` | Zmienna środowiskowa | nieustawione | Nadpisuje ścieżkę używaną do pomiaru widocznej dla PostgreSQL pojemności filesystemu dla `statfs()`. |
 | `DBFS_PERSIST_BUFFER_CHUNK_BLOCKS` | Zmienna środowiskowa | `128` | Steruje liczbą dirty bloków pakowanych do jednego zapytania `persist_buffer()`. |
 | `DBFS_PG_SSLMODE`, `DBFS_PG_SSLROOTCERT`, `DBFS_PG_SSLCERT`, `DBFS_PG_SSLKEY` | Zmienna środowiskowa | nieustawione | Nadpisuje parametry TLS połączenia do PostgreSQL. |
 
@@ -315,6 +316,8 @@ Może też zawierać sekcję `[dbfs]` z:
 - `workers_write`
 - `workers_write_min_blocks`
 - `persist_buffer_chunk_blocks`
+- `max_fs_size_bytes`
+- `pg_visible_path`
 - `copy_dedupe_enabled`
 - `copy_dedupe_min_blocks`
 - `copy_dedupe_max_blocks`
@@ -496,7 +499,7 @@ Aktualne baseline'y porównawcze dla throughput, dużego copy, dużych wieloblok
 ## Opcje runtime
 
 Jeśli potrzebujesz `allow_other`, uruchom mount z `DBFS_ALLOW_OTHER=1`, ale tylko wtedy, gdy `/etc/fuse.conf` na to pozwala.
-W `/etc/dbfs/dbfs_config.ini` można też dodać sekcję `[dbfs]` z `pool_max_connections = N`, żeby ograniczyć liczbę połączeń PostgreSQL, które może otworzyć pula DBFS. Ta sama sekcja może także ustawiać domyślne parametry storage/read, takie jak `write_flush_threshold_bytes`, `read_cache_blocks`, `read_ahead_blocks`, `sequential_read_ahead_blocks`, `small_file_read_threshold_blocks`, `metadata_cache_ttl_seconds` i `statfs_cache_ttl_seconds`. Jeśli tego pliku nie ma, DBFS użyje `dbfs_config.ini` z katalogu projektu.
+W `/etc/dbfs/dbfs_config.ini` można też dodać sekcję `[dbfs]` z `pool_max_connections = N`, żeby ograniczyć liczbę połączeń PostgreSQL, które może otworzyć pula DBFS. Ta sama sekcja może także ustawiać domyślne parametry storage/read, takie jak `write_flush_threshold_bytes`, `max_fs_size_bytes`, `read_cache_blocks`, `read_ahead_blocks`, `sequential_read_ahead_blocks`, `small_file_read_threshold_blocks`, `metadata_cache_ttl_seconds` i `statfs_cache_ttl_seconds`. `max_fs_size_bytes` przyjmuje zwykłe bajty albo binarne rozmiary typu `50GiB` czy `1TiB`, a `pg_visible_path` pozwala wskazać ścieżkę, którą PostgreSQL faktycznie widzi na dysku, żeby `statfs()` mógł ograniczyć raportowany rozmiar do rzeczywistego. Jeśli tego pliku nie ma, DBFS użyje `dbfs_config.ini` z katalogu projektu.
 Ta sama sekcja może też ustawiać parametry wielowątkowości dla większych odczytów i kopiowania, takie jak `workers_read`, `workers_read_min_blocks`, `workers_write` i `workers_write_min_blocks`, oraz `persist_buffer_chunk_blocks`, które decyduje o wielkości paczek `execute_values()` podczas flushu. `workers_read` jest używane tylko wtedy, gdy brakujące bloki w odczycie dzielą się na kilka rozłącznych zakresów, a `workers_write` tylko wtedy, gdy kopiowanie można podzielić na kilka segmentów źródłowych. `block_size` nadal ma znaczenie, bo heurystyki workerów działają na blokach, a nie na surowych bajtach, więc mniejszy albo większy blok zmienia moment, w którym wielowątkowość zaczyna mieć sens, ale nie oznacza automatycznie "4 KiB = jeden wątek". Dla powtarzanych kopii typu rsync można też włączyć `copy_dedupe_enabled`, żeby porównywać bloki docelowe i pomijać niezmienione zakresy podczas `copy_file_range()`; `copy_dedupe_min_blocks` jest dolną bramką, `copy_dedupe_max_blocks` opcjonalnym górnym limitem dla bardzo dużych plików, a `copy_dedupe_crc_table` może przy tym utrzymywać tabelę CRC w PostgreSQL i uzupełniać ją lazy podczas porównań. Knoby dedupe zostają domyślnie wyłączone, jeśli nie wiesz, że workload faktycznie na tym korzysta, a `rust_hotpath_copy_dedupe` zostaje wyłączony, dopóki nie włączysz go jawnie. Może też ustawiać `synchronous_commit`, żeby sterować trwałością sesji PostgreSQL dla każdego połączenia; dozwolone wartości to `on`, `off`, `local`, `remote_write` i `remote_apply`.
 Jeśli chcesz gotowy preset produkcyjny, ustaw `DBFS_PROFILE=bulk_write`, `DBFS_PROFILE=metadata_heavy` albo `DBFS_PROFILE=pg_locking` przed mountem. Wybrany profil nadpisuje bazowe wartości z `[dbfs]` w `dbfs_config.ini`.
 Profil możesz też podać jawnie jako `--profile bulk_write` do `dbfs_bootstrap.py` / `dbfs-bootstrap` albo jako `-o profile=bulk_write` do `mount.dbfs`.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import configparser
 import os
+import re
 from pathlib import Path
 
 
@@ -56,3 +57,37 @@ def load_config_parser(file_path: str | os.PathLike[str] | None = None, base_dir
     if not read_files:
         raise FileNotFoundError(f"Unable to read DBFS configuration: {config_path}")
     return config, config_path
+
+
+def parse_size_bytes(value, default=None):
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+
+    normalized = str(value).strip().replace("_", "")
+    if normalized == "":
+        return default
+
+    if normalized.isdigit():
+        return int(normalized)
+
+    match = re.fullmatch(r"(?i)(\d+)(?:\s*([kmgtp]?)(i?b)?)?", normalized)
+    if not match:
+        return default
+
+    number = int(match.group(1))
+    suffix = (match.group(2) or "").lower()
+    multipliers = {
+        "": 1,
+        "k": 1024,
+        "m": 1024**2,
+        "g": 1024**3,
+        "t": 1024**4,
+        "p": 1024**5,
+    }
+    return number * multipliers.get(suffix, 1)
