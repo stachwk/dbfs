@@ -22,6 +22,7 @@ This document records the small set of open follow-ups plus completed work, clos
 - Move PostgreSQL away from storing thousands of 4 KiB blocks directly and toward dynamic extents.
 - Move SQL/query execution from Python into Rust so the persistence path becomes Python -> Rust -> PostgreSQL, not Python -> PostgreSQL directly.
 - Keep Python as the orchestration layer for FUSE callbacks, reconnect retries, ACL, journal, and runtime config.
+- Treat this as the next major direction rather than a hard rewrite backlog; when adjacent work touches `truncate`, `fallocate`, `write`, `copy`, `flush`, or `persist`, prefer carving out the corresponding extent/storage piece in Rust if it can be done safely and incrementally.
 - Capture the next architectural step explicitly:
   - `logical_block_size = 4k`
   - `persist model = extents`
