@@ -726,6 +726,15 @@ class StorageSupport:
             return None
         return int(out.fetch_first), int(out.fetch_last)
 
+    def _read_fetch_bounds_rust_ffi(self, total_blocks, requested_first, requested_last, sequential, streak):
+        return self.python_to_rust_hotpath_read_fetch_bounds(
+            total_blocks,
+            requested_first,
+            requested_last,
+            sequential,
+            streak,
+        )
+
     def python_to_rust_hotpath_read_slice_plan(self, file_size, offset, size, block_size, sequential, streak):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
