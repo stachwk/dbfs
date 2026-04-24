@@ -1152,6 +1152,9 @@ class StorageSupport:
         buffer = ctypes.create_string_buffer(data, len(data))
         return int(lib.dbfs_crc32(ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte)), len(data)))
 
+    def _crc32_rust_ffi(self, data):
+        return self.python_to_rust_hotpath_crc32(data)
+
     def python_to_rust_hotpath_persist_block_payload(self, payload, used_len, block_size):
         lib = self._load_rust_hotpath_lib()
         if lib is None:

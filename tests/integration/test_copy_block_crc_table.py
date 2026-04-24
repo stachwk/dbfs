@@ -109,7 +109,7 @@ def main() -> None:
             )
             crc_rows_after_first_copy = cur.fetchall()
         expected_source_crcs = [
-            crc_helper._crc32_rust_ffi(payload[index * block_size : (index + 1) * block_size])
+            crc_helper.python_to_rust_hotpath_crc32(payload[index * block_size : (index + 1) * block_size])
             for index in range(expected_full_blocks)
         ]
         if any(value is None for value in expected_source_crcs):
@@ -120,7 +120,7 @@ def main() -> None:
         mutated_block = bytearray(payload[:block_size])
         mutated_block[0] ^= 0xFF
         mutated_payload = bytes(mutated_block) + payload[block_size:]
-        mutated_crc = crc_helper._crc32_rust_ffi(mutated_payload[:block_size])
+        mutated_crc = crc_helper.python_to_rust_hotpath_crc32(mutated_payload[:block_size])
         if mutated_crc is None:
             raise AssertionError("expected Rust CRC32 to be available")
 
