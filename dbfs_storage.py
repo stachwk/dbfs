@@ -758,6 +758,16 @@ class StorageSupport:
             return None
         return int(out.total_blocks), int(out.fetch_first), int(out.fetch_last)
 
+    def _read_slice_plan_rust_ffi(self, file_size, offset, size, block_size, sequential, streak):
+        return self.python_to_rust_hotpath_read_slice_plan(
+            file_size,
+            offset,
+            size,
+            block_size,
+            sequential,
+            streak,
+        )
+
     def python_to_rust_hotpath_block_transfer_plan(self, length, block_size, requested_workers, workers_min_blocks, minimum_one):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
@@ -771,6 +781,15 @@ class StorageSupport:
             ctypes.c_ubyte(1 if minimum_one else 0),
         )
         return int(result.total_blocks), bool(result.parallel), int(result.workers)
+
+    def _block_transfer_plan_rust_ffi(self, length, block_size, requested_workers, workers_min_blocks, minimum_one):
+        return self.python_to_rust_hotpath_block_transfer_plan(
+            length,
+            block_size,
+            requested_workers,
+            workers_min_blocks,
+            minimum_one,
+        )
 
     def python_to_rust_hotpath_block_transfer_total_blocks(self, length, block_size, minimum_one):
         plan = self.python_to_rust_hotpath_block_transfer_plan(length, block_size, 1, 1, minimum_one)
@@ -788,6 +807,14 @@ class StorageSupport:
         if plan is None:
             return None
         return plan[1]
+
+    def _read_missing_range_worker_count_rust_ffi(self, workers_read, workers_read_min_blocks, missing_len, contiguous_ranges_len):
+        return self.python_to_rust_hotpath_read_missing_range_worker_count(
+            workers_read,
+            workers_read_min_blocks,
+            missing_len,
+            contiguous_ranges_len,
+        )
 
     def python_to_rust_hotpath_read_missing_range_worker_plan(self, workers_read, workers_read_min_blocks, missing_len, contiguous_ranges_len):
         return self.python_to_rust_hotpath_parallel_worker_plan(
@@ -810,6 +837,12 @@ class StorageSupport:
             )
         )
 
+    def _block_count_for_length_rust_ffi(self, length, block_size, minimum_one):
+        return self.python_to_rust_hotpath_block_count_for_length(length, block_size, minimum_one)
+
+    def _block_count_for_length_rust_ffi(self, length, block_size, minimum_one):
+        return self.python_to_rust_hotpath_block_count_for_length(length, block_size, minimum_one)
+
     def _block_count_for_length(self, length, block_size, minimum_one):
         count = self.python_to_rust_hotpath_block_count_for_length(length, block_size, minimum_one)
         if count is not None:
@@ -831,6 +864,9 @@ class StorageSupport:
             )
         )
 
+    def _dirty_block_size_rust_ffi(self, file_size, block_index, block_size):
+        return self.python_to_rust_hotpath_dirty_block_size(file_size, block_index, block_size)
+
     def python_to_rust_hotpath_write_copy_worker_count(self, total_blocks, workers_write, workers_write_min_blocks):
         plan = self.python_to_rust_hotpath_parallel_worker_plan(
             workers_write,
@@ -841,6 +877,13 @@ class StorageSupport:
         if plan is None:
             return None
         return plan[1]
+
+    def _write_copy_worker_count_rust_ffi(self, total_blocks, workers_write, workers_write_min_blocks):
+        return self.python_to_rust_hotpath_write_copy_worker_count(
+            total_blocks,
+            workers_write,
+            workers_write_min_blocks,
+        )
 
     def python_to_rust_hotpath_write_copy_worker_plan(self, total_blocks, workers_write, workers_write_min_blocks):
         return self.python_to_rust_hotpath_parallel_worker_plan(
@@ -873,6 +916,14 @@ class StorageSupport:
             bool(result.dedupe_enabled),
             bool(result.parallel),
             int(result.workers),
+        )
+
+    def _write_copy_plan_rust_ffi(self, length, block_size, workers_write, workers_write_min_blocks):
+        return self.python_to_rust_hotpath_write_copy_plan(
+            length,
+            block_size,
+            workers_write,
+            workers_write_min_blocks,
         )
 
     def _block_transfer_plan(self, length, block_size, requested_workers, workers_min_blocks, minimum_one):
@@ -938,6 +989,14 @@ class StorageSupport:
             )
         )
 
+    def _parallel_worker_count_rust_ffi(self, requested_workers, minimum_items_for_parallel, total_items, parallel_groups):
+        return self.python_to_rust_hotpath_parallel_worker_count(
+            requested_workers,
+            minimum_items_for_parallel,
+            total_items,
+            parallel_groups,
+        )
+
     def python_to_rust_hotpath_parallel_worker_plan(self, requested_workers, minimum_items_for_parallel, total_items, parallel_groups):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
@@ -950,6 +1009,14 @@ class StorageSupport:
             ctypes.c_uint64(int(parallel_groups)),
         )
         return bool(result.parallel), int(result.workers)
+
+    def _parallel_worker_plan_rust_ffi(self, requested_workers, minimum_items_for_parallel, total_items, parallel_groups):
+        return self.python_to_rust_hotpath_parallel_worker_plan(
+            requested_workers,
+            minimum_items_for_parallel,
+            total_items,
+            parallel_groups,
+        )
 
     def python_to_rust_hotpath_sorted_contiguous_ranges(self, values):
         lib = self._load_rust_hotpath_lib()
@@ -977,6 +1044,9 @@ class StorageSupport:
             return [(int(out_ptr[i].start), int(out_ptr[i].end)) for i in range(out_len.value)]
         finally:
             lib.dbfs_free_ranges(out_ptr, out_len)
+
+    def _sorted_contiguous_ranges_rust_ffi(self, values):
+        return self.python_to_rust_hotpath_sorted_contiguous_ranges(values)
 
     def python_to_rust_hotpath_dirty_block_ranges_plan(self, file_size, block_size, dirty_blocks):
         lib = self._load_rust_hotpath_lib()
