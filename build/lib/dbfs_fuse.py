@@ -1444,7 +1444,7 @@ class DBFS(Operations):
             raise FuseOSError(errno.EOPNOTSUPP)
         value = self.fetch_xattr_value(path, xattr_name)
         if value is None:
-            return -errno.ENODATA
+            raise FuseOSError(errno.ENODATA)
         return value
 
     def setxattr(self, path, name, value, options, position=0):
