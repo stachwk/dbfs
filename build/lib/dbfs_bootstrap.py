@@ -13,6 +13,33 @@ from dbfs_fuse import DBFS, configure_logging
 from dbfs_version import DBFS_VERSION_LABEL
 
 
+def _validate_mountpoint(mountpoint: str) -> None:
+    if not os.path.exists(mountpoint):
+        logging.error("Mountpoint %s does not exist. Create an empty directory first.", mountpoint)
+        raise SystemExit(1)
+    if not os.path.isdir(mountpoint):
+        logging.error("Mountpoint %s is not a directory.", mountpoint)
+        raise SystemExit(1)
+
+    try:
+        entries = [entry for entry in os.listdir(mountpoint) if entry not in {".", ".."}]
+    except OSError as exc:
+        logging.error("Cannot inspect mountpoint %s: %s", mountpoint, exc)
+        raise SystemExit(1)
+
+    if entries:
+        preview = ", ".join(entries[:5])
+        suffix = "" if len(entries) <= 5 else f" (+{len(entries) - 5} more)"
+        logging.error(
+            "Mountpoint %s is not empty (%d entries: %s%s). Please use an empty directory.",
+            mountpoint,
+            len(entries),
+            preview,
+            suffix,
+        )
+        raise SystemExit(1)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Mount a FUSE filesystem from PostgreSQL.")
     parser.add_argument(
@@ -110,6 +137,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.info("Using DBFS config file: %s", config_path)
     logging.info("DBFS version=%s", DBFS_VERSION_LABEL)
     logging.debug("Resolved mountpoint argument: %s", os.path.abspath(args.mountpoint))
+    _validate_mountpoint(args.mountpoint)
     dsn, db_config = load_dsn_from_config(config_path)
     runtime_config = load_dbfs_runtime_config(config_path)
     logging.debug("Creating FUSE instance")
@@ -188,7 +216,14 @@ def main(argv: list[str] | None = None) -> None:
         fs.lock_poll_interval_seconds,
     )
     logging.info("Schema mode=new ctime_column=change_date for files/directories/symlinks/hardlinks")
-    FUSE(fs, args.mountpoint, **mount_kwargs)
+    try:
+        FUSE(fs, args.mountpoint, **mount_kwargs)
+    except RuntimeError as exc:
+        message = str(exc)
+        if "mountpoint is not empty" in message:
+            logging.error("Mountpoint %s is not empty. Use a different empty directory.", args.mountpoint)
+            raise SystemExit(1)
+        raise
     logging.debug("DBFS mounted")
 
 
