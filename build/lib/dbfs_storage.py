@@ -3,12 +3,10 @@ from __future__ import annotations
 import ctypes
 import binascii
 import os
-import subprocess
-import shutil
-from pathlib import Path
 import time
 from itertools import chain
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from psycopg2.extras import execute_values
 
@@ -96,6 +94,37 @@ class DbfsLogicalResizePlan(ctypes.Structure):
         ("has_partial_tail", ctypes.c_ubyte),
         ("tail_block_index", ctypes.c_uint64),
         ("tail_valid_len", ctypes.c_uint64),
+    ]
+
+
+class DbfsPersistLayoutPlan(ctypes.Structure):
+    _fields_ = [
+        ("total_blocks", ctypes.c_uint64),
+        ("truncate_only", ctypes.c_ubyte),
+    ]
+
+
+class DbfsPersistBlockPlanEntry(ctypes.Structure):
+    _fields_ = [
+        ("block_index", ctypes.c_uint64),
+        ("used_len", ctypes.c_uint64),
+    ]
+
+
+class DbfsPersistBlockInput(ctypes.Structure):
+    _fields_ = [
+        ("block_index", ctypes.c_uint64),
+        ("ptr", ctypes.POINTER(ctypes.c_ubyte)),
+        ("len", ctypes.c_size_t),
+        ("used_len", ctypes.c_uint64),
+    ]
+
+
+class DbfsPersistCrcPlanEntry(ctypes.Structure):
+    _fields_ = [
+        ("block_index", ctypes.c_uint64),
+        ("has_crc", ctypes.c_ubyte),
+        ("crc32", ctypes.c_uint32),
     ]
 
 
@@ -302,6 +331,19 @@ class StorageSupport:
         )
 
     def _persist_copy_block_crc_rows(self, cur, block_rows, block_size):
+        if not block_rows:
+            return
+
+        file_id = int(block_rows[0][0])
+        rust_persist_copy_block_crc_rows = getattr(
+            self.owner.backend,
+            "python_to_rust_pg_repo_persist_copy_block_crc_rows",
+            None,
+        )
+        if rust_persist_copy_block_crc_rows is not None:
+            if rust_persist_copy_block_crc_rows(file_id, block_size, block_rows):
+                return
+
         crc_rows = []
         stale_rows = []
         for file_id, block_index, data, used_len in block_rows:
@@ -339,48 +381,8 @@ class StorageSupport:
     def python_to_rust_hotpath_persist_pad_enabled(self):
         return bool(getattr(self.owner, "rust_hotpath_persist_pad", True))
 
-    def python_to_rust_hotpath_persist_pad_bin_path(self):
-        raw_value = os.environ.get("DBFS_RUST_HOTPATH_PERSIST_PAD_BIN")
-        candidates = []
-        if raw_value:
-            candidates.append(Path(raw_value))
-        path_candidate = shutil.which("dbfs-persist-pad")
-        if path_candidate:
-            candidates.append(Path(path_candidate))
-        repo_root = Path(__file__).resolve().parent
-        candidates.extend(
-            [
-                repo_root / "rust_hotpath" / "target" / "debug" / "dbfs-persist-pad",
-                repo_root / "rust_hotpath" / "target" / "release" / "dbfs-persist-pad",
-            ]
-        )
-        for candidate in candidates:
-            if candidate.is_file():
-                return str(candidate)
-        return None
-
     def python_to_rust_hotpath_read_assemble_enabled(self):
         return bool(getattr(self.owner, "rust_hotpath_read_assemble", True))
-
-    def python_to_rust_hotpath_read_assemble_bin_path(self):
-        raw_value = os.environ.get("DBFS_RUST_HOTPATH_READ_ASSEMBLE_BIN")
-        candidates = []
-        if raw_value:
-            candidates.append(Path(raw_value))
-        path_candidate = shutil.which("dbfs-read-assemble")
-        if path_candidate:
-            candidates.append(Path(path_candidate))
-        repo_root = Path(__file__).resolve().parent
-        candidates.extend(
-            [
-                repo_root / "rust_hotpath" / "target" / "debug" / "dbfs-read-assemble",
-                repo_root / "rust_hotpath" / "target" / "release" / "dbfs-read-assemble",
-            ]
-        )
-        for candidate in candidates:
-            if candidate.is_file():
-                return str(candidate)
-        return None
 
     def rust_hotpath_lib_path(self):
         raw_value = os.environ.get("DBFS_RUST_HOTPATH_LIB")
@@ -616,6 +618,48 @@ class StorageSupport:
             ctypes.POINTER(ctypes.c_size_t),
         ]
         lib.dbfs_dirty_block_ranges_plan.restype = ctypes.c_int
+        lib.dbfs_persist_layout_plan.argtypes = [
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_ubyte,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_ubyte),
+            ctypes.POINTER(ctypes.POINTER(DbfsRange)),
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        lib.dbfs_persist_layout_plan.restype = ctypes.c_int
+        lib.dbfs_persist_block_plan.argtypes = [
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+            ctypes.c_ubyte,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_uint64),
+            ctypes.POINTER(ctypes.c_ubyte),
+            ctypes.POINTER(ctypes.POINTER(DbfsPersistBlockPlanEntry)),
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        lib.dbfs_persist_block_plan.restype = ctypes.c_int
+        lib.dbfs_persist_block_crc_plan.argtypes = [
+            ctypes.c_uint64,
+            ctypes.POINTER(DbfsPersistBlockInput),
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.POINTER(DbfsPersistCrcPlanEntry)),
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        lib.dbfs_persist_block_crc_plan.restype = ctypes.c_int
+        lib.dbfs_free_persist_blocks.argtypes = [
+            ctypes.POINTER(DbfsPersistBlockPlanEntry),
+            ctypes.c_size_t,
+        ]
+        lib.dbfs_free_persist_blocks.restype = None
+        lib.dbfs_free_persist_crc_rows.argtypes = [
+            ctypes.POINTER(DbfsPersistCrcPlanEntry),
+            ctypes.c_size_t,
+        ]
+        lib.dbfs_free_persist_crc_rows.restype = None
 
         self._rust_hotpath_lib_handle = lib
         return lib
@@ -945,6 +989,122 @@ class StorageSupport:
         finally:
             lib.dbfs_free_ranges(out_ptr, out_len)
 
+    def python_to_rust_hotpath_persist_layout_plan(self, file_size, block_size, truncate_pending, dirty_blocks):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        dirty_blocks = [int(block_index) for block_index in dirty_blocks]
+        dirty_array = (ctypes.c_uint64 * len(dirty_blocks))(*dirty_blocks) if dirty_blocks else None
+        out_total_blocks = ctypes.c_uint64()
+        out_truncate_only = ctypes.c_ubyte()
+        out_ptr = ctypes.POINTER(DbfsRange)()
+        out_len = ctypes.c_size_t()
+
+        rc = lib.dbfs_persist_layout_plan(
+            ctypes.c_uint64(int(file_size)),
+            ctypes.c_uint64(int(block_size)),
+            ctypes.c_ubyte(1 if truncate_pending else 0),
+            dirty_array,
+            ctypes.c_size_t(len(dirty_blocks)),
+            ctypes.byref(out_total_blocks),
+            ctypes.byref(out_truncate_only),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+        )
+        if rc != 0:
+            return None
+
+        try:
+            ranges = [(int(out_ptr[i].start), int(out_ptr[i].end)) for i in range(out_len.value)]
+            return int(out_total_blocks.value), bool(out_truncate_only.value), ranges
+        finally:
+            lib.dbfs_free_ranges(out_ptr, out_len)
+
+    def python_to_rust_hotpath_persist_block_plan(self, file_size, block_size, truncate_pending, dirty_blocks):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        dirty_blocks = [int(block_index) for block_index in dirty_blocks]
+        dirty_array = (ctypes.c_uint64 * len(dirty_blocks))(*dirty_blocks) if dirty_blocks else None
+        out_total_blocks = ctypes.c_uint64()
+        out_truncate_only = ctypes.c_ubyte()
+        out_ptr = ctypes.POINTER(DbfsPersistBlockPlanEntry)()
+        out_len = ctypes.c_size_t()
+
+        rc = lib.dbfs_persist_block_plan(
+            ctypes.c_uint64(int(file_size)),
+            ctypes.c_uint64(int(block_size)),
+            ctypes.c_ubyte(1 if truncate_pending else 0),
+            dirty_array,
+            ctypes.c_size_t(len(dirty_blocks)),
+            ctypes.byref(out_total_blocks),
+            ctypes.byref(out_truncate_only),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+        )
+        if rc != 0:
+            return None
+
+        try:
+            blocks = [
+                (int(out_ptr[i].block_index), int(out_ptr[i].used_len))
+                for i in range(out_len.value)
+            ]
+            return int(out_total_blocks.value), bool(out_truncate_only.value), blocks
+        finally:
+            lib.dbfs_free_persist_blocks(out_ptr, out_len)
+
+    def python_to_rust_hotpath_persist_block_crc_plan(self, block_size, block_rows):
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        if not block_rows:
+            return []
+
+        payload_buffers = []
+        inputs = []
+        for block_index, data, used_len in block_rows:
+            payload = bytes(data)
+            buffer = ctypes.create_string_buffer(payload, len(payload))
+            payload_buffers.append(buffer)
+            inputs.append(
+                DbfsPersistBlockInput(
+                    block_index=ctypes.c_uint64(int(block_index)),
+                    ptr=ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte)),
+                    len=ctypes.c_size_t(len(payload)),
+                    used_len=ctypes.c_uint64(int(used_len)),
+                )
+            )
+
+        inputs_array = (DbfsPersistBlockInput * len(inputs))(*inputs)
+        out_ptr = ctypes.POINTER(DbfsPersistCrcPlanEntry)()
+        out_len = ctypes.c_size_t()
+
+        rc = lib.dbfs_persist_block_crc_plan(
+            ctypes.c_uint64(int(block_size)),
+            inputs_array,
+            ctypes.c_size_t(len(inputs)),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+        )
+        if rc != 0:
+            return None
+
+        try:
+            return [
+                (
+                    int(out_ptr[i].block_index),
+                    bool(out_ptr[i].has_crc),
+                    int(out_ptr[i].crc32),
+                )
+                for i in range(out_len.value)
+            ]
+        finally:
+            lib.dbfs_free_persist_crc_rows(out_ptr, out_len)
+
     def python_to_rust_hotpath_copy_segments(self, off_in, off_out, length, block_size, workers):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
@@ -1117,24 +1277,6 @@ class StorageSupport:
             ffi_result = self.python_to_rust_hotpath_persist_block_payload(payload, used_len, block_size)
             if ffi_result is not None and len(ffi_result) == max(1, int(block_size)):
                 return ffi_result
-
-            helper = self.python_to_rust_hotpath_persist_pad_bin_path()
-            if helper is not None:
-                try:
-                    completed = subprocess.run(
-                        [
-                            helper,
-                            str(int(used_len)),
-                            str(int(block_size)),
-                        ],
-                        input=bytes(payload[:block_size]),
-                        check=True,
-                        capture_output=True,
-                    )
-                    if len(completed.stdout) == max(1, int(block_size)):
-                        return completed.stdout
-                except Exception:
-                    pass
         if used_len >= block_size:
             return memoryview(payload)[:block_size]
         return bytes(payload[:used_len]) + (b"\x00" * (block_size - used_len))
@@ -1197,30 +1339,6 @@ class StorageSupport:
             ffi_result = self.python_to_rust_hotpath_assemble_blocks(file_id, first_block, last_block)
             if ffi_result is not None:
                 return ffi_result
-
-            helper = self.python_to_rust_hotpath_read_assemble_bin_path()
-            if helper is not None:
-                try:
-                    input_data = "\n".join(
-                        f"{block_index}|{block_map.get(block_index, b'').hex()}"
-                        for block_index in range(first_block, last_block + 1)
-                    )
-                    completed = subprocess.run(
-                        [
-                            helper,
-                            str(int(first_block)),
-                            str(int(last_block)),
-                            "0",
-                            str(int((last_block - first_block + 1) * block_size)),
-                            str(int(block_size)),
-                        ],
-                        input=input_data.encode(),
-                        check=True,
-                        capture_output=True,
-                    )
-                    return completed.stdout
-                except Exception:
-                    pass
 
         chunks = []
         for block_index in range(first_block, last_block + 1):
@@ -1301,29 +1419,11 @@ class StorageSupport:
         block_map = self._fetch_block_range(file_id, fetch_first, fetch_last)
 
         if self.python_to_rust_hotpath_read_assemble_enabled():
-            helper = self.python_to_rust_hotpath_read_assemble_bin_path()
-            if helper is not None:
-                try:
-                    input_data = "\n".join(
-                        f"{block_index}|{(bytes(state['overlay_blocks'][block_index]) if state is not None and block_index in state['overlay_blocks'] else block_map.get(block_index, b'')).hex()}"
-                        for block_index in range(fetch_first, fetch_last + 1)
-                    )
-                    completed = subprocess.run(
-                        [
-                            helper,
-                            str(int(fetch_first)),
-                            str(int(fetch_last)),
-                            str(int(offset)),
-                            str(int(end_offset)),
-                            str(int(block_size)),
-                        ],
-                        input=input_data.encode(),
-                        check=True,
-                        capture_output=True,
-                    )
-                    return completed.stdout
-                except Exception:
-                    pass
+            ffi_result = self.python_to_rust_hotpath_assemble_blocks(file_id, fetch_first, fetch_last)
+            if ffi_result is not None:
+                start_offset = offset - (fetch_first * block_size)
+                end_offset_in_raw = start_offset + (end_offset - offset)
+                return ffi_result[start_offset:end_offset_in_raw]
 
         chunks = []
         for block_index in range(fetch_first, fetch_last + 1):
@@ -1486,26 +1586,18 @@ class StorageSupport:
 
         file_size = int(state["file_size"])
         block_size = self.owner.block_size
-        plan = self.python_to_rust_hotpath_dirty_block_ranges_plan(file_size, block_size, dirty_blocks)
+        plan = self.python_to_rust_hotpath_persist_block_plan(file_size, block_size, truncate_pending, dirty_blocks)
         if plan is None:
             total_blocks = self._block_transfer_plan(file_size, block_size, 1, 1, False).total_blocks
-            ordered_dirty_ranges = self.python_to_rust_hotpath_sorted_contiguous_ranges(dirty_blocks)
-            if ordered_dirty_ranges is None:
-                ordered_dirty_ranges = []
-                ordered_dirty_blocks = sorted(dirty_blocks)
-                if ordered_dirty_blocks:
-                    range_start = ordered_dirty_blocks[0]
-                    range_end = ordered_dirty_blocks[0]
-                    for block_index in ordered_dirty_blocks[1:]:
-                        if block_index == range_end + 1:
-                            range_end = block_index
-                            continue
-                        ordered_dirty_ranges.append((range_start, range_end))
-                        range_start = range_end = block_index
-                    ordered_dirty_ranges.append((range_start, range_end))
+            ordered_dirty_blocks = sorted({int(block_index) for block_index in dirty_blocks})
+            ordered_dirty_plan = [
+                (block_index, self._dirty_block_size(file_size, block_index, block_size))
+                for block_index in ordered_dirty_blocks
+                if block_index < total_blocks
+            ]
+            truncate_only = bool(truncate_pending and not dirty_blocks)
         else:
-            total_blocks, ordered_dirty_ranges = plan
-        truncate_only = bool(truncate_pending and not dirty_blocks)
+            total_blocks, truncate_only, ordered_dirty_plan = plan
         blocks_written = 0
 
         started = time.perf_counter()
@@ -1514,6 +1606,40 @@ class StorageSupport:
         for attempt in range(2):
             try:
                 with self.owner.db_connection() as conn, conn.cursor() as cur:
+                    block_rows = []
+                    if not truncate_only:
+                        overlay_blocks = state["overlay_blocks"]
+                        for block_index, used_len in ordered_dirty_plan:
+                            if block_index >= total_blocks:
+                                continue
+
+                            payload = overlay_blocks.get(block_index)
+                            if payload is None:
+                                continue
+
+                            data = self._persist_block_payload(payload, used_len, block_size)
+                            block_rows.append((file_id, block_index, data, used_len))
+
+                    rust_persist_file_blocks = getattr(
+                        self.owner.backend,
+                        "python_to_rust_pg_repo_persist_file_blocks",
+                        None,
+                    )
+                    rust_persisted = False
+                    if rust_persist_file_blocks is not None:
+                        rust_persisted = rust_persist_file_blocks(
+                            file_id,
+                            file_size,
+                            block_size,
+                            total_blocks,
+                            truncate_pending,
+                            block_rows,
+                        )
+                    if rust_persisted:
+                        blocks_written = len(block_rows)
+                        conn.commit()
+                        break
+
                     if truncate_pending:
                         if total_blocks == 0:
                             cur.execute(
@@ -1546,32 +1672,13 @@ class StorageSupport:
                                 (file_id, total_blocks),
                             )
 
-                    if not truncate_only:
-                        overlay_blocks = state["overlay_blocks"]
-                        block_rows = []
-                        for range_start, range_end in ordered_dirty_ranges:
-                            if range_start >= total_blocks:
-                                continue
-                            range_end = min(range_end, total_blocks - 1)
-                            for block_index in range(range_start, range_end + 1):
-                                payload = overlay_blocks.get(block_index)
-                                if payload is None:
-                                    continue
-
-                                block_start = block_index * block_size
-                                block_end = min(file_size, block_start + block_size)
-                                used_len = max(0, block_end - block_start)
-
-                                data = self._persist_block_payload(payload, used_len, block_size)
-                                block_rows.append((file_id, block_index, data, used_len))
-                                blocks_written += 1
-
-                        if block_rows:
-                            self._persist_block_chunks(
-                                cur,
-                                ((file_id, block_index, data) for file_id, block_index, data, _ in block_rows),
-                            )
-                            self._persist_copy_block_crc_rows(cur, block_rows, block_size)
+                    if not truncate_only and block_rows:
+                        blocks_written = len(block_rows)
+                        self._persist_block_chunks(
+                            cur,
+                            ((file_id, block_index, data) for file_id, block_index, data, _ in block_rows),
+                        )
+                        self._persist_copy_block_crc_rows(cur, block_rows, block_size)
 
                     cur.execute(
                         """
@@ -1884,32 +1991,6 @@ class StorageSupport:
             if segments is not None:
                 return segments
 
-            helper = self.python_to_rust_hotpath_copy_plan_bin_path()
-            if helper is not None:
-                try:
-                    completed = subprocess.run(
-                        [
-                            helper,
-                            str(int(off_in)),
-                            str(int(off_out)),
-                            str(int(length)),
-                            str(int(block_size)),
-                            str(int(workers)),
-                        ],
-                        check=True,
-                        capture_output=True,
-                        text=True,
-                    )
-                    segments = []
-                    for line in completed.stdout.splitlines():
-                        if not line.strip():
-                            continue
-                        src, dst, chunk_len = line.split(",")
-                        segments.append((int(src), int(dst), int(chunk_len)))
-                    return segments
-                except Exception:
-                    pass
-
         total_blocks = self._block_count_for_length(length, block_size, True)
         worker_count = max(1, min(int(workers), total_blocks))
         blocks_per_worker = max(1, (total_blocks + worker_count - 1) // worker_count)
@@ -1932,26 +2013,6 @@ class StorageSupport:
     def python_to_rust_hotpath_copy_plan_enabled(self):
         return bool(getattr(self.owner, "rust_hotpath_copy_plan", False))
 
-    def python_to_rust_hotpath_copy_plan_bin_path(self):
-        raw_value = os.environ.get("DBFS_RUST_HOTPATH_COPY_PLAN_BIN")
-        candidates = []
-        if raw_value:
-            candidates.append(Path(raw_value))
-        path_candidate = shutil.which("dbfs-copy-plan")
-        if path_candidate:
-            candidates.append(Path(path_candidate))
-        repo_root = Path(__file__).resolve().parent
-        candidates.extend(
-            [
-                repo_root / "rust_hotpath" / "target" / "debug" / "dbfs-copy-plan",
-                repo_root / "rust_hotpath" / "target" / "release" / "dbfs-copy-plan",
-            ]
-        )
-        for candidate in candidates:
-            if candidate.is_file():
-                return str(candidate)
-        return None
-
     def _read_copy_destination_chunk(self, dst_file_id, dst_offset, length):
         current = self.read_file_slice(dst_file_id, dst_offset, length)
         if len(current) < length:
@@ -1961,48 +2022,8 @@ class StorageSupport:
     def python_to_rust_hotpath_copy_pack_enabled(self):
         return bool(getattr(self.owner, "rust_hotpath_copy_pack", False))
 
-    def python_to_rust_hotpath_copy_pack_bin_path(self):
-        raw_value = os.environ.get("DBFS_RUST_HOTPATH_COPY_PACK_BIN")
-        candidates = []
-        if raw_value:
-            candidates.append(Path(raw_value))
-        path_candidate = shutil.which("dbfs-copy-pack")
-        if path_candidate:
-            candidates.append(Path(path_candidate))
-        repo_root = Path(__file__).resolve().parent
-        candidates.extend(
-            [
-                repo_root / "rust_hotpath" / "target" / "debug" / "dbfs-copy-pack",
-                repo_root / "rust_hotpath" / "target" / "release" / "dbfs-copy-pack",
-            ]
-        )
-        for candidate in candidates:
-            if candidate.is_file():
-                return str(candidate)
-        return None
-
     def python_to_rust_hotpath_copy_dedupe_enabled(self):
         return bool(getattr(self.owner, "rust_hotpath_copy_dedupe", False))
-
-    def python_to_rust_hotpath_copy_dedupe_bin_path(self):
-        raw_value = os.environ.get("DBFS_RUST_HOTPATH_COPY_DEDUPE_BIN")
-        candidates = []
-        if raw_value:
-            candidates.append(Path(raw_value))
-        path_candidate = shutil.which("dbfs-copy-dedupe")
-        if path_candidate:
-            candidates.append(Path(path_candidate))
-        repo_root = Path(__file__).resolve().parent
-        candidates.extend(
-            [
-                repo_root / "rust_hotpath" / "target" / "debug" / "dbfs-copy-dedupe",
-                repo_root / "rust_hotpath" / "target" / "release" / "dbfs-copy-dedupe",
-            ]
-        )
-        for candidate in candidates:
-            if candidate.is_file():
-                return str(candidate)
-        return None
 
     def _pack_changed_copy_ranges(self, dst_offset, total_len, block_size, changed_mask):
         if self.python_to_rust_hotpath_copy_pack_enabled():
@@ -2011,32 +2032,6 @@ class StorageSupport:
             )
             if ffi_result is not None:
                 return ffi_result
-
-            helper = self.python_to_rust_hotpath_copy_pack_bin_path()
-            if helper is not None:
-                mask_arg = ",".join("1" if changed else "0" for changed in changed_mask)
-                try:
-                    completed = subprocess.run(
-                        [
-                            helper,
-                            str(int(dst_offset)),
-                            str(int(total_len)),
-                            str(int(block_size)),
-                            mask_arg,
-                        ],
-                        check=True,
-                        capture_output=True,
-                        text=True,
-                    )
-                    ranges = []
-                    for line in completed.stdout.splitlines():
-                        if not line.strip():
-                            continue
-                        start, end = line.split(",")
-                        ranges.append((int(start), int(end)))
-                    return ranges
-                except Exception:
-                    pass
 
         ranges = []
         run_start = None
@@ -2098,49 +2093,6 @@ class StorageSupport:
                     self.write_into_state(dst_file_id, payload[rel_start:rel_end], run_start)
                     bytes_written += rel_end - rel_start
                 return bytes_written
-
-            helper = self.python_to_rust_hotpath_copy_dedupe_bin_path()
-            if helper is not None:
-                try:
-                    input_lines = []
-                    for rel_offset in range(0, len(payload), block_size):
-                        chunk = payload[rel_offset:rel_offset + block_size]
-                        dst_chunk_offset = dst_offset + rel_offset
-                        current = self._read_copy_destination_chunk(dst_file_id, dst_chunk_offset, len(chunk))
-                        input_lines.append(f"{bytes(chunk).hex()}|{bytes(current).hex()}")
-
-                    completed = subprocess.run(
-                        [
-                            helper,
-                            str(int(dst_offset)),
-                            str(int(len(payload))),
-                            str(int(block_size)),
-                        ],
-                        input="\n".join(input_lines),
-                        check=True,
-                        capture_output=True,
-                        text=True,
-                    )
-
-                    ranges = []
-                    for line in completed.stdout.splitlines():
-                        if not line.strip():
-                            continue
-                        start, end = line.split(",")
-                        ranges.append((int(start), int(end)))
-
-                    bytes_written = 0
-                    for run_start, run_end in ranges:
-                        if run_end <= run_start:
-                            continue
-                        rel_start = run_start - dst_offset
-                        rel_end = run_end - dst_offset
-                        self.write_into_state(dst_file_id, payload[rel_start:rel_end], run_start)
-                        bytes_written += rel_end - rel_start
-
-                    return bytes_written
-                except Exception:
-                    pass
 
         changed_mask = []
         use_crc_table = self._copy_dedupe_crc_table_enabled()

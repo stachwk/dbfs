@@ -1421,7 +1421,9 @@ class StorageSupport:
         if self.python_to_rust_hotpath_read_assemble_enabled():
             ffi_result = self.python_to_rust_hotpath_assemble_blocks(file_id, fetch_first, fetch_last)
             if ffi_result is not None:
-                return ffi_result
+                start_offset = offset - (fetch_first * block_size)
+                end_offset_in_raw = start_offset + (end_offset - offset)
+                return ffi_result[start_offset:end_offset_in_raw]
 
         chunks = []
         for block_index in range(fetch_first, fetch_last + 1):
