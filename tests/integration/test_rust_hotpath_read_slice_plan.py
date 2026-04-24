@@ -22,7 +22,7 @@ def main() -> None:
     ]
 
     for (file_size, offset, size, block_size, sequential, streak), expected in cases:
-        result = storage._read_slice_plan_rust_ffi(file_size, offset, size, block_size, sequential, streak)
+        result = storage.python_to_rust_hotpath_read_slice_plan(file_size, offset, size, block_size, sequential, streak)
         if expected is None:
             assert result is None, (file_size, offset, size, block_size, sequential, streak, result)
             continue

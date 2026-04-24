@@ -23,7 +23,7 @@ def main() -> None:
     ]
 
     for payload, expected in cases:
-        rust_value = storage._crc32_rust_ffi(payload)
+        rust_value = storage.python_to_rust_hotpath_crc32(payload)
         assert rust_value is not None, payload
         assert rust_value == expected, (payload, rust_value, expected)
 

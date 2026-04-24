@@ -24,7 +24,7 @@ def main() -> None:
     ]
 
     for args, expected in cases:
-        result = storage._read_missing_range_worker_count_rust_ffi(*args)
+        result = storage.python_to_rust_hotpath_read_missing_range_worker_count(*args)
         assert result is not None, args
         assert result == expected, (args, result, expected)
 

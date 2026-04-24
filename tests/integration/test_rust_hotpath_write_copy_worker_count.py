@@ -24,7 +24,7 @@ def main() -> None:
     ]
 
     for args, expected in cases:
-        result = storage._write_copy_worker_count_rust_ffi(*args)
+        result = storage.python_to_rust_hotpath_write_copy_worker_count(*args)
         assert result is not None, args
         assert result == expected, (args, result, expected)
 
@@ -35,7 +35,7 @@ def main() -> None:
     ]
 
     for args, expected in plan_cases:
-        result = storage._write_copy_plan_rust_ffi(*args)
+        result = storage.python_to_rust_hotpath_write_copy_plan(*args)
         assert result is not None, args
         assert result == expected, (args, result, expected)
 
@@ -47,7 +47,7 @@ def main() -> None:
     ]
 
     for args, expected in dedupe_cases:
-        result = storage._write_copy_plan_rust_ffi(*args)
+        result = storage.python_to_rust_hotpath_write_copy_plan(*args)
         assert result is not None, args
         assert result == expected, (args, result, expected)
 
@@ -58,7 +58,7 @@ def main() -> None:
     ]
 
     for args, expected in transfer_cases:
-        result = storage._block_transfer_plan_rust_ffi(*args)
+        result = storage.python_to_rust_hotpath_block_transfer_plan(*args)
         assert result is not None, args
         assert result == expected, (args, result, expected)
 

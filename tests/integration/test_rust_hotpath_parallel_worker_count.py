@@ -24,10 +24,10 @@ def main() -> None:
     ]
 
     for args, expected in cases:
-        result = storage._parallel_worker_count_rust_ffi(*args)
+        result = storage.python_to_rust_hotpath_parallel_worker_count(*args)
         assert result is not None, args
         assert result == expected, (args, result, expected)
-        plan = storage._parallel_worker_plan_rust_ffi(*args)
+        plan = storage.python_to_rust_hotpath_parallel_worker_plan(*args)
         assert plan is not None, args
         expected_plan = (expected > 1, expected)
         assert plan == expected_plan, (args, plan, expected_plan)

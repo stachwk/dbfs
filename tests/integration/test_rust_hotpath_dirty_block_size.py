@@ -24,7 +24,7 @@ def main() -> None:
     ]
 
     for args, expected in cases:
-        result = storage._dirty_block_size_rust_ffi(*args)
+        result = storage.python_to_rust_hotpath_dirty_block_size(*args)
         assert result is not None, args
         assert result == expected, (args, result, expected)
 

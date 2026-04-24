@@ -24,7 +24,7 @@ def main() -> None:
     ]
 
     for missing, expected in cases:
-        result = storage._sorted_contiguous_ranges_rust_ffi(missing)
+        result = storage.python_to_rust_hotpath_sorted_contiguous_ranges(missing)
         assert result is not None, missing
         assert result == expected, (missing, result, expected)
         assert storage._missing_block_ranges(missing) == expected

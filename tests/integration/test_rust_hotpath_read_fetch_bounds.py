@@ -23,7 +23,7 @@ def main() -> None:
     ]
 
     for args, expected in cases:
-        result = storage._read_fetch_bounds_rust_ffi(*args)
+        result = storage.python_to_rust_hotpath_read_fetch_bounds(*args)
         if expected is None:
             assert result is None, (args, result)
         else:
