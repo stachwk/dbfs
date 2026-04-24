@@ -695,6 +695,15 @@ class StorageSupport:
             )
         )
 
+    def _read_ahead_blocks_rust_ffi(self, read_ahead_blocks, sequential_read_ahead_blocks, streak, read_cache_limit_blocks, sequential):
+        return self.python_to_rust_hotpath_read_ahead_blocks(
+            read_ahead_blocks,
+            sequential_read_ahead_blocks,
+            streak,
+            read_cache_limit_blocks,
+            sequential,
+        )
+
     def python_to_rust_hotpath_read_fetch_bounds(self, total_blocks, requested_first, requested_last, sequential, streak):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
