@@ -10,10 +10,12 @@ import psycopg2
 
 class NamespaceRepositoryDeleteMutations:
     def _purge_primary_file(self, cur, file_id):
-        cur.execute("DELETE FROM data_blocks WHERE id_file = %s", (file_id,))
-        cur.execute("DELETE FROM copy_block_crc WHERE id_file = %s", (file_id,))
-        cur.execute("DELETE FROM files WHERE id_file = %s", (file_id,))
         dbfs = self.dbfs
+        rust_purged = dbfs.backend.python_to_rust_pg_repo_purge_primary_file(file_id)
+        if not rust_purged:
+            cur.execute("DELETE FROM data_blocks WHERE id_file = %s", (file_id,))
+            cur.execute("DELETE FROM copy_block_crc WHERE id_file = %s", (file_id,))
+            cur.execute("DELETE FROM files WHERE id_file = %s", (file_id,))
         dbfs.clear_write_buffer_dirty(file_id)
         dbfs._clear_path_lock_state(("file", file_id))
         dbfs.clear_read_cache(file_id)

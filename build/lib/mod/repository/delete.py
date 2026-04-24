@@ -10,10 +10,12 @@ import psycopg2
 
 class NamespaceRepositoryDeleteMutations:
     def _purge_primary_file(self, cur, file_id):
-        cur.execute("DELETE FROM data_blocks WHERE id_file = %s", (file_id,))
-        cur.execute("DELETE FROM copy_block_crc WHERE id_file = %s", (file_id,))
-        cur.execute("DELETE FROM files WHERE id_file = %s", (file_id,))
         dbfs = self.dbfs
+        rust_purged = dbfs.backend.python_to_rust_pg_repo_purge_primary_file(file_id)
+        if not rust_purged:
+            cur.execute("DELETE FROM data_blocks WHERE id_file = %s", (file_id,))
+            cur.execute("DELETE FROM copy_block_crc WHERE id_file = %s", (file_id,))
+            cur.execute("DELETE FROM files WHERE id_file = %s", (file_id,))
         dbfs.clear_write_buffer_dirty(file_id)
         dbfs._clear_path_lock_state(("file", file_id))
         dbfs.clear_read_cache(file_id)
@@ -49,12 +51,8 @@ class NamespaceRepositoryDeleteMutations:
             with dbfs.db_connection() as conn, conn.cursor() as cur:
                 dbfs.enforce_sticky_bit(parent_path, dbfs.getattr(path))
                 dbfs.append_journal_event(cur, "unlink", path, file_id=entry_id, directory_id=parent_id)
-                link_count = dbfs.count_file_links(entry_id)
-                if link_count > 1:
-                    promoted = dbfs.promote_hardlink_to_primary(entry_id, cur)
-                    if promoted is None:
-                        raise dbfs.FuseOSError(errno.ENOENT)
-                else:
+                promoted = dbfs.promote_hardlink_to_primary(entry_id, cur)
+                if not promoted:
                     self._purge_primary_file(cur, entry_id)
                 dbfs.delete_path_xattrs(path, cur=cur)
                 if parent_id is not None:
@@ -120,12 +118,8 @@ class NamespaceRepositoryDeleteMutations:
                         dbfs.delete_path_xattrs(new, cur=cur)
                     elif existing_kind == "file":
                         target_file_id = existing_id
-                        link_count = dbfs.count_file_links(target_file_id)
-                        if link_count > 1:
-                            promoted = dbfs.promote_hardlink_to_primary(target_file_id, cur)
-                            if promoted is None:
-                                raise dbfs.FuseOSError(errno.ENOENT)
-                        else:
+                        promoted = dbfs.promote_hardlink_to_primary(target_file_id, cur)
+                        if not promoted:
                             self._purge_primary_file(cur, target_file_id)
                         dbfs.delete_path_xattrs(new, cur=cur)
                     elif existing_kind == "symlink":

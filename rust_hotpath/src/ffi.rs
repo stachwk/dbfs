@@ -1485,6 +1485,49 @@ pub extern "C" fn dbfs_rust_pg_repo_persist_file_blocks(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_set_file_size(
+    repo_ptr: *mut DbfsPgRepo,
+    file_id: u64,
+    file_size: u64,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.set_file_size(file_id, file_size) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_purge_primary_file(
+    repo_ptr: *mut DbfsPgRepo,
+    file_id: u64,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.purge_primary_file(file_id) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn dbfs_rust_pg_repo_resolve_path(
     repo_ptr: *mut DbfsPgRepo,
     path_ptr: *const u8,
@@ -2281,6 +2324,7 @@ mod tests {
         DbfsLogicalResizePlan, DbfsParallelWorkerPlan, DbfsPersistBlockInput,
         DbfsPersistBlockPlanEntry, DbfsPersistCrcPlanEntry, DbfsRange, DbfsReadBlock,
         DbfsReadBounds, DbfsReadSlicePlan, DbfsWriteCopyPlan, crc32_bytes,
+        dbfs_rust_pg_repo_purge_primary_file, dbfs_rust_pg_repo_set_file_size,
     };
 
     #[test]
@@ -2417,6 +2461,18 @@ mod tests {
         );
         assert_eq!(status, 1);
         assert_eq!(out_promoted, 0);
+    }
+
+    #[test]
+    fn exports_set_file_size() {
+        let status = dbfs_rust_pg_repo_set_file_size(std::ptr::null_mut(), 1, 2);
+        assert_eq!(status, 1);
+    }
+
+    #[test]
+    fn exports_purge_primary_file() {
+        let status = dbfs_rust_pg_repo_purge_primary_file(std::ptr::null_mut(), 1);
+        assert_eq!(status, 1);
     }
 
     #[test]

@@ -1526,17 +1526,23 @@ class DBFS(Operations):
         self.storage.truncate_to_size(id_file, length)
         self.storage.maybe_flush_dirty_write_buffer(id_file)
 
-        with self.db_connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE files
-                SET size = %s, modification_date = NOW(), {file_ctime} = NOW()
-                WHERE id_file = %s
-                """.format(file_ctime=self.ctime_column("files")),
-                (length, id_file),
-            )
-            self.append_journal_event(cur, "truncate", path, file_id=id_file)
-            conn.commit()
+        rust_updated = self.backend.python_to_rust_pg_repo_set_file_size(id_file, length)
+        if not rust_updated:
+            with self.db_connection() as conn, conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE files
+                    SET size = %s, modification_date = NOW(), {file_ctime} = NOW()
+                    WHERE id_file = %s
+                    """.format(file_ctime=self.ctime_column("files")),
+                    (length, id_file),
+                )
+                self.append_journal_event(cur, "truncate", path, file_id=id_file)
+                conn.commit()
+        else:
+            with self.db_connection() as conn, conn.cursor() as cur:
+                self.append_journal_event(cur, "truncate", path, file_id=id_file)
+                conn.commit()
 
         self.clear_read_cache(id_file)
         self.invalidate_metadata_cache(path, include_statfs=True)
@@ -1567,17 +1573,23 @@ class DBFS(Operations):
 
         self.storage.truncate_to_size(id_file, new_size)
 
-        with self.db_connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE files
-                SET size = %s, modification_date = NOW(), {file_ctime} = NOW()
-                WHERE id_file = %s
-                """.format(file_ctime=self.ctime_column("files")),
-                (new_size, id_file),
-            )
-            self.append_journal_event(cur, "fallocate", path, file_id=id_file)
-            conn.commit()
+        rust_updated = self.backend.python_to_rust_pg_repo_set_file_size(id_file, new_size)
+        if not rust_updated:
+            with self.db_connection() as conn, conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE files
+                    SET size = %s, modification_date = NOW(), {file_ctime} = NOW()
+                    WHERE id_file = %s
+                    """.format(file_ctime=self.ctime_column("files")),
+                    (new_size, id_file),
+                )
+                self.append_journal_event(cur, "fallocate", path, file_id=id_file)
+                conn.commit()
+        else:
+            with self.db_connection() as conn, conn.cursor() as cur:
+                self.append_journal_event(cur, "fallocate", path, file_id=id_file)
+                conn.commit()
 
         self.clear_read_cache(id_file)
         self.invalidate_metadata_cache(path, include_statfs=True)

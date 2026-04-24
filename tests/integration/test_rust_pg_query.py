@@ -148,6 +148,38 @@ def main():
             assert data_rows[0][0] == 0 and bytes(data_rows[0][1]) == crc_full, data_rows
             assert data_rows[1][0] == 1 and bytes(data_rows[1][1])[: len(crc_partial)] == crc_partial, data_rows
 
+            rust_resize_target = crc_block_size + len(crc_partial)
+            rust_set_size = backend.python_to_rust_pg_repo_set_file_size(
+                rust_created_file_id,
+                rust_resize_target,
+            )
+            assert rust_set_size is True, rust_set_size
+            with psycopg2.connect(**dsn) as conn, conn.cursor() as cur:
+                cur.execute("SELECT size FROM files WHERE id_file = %s", (rust_created_file_id,))
+                resized_size = cur.fetchone()[0]
+            assert int(resized_size) == rust_resize_target, resized_size
+
+            purge_file_name = f"{namespace_name}/purge-me.txt"
+            purge_file_fh = fs.create(purge_file_name, 0o644)
+            try:
+                purge_file_id = fs.get_file_id(purge_file_name)
+                assert purge_file_id is not None, purge_file_id
+                fs.release(purge_file_name, purge_file_fh)
+                purge_file_fh = None
+                rust_purged = backend.python_to_rust_pg_repo_purge_primary_file(purge_file_id)
+                assert rust_purged is True, rust_purged
+                with psycopg2.connect(**dsn) as conn, conn.cursor() as cur:
+                    cur.execute("SELECT 1 FROM files WHERE id_file = %s", (purge_file_id,))
+                    assert cur.fetchone() is None
+                fs.touch_namespace_epoch()
+                assert fs.get_file_id(purge_file_name) is None
+            finally:
+                if purge_file_fh is not None:
+                    try:
+                        fs.release(purge_file_name, purge_file_fh)
+                    except Exception:
+                        pass
+
             file_name = f"{namespace_name}/payload.txt"
             file_fh = fs.create(file_name, 0o644)
             file_cleanup_name = file_name

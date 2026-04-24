@@ -310,6 +310,17 @@ class PostgresBackend:
             ctypes.c_size_t,
         ]
         lib.dbfs_rust_pg_repo_persist_file_blocks.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_set_file_size.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+            ctypes.c_uint64,
+        ]
+        lib.dbfs_rust_pg_repo_set_file_size.restype = ctypes.c_int
+        lib.dbfs_rust_pg_repo_purge_primary_file.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+        ]
+        lib.dbfs_rust_pg_repo_purge_primary_file.restype = ctypes.c_int
         lib.dbfs_rust_pg_repo_count_file_links.argtypes = [
             ctypes.c_void_p,
             ctypes.c_uint64,
@@ -883,6 +894,41 @@ class PostgresBackend:
             ctypes.c_ubyte(1 if truncate_pending else 0),
             inputs_array,
             len(inputs),
+        )
+        if status != 0:
+            return None
+        return True
+
+    def python_to_rust_pg_repo_set_file_size(self, file_id, file_size):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        status = lib.dbfs_rust_pg_repo_set_file_size(
+            repo,
+            int(file_id),
+            int(file_size),
+        )
+        if status != 0:
+            return None
+        return True
+
+    def python_to_rust_pg_repo_purge_primary_file(self, file_id):
+        repo = self._load_rust_pg_repo()
+        if repo is None:
+            return None
+
+        lib = self._load_rust_hotpath_lib()
+        if lib is None:
+            return None
+
+        status = lib.dbfs_rust_pg_repo_purge_primary_file(
+            repo,
+            int(file_id),
         )
         if status != 0:
             return None

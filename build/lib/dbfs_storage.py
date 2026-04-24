@@ -695,15 +695,6 @@ class StorageSupport:
             )
         )
 
-    def _read_ahead_blocks_rust_ffi(self, read_ahead_blocks, sequential_read_ahead_blocks, streak, read_cache_limit_blocks, sequential):
-        return self.python_to_rust_hotpath_read_ahead_blocks(
-            read_ahead_blocks,
-            sequential_read_ahead_blocks,
-            streak,
-            read_cache_limit_blocks,
-            sequential,
-        )
-
     def python_to_rust_hotpath_read_fetch_bounds(self, total_blocks, requested_first, requested_last, sequential, streak):
         lib = self._load_rust_hotpath_lib()
         if lib is None:
@@ -725,15 +716,6 @@ class StorageSupport:
         if rc != 0:
             return None
         return int(out.fetch_first), int(out.fetch_last)
-
-    def _read_fetch_bounds_rust_ffi(self, total_blocks, requested_first, requested_last, sequential, streak):
-        return self.python_to_rust_hotpath_read_fetch_bounds(
-            total_blocks,
-            requested_first,
-            requested_last,
-            sequential,
-            streak,
-        )
 
     def python_to_rust_hotpath_read_slice_plan(self, file_size, offset, size, block_size, sequential, streak):
         lib = self._load_rust_hotpath_lib()
@@ -1169,9 +1151,6 @@ class StorageSupport:
 
         buffer = ctypes.create_string_buffer(data, len(data))
         return int(lib.dbfs_crc32(ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte)), len(data)))
-
-    def _crc32_rust_ffi(self, data):
-        return self.python_to_rust_hotpath_crc32(data)
 
     def python_to_rust_hotpath_persist_block_payload(self, payload, used_len, block_size):
         lib = self._load_rust_hotpath_lib()

@@ -1564,6 +1564,43 @@ impl DbRepo {
         })
     }
 
+    pub fn set_file_size(&self, file_id: u64, file_size: u64) -> Result<(), String> {
+        let sql_update_file = CString::new(
+            "UPDATE files SET size = $1, modification_date = NOW(), change_date = NOW() WHERE id_file = $2",
+        )
+        .map_err(|_| "SQL contains NUL byte".to_string())?;
+        let file_id = CString::new(file_id.to_string()).map_err(|_| "file id contains NUL byte".to_string())?;
+        let file_size = CString::new(file_size.to_string()).map_err(|_| "file size contains NUL byte".to_string())?;
+
+        self.with_cached_connection(|conn| unsafe {
+            transactional(conn, |conn| {
+                let params = [&file_size, &file_id];
+                exec_command_params(conn, &sql_update_file, &params)?;
+                Ok(())
+            })
+        })
+    }
+
+    pub fn purge_primary_file(&self, file_id: u64) -> Result<(), String> {
+        let sql_delete_data = CString::new("DELETE FROM data_blocks WHERE id_file = $1")
+            .map_err(|_| "SQL contains NUL byte".to_string())?;
+        let sql_delete_crc = CString::new("DELETE FROM copy_block_crc WHERE id_file = $1")
+            .map_err(|_| "SQL contains NUL byte".to_string())?;
+        let sql_delete_file = CString::new("DELETE FROM files WHERE id_file = $1")
+            .map_err(|_| "SQL contains NUL byte".to_string())?;
+        let file_id = CString::new(file_id.to_string()).map_err(|_| "file id contains NUL byte".to_string())?;
+
+        self.with_cached_connection(|conn| unsafe {
+            transactional(conn, |conn| {
+                let params = [&file_id];
+                exec_command_params(conn, &sql_delete_data, &params)?;
+                exec_command_params(conn, &sql_delete_crc, &params)?;
+                exec_command_params(conn, &sql_delete_file, &params)?;
+                Ok(())
+            })
+        })
+    }
+
     pub fn count_file_links(&self, file_id: u64) -> Result<u64, String> {
         let sql = CString::new("SELECT 1 + COUNT(*) FROM hardlinks WHERE id_file = $1")
             .map_err(|_| "SQL contains NUL byte".to_string())?;
