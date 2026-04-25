@@ -74,8 +74,7 @@ def main() -> None:
         write_seconds = profile_seconds(fs._io_profile, "write")
         persist_seconds = profile_seconds(fs._io_profile, "persist_buffer")
         flush_seconds = profile_seconds(fs._io_profile, "flush")
-        release_seconds = profile_seconds(fs._io_profile, "release")
-        finalization_seconds = persist_seconds + flush_seconds + release_seconds
+        finalization_seconds = persist_seconds + flush_seconds
 
         print(
             "OK flush-release/profile "

@@ -34,15 +34,19 @@ with conn, conn.cursor() as cur:
             SELECT d.id_directory
             FROM directories d
             JOIN subtree s ON d.id_parent = s.id_directory
-        ),
-        file_ids AS (
-            SELECT id_file FROM files WHERE id_directory IN (SELECT id_directory FROM subtree)
         )
-        DELETE FROM data_blocks WHERE id_file IN (SELECT id_file FROM file_ids)
-        """
-        ,
+        SELECT id_file, data_object_id FROM files WHERE id_directory IN (SELECT id_directory FROM subtree)
+        """,
         (root_name,),
     )
+    file_rows = cur.fetchall()
+    file_ids = [row[0] for row in file_rows]
+    data_object_ids = [row[1] for row in file_rows]
+    if data_object_ids:
+        cur.execute("DELETE FROM data_blocks WHERE data_object_id = ANY(%s)", (data_object_ids,))
+        cur.execute("DELETE FROM copy_block_crc WHERE data_object_id = ANY(%s)", (data_object_ids,))
+        cur.execute("DELETE FROM files WHERE id_file = ANY(%s)", (file_ids,))
+        cur.execute("DELETE FROM data_objects WHERE id_data_object = ANY(%s)", (data_object_ids,))
     cur.execute(
         """
         WITH RECURSIVE subtree AS (

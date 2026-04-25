@@ -2,12 +2,21 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import ctypes
 import errno
 import os
 import stat
 
 
 class NamespaceRepositoryLookup:
+    def _rust_repo(self):
+        dbfs = self.dbfs
+        repo = dbfs.backend._load_rust_pg_repo()
+        lib = dbfs.backend._load_rust_hotpath_lib()
+        if repo is None or lib is None:
+            raise dbfs.FuseOSError(errno.EIO)
+        return repo, lib
+
     @staticmethod
     def _table_parent_clause(table_name):
         if table_name == "directories":
@@ -37,40 +46,22 @@ class NamespaceRepositoryLookup:
         if path in self._dir_id_cache:
             return self._dir_id_cache[path]
 
-        rust_value = dbfs.backend.python_to_rust_namespace_get_dir_id(path)
-        if rust_value is not None:
-            self._dir_id_cache[path] = rust_value
-            return rust_value
-
-        with dbfs.db_connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                WITH RECURSIVE parts AS (
-                    SELECT part, ord
-                    FROM unnest(string_to_array(btrim(%s, '/'), '/')) WITH ORDINALITY AS t(part, ord)
-                ),
-                walk AS (
-                    SELECT d.id_directory, p.ord
-                    FROM directories d
-                    JOIN parts p ON p.ord = 1
-                    WHERE d.id_parent IS NULL AND d.name = p.part
-                    UNION ALL
-                    SELECT d.id_directory, p.ord
-                    FROM walk w
-                    JOIN parts p ON p.ord = w.ord + 1
-                    JOIN directories d ON d.id_parent = w.id_directory AND d.name = p.part
-                )
-                SELECT id_directory
-                FROM walk
-                ORDER BY ord DESC
-                LIMIT 1
-                """,
-                (path,),
-            )
-            result = cur.fetchone()
-            value = result[0] if result else None
-            self._dir_id_cache[path] = value
-            return value
+        repo, lib = self._rust_repo()
+        path_bytes = str(path).encode("utf-8")
+        out_value = ctypes.c_uint64()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_get_dir_id(
+            repo,
+            path_bytes,
+            len(path_bytes),
+            ctypes.byref(out_value),
+            ctypes.byref(out_found),
+        )
+        if status != 0 or not out_found.value:
+            raise dbfs.FuseOSError(errno.EIO)
+        rust_value = int(out_value.value)
+        self._dir_id_cache[path] = rust_value
+        return rust_value
 
     def _entry_lookup(self, path):
         dbfs = self.dbfs
@@ -79,71 +70,32 @@ class NamespaceRepositoryLookup:
         if path in self._entry_cache:
             return self._entry_cache[path]
 
-        rust_value = dbfs.backend.python_to_rust_namespace_resolve_path(path)
-        if rust_value is not None:
-            value = rust_value
-            self._entry_cache[path] = value
-            return value
-
-        parent_path = os.path.dirname(path)
-        name = os.path.basename(path)
-        parent_id = self.get_dir_id(parent_path)
-
-        with dbfs.db_connection() as conn, conn.cursor() as cur:
-            if parent_id is None:
-                cur.execute(
-                    """
-                    SELECT kind, entry_id FROM (
-                        SELECT 1 AS precedence, 'hardlink' AS kind, h.id_hardlink AS entry_id
-                        FROM hardlinks h
-                        WHERE h.name = %s AND h.id_directory IS NULL
-                        UNION ALL
-                        SELECT 2 AS precedence, 'symlink' AS kind, s.id_symlink AS entry_id
-                        FROM symlinks s
-                        WHERE s.name = %s AND s.id_parent IS NULL
-                        UNION ALL
-                        SELECT 3 AS precedence, 'file' AS kind, f.id_file AS entry_id
-                        FROM files f
-                        WHERE f.name = %s AND f.id_directory IS NULL
-                        UNION ALL
-                        SELECT 4 AS precedence, 'dir' AS kind, d.id_directory AS entry_id
-                        FROM directories d
-                        WHERE d.name = %s AND d.id_parent IS NULL
-                    ) entries
-                    ORDER BY precedence
-                    LIMIT 1
-                    """,
-                    (name, name, name, name),
-                )
-            else:
-                cur.execute(
-                    """
-                    SELECT kind, entry_id FROM (
-                        SELECT 1 AS precedence, 'hardlink' AS kind, h.id_hardlink AS entry_id
-                        FROM hardlinks h
-                        WHERE h.name = %s AND h.id_directory = %s
-                        UNION ALL
-                        SELECT 2 AS precedence, 'symlink' AS kind, s.id_symlink AS entry_id
-                        FROM symlinks s
-                        WHERE s.name = %s AND s.id_parent = %s
-                        UNION ALL
-                        SELECT 3 AS precedence, 'file' AS kind, f.id_file AS entry_id
-                        FROM files f
-                        WHERE f.name = %s AND f.id_directory = %s
-                        UNION ALL
-                        SELECT 4 AS precedence, 'dir' AS kind, d.id_directory AS entry_id
-                        FROM directories d
-                        WHERE d.name = %s AND d.id_parent = %s
-                    ) entries
-                    ORDER BY precedence
-                    LIMIT 1
-                    """,
-                    (name, parent_id, name, parent_id, name, parent_id, name, parent_id),
-                )
-            result = cur.fetchone()
-            value = (parent_id, result[0], result[1]) if result else (parent_id, None, None)
-            self._entry_cache[path] = value
-            return value
+        repo, lib = self._rust_repo()
+        path_bytes = str(path).encode("utf-8")
+        out_parent_id = ctypes.c_uint64()
+        out_parent_found = ctypes.c_ubyte()
+        out_kind = ctypes.c_ubyte()
+        out_entry_id = ctypes.c_uint64()
+        out_entry_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_resolve_path(
+            repo,
+            path_bytes,
+            len(path_bytes),
+            ctypes.byref(out_parent_id),
+            ctypes.byref(out_parent_found),
+            ctypes.byref(out_kind),
+            ctypes.byref(out_entry_id),
+            ctypes.byref(out_entry_found),
+        )
+        if status != 0:
+            raise dbfs.FuseOSError(errno.EIO)
+        value = (
+            int(out_parent_id.value) if out_parent_found.value else None,
+            {0: None, 1: "dir", 2: "file", 3: "hardlink", 4: "symlink"}.get(int(out_kind.value), None),
+            int(out_entry_id.value) if out_entry_found.value else None,
+        )
+        self._entry_cache[path] = value
+        return value
 
     def resolve_path(self, path):
         return self._entry_lookup(path)
@@ -155,229 +107,23 @@ class NamespaceRepositoryLookup:
         if path in self._file_id_cache:
             return self._file_id_cache[path]
 
-        rust_value = dbfs.backend.python_to_rust_namespace_get_file_id(path)
-        if rust_value is not None:
-            self._file_id_cache[path] = rust_value
-            return rust_value
-
-        parent_path = os.path.dirname(path)
-        file_name = os.path.basename(path)
-        parent_id = self.get_dir_id(parent_path)
-
-        with dbfs.db_connection() as conn, conn.cursor() as cur:
-            if parent_id is None:
-                cur.execute(
-                    """
-                    SELECT id_file FROM (
-                        SELECT 1 AS precedence, id_file FROM hardlinks WHERE name = %s AND id_directory IS NULL
-                        UNION ALL
-                        SELECT 2 AS precedence, id_file FROM files WHERE name = %s AND id_directory IS NULL
-                    ) entries
-                    ORDER BY precedence
-                    LIMIT 1
-                    """,
-                    (file_name, file_name),
-                )
-            else:
-                cur.execute(
-                    """
-                    SELECT id_file FROM (
-                        SELECT 1 AS precedence, id_file FROM hardlinks WHERE name = %s AND id_directory = %s
-                        UNION ALL
-                        SELECT 2 AS precedence, id_file FROM files WHERE name = %s AND id_directory = %s
-                    ) entries
-                    ORDER BY precedence
-                    LIMIT 1
-                    """,
-                    (file_name, parent_id, file_name, parent_id),
-                )
-
-            result = cur.fetchone()
-            value = result[0] if result else None
-            self._file_id_cache[path] = value
-            return value
-
-    def get_file_mode_value(self, path):
-        dbfs = self.dbfs
-        path = dbfs.normalize_path(path)
-        self._refresh_lookup_cache()
-        if path in self._file_mode_cache:
-            return self._file_mode_cache[path]
-
-        rust_value = dbfs.backend.python_to_rust_namespace_get_file_mode_value(path)
-        if rust_value is not None:
-            self._file_mode_cache[path] = rust_value
-            return rust_value
-
-        parent_path = os.path.dirname(path)
-        file_name = os.path.basename(path)
-        parent_id = self.get_dir_id(parent_path)
-
-        with dbfs.db_connection() as conn, conn.cursor() as cur:
-            if parent_id is None:
-                cur.execute(
-                    """
-                    SELECT mode FROM (
-                        SELECT 1 AS precedence, mode FROM hardlinks JOIN files ON hardlinks.id_file = files.id_file WHERE hardlinks.name = %s AND hardlinks.id_directory IS NULL
-                        UNION ALL
-                        SELECT 2 AS precedence, mode FROM files WHERE name = %s AND id_directory IS NULL
-                    ) entries
-                    ORDER BY precedence
-                    LIMIT 1
-                    """,
-                    (file_name, file_name),
-                )
-            else:
-                cur.execute(
-                    """
-                    SELECT mode FROM (
-                        SELECT 1 AS precedence, mode FROM hardlinks JOIN files ON hardlinks.id_file = files.id_file WHERE hardlinks.name = %s AND hardlinks.id_directory = %s
-                        UNION ALL
-                        SELECT 2 AS precedence, mode FROM files WHERE name = %s AND id_directory = %s
-                    ) entries
-                    ORDER BY precedence
-                    LIMIT 1
-                    """,
-                    (file_name, parent_id, file_name, parent_id),
-                )
-
-            result = cur.fetchone()
-            value = result[0] if result else None
-            self._file_mode_cache[path] = value
-            return value
-
-    def get_hardlink_id(self, path):
-        dbfs = self.dbfs
-        path = dbfs.normalize_path(path)
-        self._refresh_lookup_cache()
-        if path in self._hardlink_id_cache:
-            return self._hardlink_id_cache[path]
-
-        rust_value = dbfs.backend.python_to_rust_namespace_get_hardlink_id(path)
-        if rust_value is not None:
-            self._hardlink_id_cache[path] = rust_value
-            return rust_value
-
-        parent_path = os.path.dirname(path)
-        link_name = os.path.basename(path)
-        parent_id = self.get_dir_id(parent_path)
-
-        with dbfs.db_connection() as conn, conn.cursor() as cur:
-            if parent_id is None:
-                cur.execute(
-                    "SELECT id_hardlink FROM hardlinks WHERE name = %s AND id_directory IS NULL",
-                    (link_name,),
-                )
-            else:
-                cur.execute(
-                    "SELECT id_hardlink FROM hardlinks WHERE name = %s AND id_directory = %s",
-                    (link_name, parent_id),
-                )
-
-            result = cur.fetchone()
-            value = result[0] if result else None
-            self._hardlink_id_cache[path] = value
-            return value
-
-    def get_hardlink_file_id(self, hardlink_id):
-        dbfs = self.dbfs
-        rust_value = dbfs.backend.python_to_rust_namespace_get_hardlink_file_id(hardlink_id)
-        if rust_value is not None:
-            return rust_value
-
-        with dbfs.db_connection() as conn, conn.cursor() as cur:
-            cur.execute("SELECT id_file FROM hardlinks WHERE id_hardlink = %s", (hardlink_id,))
-            result = cur.fetchone()
-            return result[0] if result else None
-
-    def get_symlink_id(self, path):
-        dbfs = self.dbfs
-        path = dbfs.normalize_path(path)
-        self._refresh_lookup_cache()
-        if path in self._symlink_id_cache:
-            return self._symlink_id_cache[path]
-
-        rust_value = dbfs.backend.python_to_rust_namespace_get_symlink_id(path)
-        if rust_value is not None:
-            self._symlink_id_cache[path] = rust_value
-            return rust_value
-
-        parent_path = os.path.dirname(path)
-        link_name = os.path.basename(path)
-        parent_id = self.get_dir_id(parent_path)
-
-        with dbfs.db_connection() as conn, conn.cursor() as cur:
-            if parent_id is None:
-                cur.execute(
-                    "SELECT id_symlink FROM symlinks WHERE name = %s AND id_parent IS NULL",
-                    (link_name,),
-                )
-            else:
-                cur.execute(
-                    "SELECT id_symlink FROM symlinks WHERE name = %s AND id_parent = %s",
-                    (link_name, parent_id),
-                )
-
-            result = cur.fetchone()
-            value = result[0] if result else None
-            self._symlink_id_cache[path] = value
-            return value
-
-    def get_dir_id_by_path(self, path):
-        return self.get_dir_id(self.dbfs.normalize_path(path))
+        repo, lib = self._rust_repo()
+        path_bytes = str(path).encode("utf-8")
+        out_value = ctypes.c_uint64()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_get_file_id(
+            repo,
+            path_bytes,
+            len(path_bytes),
+            ctypes.byref(out_value),
+            ctypes.byref(out_found),
+        )
+        if status != 0 or not out_found.value:
+            raise dbfs.FuseOSError(errno.EIO)
+        rust_value = int(out_value.value)
+        self._file_id_cache[path] = rust_value
+        return rust_value
 
     def get_entry_kind_and_id(self, path):
         _, kind, entry_id = self.resolve_path(path)
         return kind, entry_id
-
-    def entry_exists(self, path, entry_kind):
-        _, kind, entry_id = self.resolve_path(path)
-        if kind != entry_kind:
-            return None
-        return entry_id
-
-    def entry_exists_any(self, path):
-        _, kind, entry_id = self.resolve_path(path)
-        return kind is not None and entry_id is not None
-
-    def count_file_links(self, file_id):
-        dbfs = self.dbfs
-        rust_value = dbfs.backend.python_to_rust_namespace_count_file_links(file_id)
-        if rust_value is not None:
-            return rust_value
-
-        with dbfs.db_connection() as conn, conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM hardlinks WHERE id_file = %s", (file_id,))
-            return 1 + cur.fetchone()[0]
-
-    def promote_hardlink_to_primary(self, file_id, cur):
-        dbfs = self.dbfs
-        rust_value = dbfs.backend.python_to_rust_namespace_promote_hardlink_to_primary(file_id)
-        if rust_value is not None:
-            return bool(rust_value)
-
-        cur.execute(
-            """
-            SELECT id_hardlink, id_directory, name
-            FROM hardlinks
-            WHERE id_file = %s
-            ORDER BY id_hardlink ASC
-            LIMIT 1
-            """,
-            (file_id,),
-        )
-        result = cur.fetchone()
-        if not result:
-            return False
-
-        hardlink_id, hardlink_dir_id, hardlink_name = result
-        cur.execute(
-            """
-            UPDATE files
-            SET id_directory = %s, name = %s
-            WHERE id_file = %s
-            """,
-            (hardlink_dir_id, hardlink_name, file_id),
-        )
-        cur.execute("DELETE FROM hardlinks WHERE id_hardlink = %s", (hardlink_id,))
-        return True

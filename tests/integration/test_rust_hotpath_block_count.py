@@ -13,7 +13,8 @@ from dbfs_storage import StorageSupport
 
 def main() -> None:
     storage = StorageSupport(SimpleNamespace())
-    assert storage._load_rust_hotpath_lib() is not None, "expected built Rust hot-path library"
+    lib = storage._load_rust_hotpath_lib()
+    assert lib is not None, "expected built Rust hot-path library"
 
     cases = [
         ((0, 4096, False), 0),
@@ -24,9 +25,9 @@ def main() -> None:
     ]
 
     for args, expected in cases:
-        result = storage.python_to_rust_hotpath_block_count_for_length(*args)
-        assert result is not None, args
-        assert result == expected, (args, result, expected)
+        length, block_size, minimum_one = args
+        result = lib.dbfs_block_count_for_length(length, block_size, 1 if minimum_one else 0)
+        assert int(result) == expected, (args, int(result), expected)
 
     print("OK rust-hotpath-block-count")
 

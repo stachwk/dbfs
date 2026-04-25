@@ -8,6 +8,7 @@ MIGRATION_DESCRIPTIONS = {
     2: "Schema admin secret table",
     3: "Schema version tracking table",
     4: "Copy block CRC cache table",
+    5: "Data objects for copy-on-write and dedupe",
 }
 
 

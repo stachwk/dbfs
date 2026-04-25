@@ -9,11 +9,13 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from dbfs_storage import StorageSupport
+from dbfs_storage import DbfsLogicalResizePlan
 
 
 def main() -> None:
     storage = StorageSupport(SimpleNamespace())
     assert storage._load_rust_hotpath_lib() is not None, "expected built Rust hot-path library"
+    lib = storage._load_rust_hotpath_lib()
 
     cases = [
         ((10, 0, 4), {"shrinking": True, "has_valid_blocks": False, "old_total_blocks": 3, "new_total_blocks": 0, "delete_from_block": 0, "max_valid_block": 0, "has_partial_tail": False, "tail_block_index": 0, "tail_valid_len": 0}),
@@ -22,7 +24,7 @@ def main() -> None:
     ]
 
     for (old_size, new_size, block_size), expected in cases:
-        plan = storage.python_to_rust_hotpath_logical_resize_plan(old_size, new_size, block_size)
+        plan = lib.dbfs_logical_resize_plan(old_size, new_size, block_size)
         assert int(plan.old_size) == old_size
         assert int(plan.new_size) == new_size
         assert int(plan.block_size) == block_size

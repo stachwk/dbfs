@@ -21,7 +21,7 @@ def build_fs(runtime_config: dict[str, object]) -> DBFS:
     fs.runtime_config = runtime_config
     fs.default_max_fs_size_bytes = parse_size_bytes("10GiB")
     fs.backend = SimpleNamespace(
-        python_to_rust_pg_query_scalar_text=lambda sql: runtime_config.get("pg_visible_path"),
+        rust_pg_query_scalar_text=lambda sql: runtime_config.get("pg_visible_path"),
     )
     fs.runtime_config_get = lambda key, default=None: runtime_config.get(key, default)
     fs.get_config_value = lambda key, default=None: default

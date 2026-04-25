@@ -62,7 +62,7 @@ def main():
         fh = None
 
         fh = fs.open(file_path, os.O_RDONLY)
-        file_id = fs.get_file_id(file_path)
+        file_id = fs.repository.get_file_id(file_path)
         assert file_id is not None
         fs.storage.clear_read_cache(file_id)
         zero_block = b"\x00" * block_size

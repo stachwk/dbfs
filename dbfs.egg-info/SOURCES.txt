@@ -8,12 +8,10 @@ dbfs_config.ini
 dbfs_config.py
 dbfs_fuse.py
 dbfs_identity.py
-dbfs_journal.py
 dbfs_locking.py
 dbfs_metadata.py
 dbfs_migrations.py
 dbfs_mkfs.py
-dbfs_namespace.py
 dbfs_permissions.py
 dbfs_pg_lock_manager.py
 dbfs_pg_tls.py

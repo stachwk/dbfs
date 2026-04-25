@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import ctypes
+import errno
 from typing import Any
 
 
 class XattrStore:
     def __init__(self, owner):
         self.owner = owner
+
+    def _rust_repo(self):
+        repo = self.owner.backend._load_rust_pg_repo()
+        lib = self.owner.backend._load_rust_hotpath_lib()
+        if repo is None or lib is None:
+            raise self.owner.FuseOSError(errno.EIO)
+        return repo, lib
 
     def _root_dir_id(self):
         return 0
@@ -53,50 +62,61 @@ class XattrStore:
 
     def fetch_xattr_value(self, path, name, cur=None):
         backend = getattr(self.owner, "backend", None)
-        rust_fetch = getattr(backend, "python_to_rust_xattr_fetch_value", None)
-        if rust_fetch is not None:
-            rust_value = rust_fetch(path, name)
-            if rust_value is not None:
-                return rust_value
-
-        owner_key = self.resolve_xattr_owner(path)
-        if owner_key is None:
-            return None
-        xattr_name = self.normalize_xattr_name(name)
-        owner_kind, owner_id = self._owner_clause(owner_key)
-        if cur is None:
-            with self.owner.db_connection() as conn, conn.cursor() as cur2:
-                cur2.execute(
-                    "SELECT value FROM xattrs WHERE owner_kind = %s AND owner_id = %s AND name = %s",
-                    (owner_kind, owner_id, xattr_name),
+        if backend is not None:
+            repo = backend._load_rust_pg_repo()
+            lib = backend._load_rust_hotpath_lib()
+            if repo is not None and lib is not None:
+                path_bytes = str(path).encode("utf-8")
+                name_bytes = str(name).encode("utf-8")
+                out_ptr = ctypes.POINTER(ctypes.c_ubyte)()
+                out_len = ctypes.c_size_t()
+                out_found = ctypes.c_ubyte()
+                status = lib.dbfs_rust_pg_repo_fetch_xattr_value(
+                    repo,
+                    path_bytes,
+                    len(path_bytes),
+                    name_bytes,
+                    len(name_bytes),
+                    ctypes.byref(out_ptr),
+                    ctypes.byref(out_len),
+                    ctypes.byref(out_found),
                 )
-                result = cur2.fetchone()
-                return bytes(result[0]) if result else None
-
-        cur.execute(
-            "SELECT value FROM xattrs WHERE owner_kind = %s AND owner_id = %s AND name = %s",
-            (owner_kind, owner_id, xattr_name),
-        )
-        result = cur.fetchone()
-        return bytes(result[0]) if result else None
+                if status == 0 and out_found.value:
+                    try:
+                        return ctypes.string_at(out_ptr, out_len.value)
+                    finally:
+                        lib.dbfs_free_bytes(out_ptr, out_len)
+            raise self.owner.FuseOSError(errno.EIO)
+        raise self.owner.FuseOSError(errno.EIO)
 
     def list_xattr_names(self, path, cur=None):
         owner_key = self.resolve_xattr_owner(path)
         if owner_key is None:
             return []
         owner_kind, owner_id = self._owner_clause(owner_key)
-        if cur is None:
-            with self.owner.db_connection() as conn, conn.cursor() as cur2:
-                cur2.execute(
-                    "SELECT name FROM xattrs WHERE owner_kind = %s AND owner_id = %s ORDER BY name",
-                    (owner_kind, owner_id),
-                )
-                return [row[0] for row in cur2.fetchall()]
-        cur.execute(
-            "SELECT name FROM xattrs WHERE owner_kind = %s AND owner_id = %s ORDER BY name",
-            (owner_kind, owner_id),
+        repo, lib = self._rust_repo()
+        owner_kind_bytes = str(owner_kind).encode("utf-8")
+        out_ptr = ctypes.POINTER(ctypes.c_ubyte)()
+        out_len = ctypes.c_size_t()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_list_xattr_names_for_owner(
+            repo,
+            owner_kind_bytes,
+            len(owner_kind_bytes),
+            int(owner_id),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+            ctypes.byref(out_found),
         )
-        return [row[0] for row in cur.fetchall()]
+        if status != 0:
+            raise self.owner.FuseOSError(errno.EIO)
+        if not out_found.value:
+            return []
+        try:
+            raw = ctypes.string_at(out_ptr, out_len.value).decode("utf-8")
+        finally:
+            lib.dbfs_free_bytes(out_ptr, out_len)
+        return [line for line in raw.split("\n") if line]
 
     def store_xattr_value(self, path, name, value, cur):
         owner_key = self.resolve_xattr_owner(path)
@@ -106,49 +126,60 @@ class XattrStore:
 
     def store_owner_xattr_value(self, owner_key, name, value, cur):
         owner_kind, owner_id = self._owner_clause(owner_key)
-        xattr_name = self.normalize_xattr_name(name)
-        stored_value = self.normalize_xattr_value(value)
-        cur.execute(
-            """
-            INSERT INTO xattrs (owner_kind, owner_id, name, value)
-            VALUES (%s, %s, %s, %s)
-            ON CONFLICT (owner_kind, owner_id, name) DO UPDATE
-            SET value = EXCLUDED.value
-            """,
-            (owner_kind, owner_id, xattr_name, stored_value),
+        repo, lib = self._rust_repo()
+        owner_kind_bytes = str(owner_kind).encode("utf-8")
+        name_bytes = str(self.normalize_xattr_name(name)).encode("utf-8")
+        value_bytes = bytes(self.normalize_xattr_value(value))
+        status = lib.dbfs_rust_pg_repo_store_xattr_value_for_owner(
+            repo,
+            owner_kind_bytes,
+            len(owner_kind_bytes),
+            int(owner_id),
+            name_bytes,
+            len(name_bytes),
+            value_bytes,
+            len(value_bytes),
         )
+        if status != 0:
+            raise self.owner.FuseOSError(errno.EIO)
 
     def delete_inode_xattrs(self, path, cur=None):
         owner_key = self.resolve_xattr_owner(path)
         if owner_key is None:
             return
         owner_kind, owner_id = self._owner_clause(owner_key)
-        if cur is not None:
-            cur.execute(
-                "DELETE FROM xattrs WHERE owner_kind = %s AND owner_id = %s",
-                (owner_kind, owner_id),
-            )
-            return
-        with self.owner.db_connection() as conn, conn.cursor() as cur2:
-            self.delete_inode_xattrs(path, cur=cur2)
-            conn.commit()
+        repo, lib = self._rust_repo()
+        owner_kind_bytes = str(owner_kind).encode("utf-8")
+        status = lib.dbfs_rust_pg_repo_delete_owner_xattrs(
+            repo,
+            owner_kind_bytes,
+            len(owner_kind_bytes),
+            int(owner_id),
+        )
+        if status != 0:
+            raise self.owner.FuseOSError(errno.EIO)
 
     def remove_xattr(self, path, name, cur=None):
         owner_key = self.resolve_xattr_owner(path)
         if owner_key is None:
             return 0
         owner_kind, owner_id = self._owner_clause(owner_key)
-        xattr_name = self.normalize_xattr_name(name)
-        if cur is not None:
-            cur.execute(
-                "DELETE FROM xattrs WHERE owner_kind = %s AND owner_id = %s AND name = %s",
-                (owner_kind, owner_id, xattr_name),
-            )
-            return cur.rowcount
-        with self.owner.db_connection() as conn, conn.cursor() as cur2:
-            self.remove_xattr(path, name, cur=cur2)
-            conn.commit()
-            return cur2.rowcount
+        repo, lib = self._rust_repo()
+        owner_kind_bytes = str(owner_kind).encode("utf-8")
+        name_bytes = str(self.normalize_xattr_name(name)).encode("utf-8")
+        out_deleted = ctypes.c_uint64()
+        status = lib.dbfs_rust_pg_repo_remove_xattr_for_owner(
+            repo,
+            owner_kind_bytes,
+            len(owner_kind_bytes),
+            int(owner_id),
+            name_bytes,
+            len(name_bytes),
+            ctypes.byref(out_deleted),
+        )
+        if status != 0:
+            raise self.owner.FuseOSError(errno.EIO)
+        return int(out_deleted.value)
 
     def move_path_xattrs(self, old_path, new_path, recursive=False, cur=None):
         # Inode-centric xattrs do not move on rename.

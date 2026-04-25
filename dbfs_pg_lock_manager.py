@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import errno
 import fcntl
 import hashlib
@@ -27,74 +28,20 @@ class PostgresLeaseLockManager:
         self._start_heartbeat()
 
     def _ensure_schema(self):
-        with self.owner.db_connection() as conn:
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS lock_leases (
-                            id_lock SERIAL PRIMARY KEY,
-                            resource_kind VARCHAR(20) NOT NULL,
-                            resource_id BIGINT NOT NULL,
-                            owner_key BIGINT NOT NULL,
-                            lease_kind VARCHAR(20) NOT NULL,
-                            lock_type INTEGER NOT NULL,
-                            lease_expires_at TIMESTAMP NOT NULL,
-                            heartbeat_at TIMESTAMP NOT NULL,
-                            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                            updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                            UNIQUE(resource_kind, resource_id, owner_key, lease_kind)
-                        )
-                        """
-                    )
-                    cur.execute(
-                        """
-                        CREATE INDEX IF NOT EXISTS idx_lock_leases_resource
-                        ON lock_leases (resource_kind, resource_id, lease_kind)
-                        """
-                    )
-                    cur.execute(
-                        """
-                        CREATE INDEX IF NOT EXISTS idx_lock_leases_expires
-                        ON lock_leases (lease_expires_at)
-                        """
-                    )
-                    cur.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS lock_range_leases (
-                            id_lock SERIAL PRIMARY KEY,
-                            resource_kind VARCHAR(20) NOT NULL,
-                            resource_id BIGINT NOT NULL,
-                            owner_key BIGINT NOT NULL,
-                            lock_type INTEGER NOT NULL,
-                            range_start BIGINT NOT NULL,
-                            range_end BIGINT NULL,
-                            lease_expires_at TIMESTAMP NOT NULL,
-                            heartbeat_at TIMESTAMP NOT NULL,
-                            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                            updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-                        )
-                        """
-                    )
-                    cur.execute(
-                        """
-                        CREATE INDEX IF NOT EXISTS idx_lock_range_leases_resource
-                        ON lock_range_leases (resource_kind, resource_id)
-                        """
-                    )
-                    cur.execute(
-                        """
-                        CREATE INDEX IF NOT EXISTS idx_lock_range_leases_expires
-                        ON lock_range_leases (lease_expires_at)
-                        """
-                    )
-                conn.commit()
-            except Exception:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-                raise
+        repo = self.owner.backend._load_rust_pg_repo()
+        lib = self.owner.backend._load_rust_hotpath_lib()
+        if repo is None or lib is None:
+            raise FuseOSError(errno.EIO)
+        status = lib.dbfs_rust_pg_repo_ensure_lock_schema(repo)
+        if status != 0:
+            raise FuseOSError(errno.EIO)
+
+    def _rust_repo(self):
+        repo = self.owner.backend._load_rust_pg_repo()
+        lib = self.owner.backend._load_rust_hotpath_lib()
+        if repo is None or lib is None:
+            raise FuseOSError(errno.EIO)
+        return repo, lib
 
     def _resource_id(self, resource_key):
         payload = repr(resource_key).encode("utf-8")
@@ -142,187 +89,72 @@ class PostgresLeaseLockManager:
         with self._active_guard:
             return list(self._active_leases)
 
-    def _flock_conflicts(self, requested_type, other_type):
-        if requested_type == fcntl.LOCK_SH:
-            return other_type == fcntl.LOCK_EX
-        if requested_type == fcntl.LOCK_EX:
-            return other_type in {fcntl.LOCK_SH, fcntl.LOCK_EX}
-        return False
-
-    def _prune_expired(self, cur, resource_key=None):
-        if resource_key is None:
-            cur.execute("DELETE FROM lock_leases WHERE lease_expires_at <= NOW()")
-            return
-        resource_kind, resource_id = resource_key
-        cur.execute(
-            """
-            DELETE FROM lock_leases
-            WHERE resource_kind = %s
-              AND resource_id = %s
-              AND lease_kind = %s
-              AND lease_expires_at <= NOW()
-            """,
-            (resource_kind, resource_id, self.LOCK_KIND),
-        )
-
-    def _find_conflict(self, cur, resource_key, owner_key, requested_type):
-        resource_kind, resource_id = resource_key
-        cur.execute(
-            """
-            SELECT owner_key, lock_type
-            FROM lock_leases
-            WHERE resource_kind = %s
-              AND resource_id = %s
-              AND lease_kind = %s
-              AND lease_expires_at > NOW()
-              AND owner_key <> %s
-            ORDER BY owner_key
-            """,
-            (resource_kind, resource_id, self.LOCK_KIND, owner_key),
-        )
-        for _, other_type in cur.fetchall():
-            if self._flock_conflicts(requested_type, other_type):
-                return True
-        return False
-
-    def _upsert_lease(self, cur, resource_key, owner_key, lock_type):
-        resource_kind, resource_id = resource_key
-        cur.execute(
-            """
-            INSERT INTO lock_leases (
-                resource_kind,
-                resource_id,
-                owner_key,
-                lease_kind,
-                lock_type,
-                lease_expires_at,
-                heartbeat_at,
-                created_at,
-                updated_at
-            ) VALUES (
-                %s,
-                %s,
-                %s,
-                %s,
-                %s,
-                NOW() + (%s || ' seconds')::interval,
-                NOW(),
-                NOW(),
-                NOW()
-            )
-            ON CONFLICT (resource_kind, resource_id, owner_key, lease_kind)
-            DO UPDATE SET
-                lock_type = EXCLUDED.lock_type,
-                lease_expires_at = EXCLUDED.lease_expires_at,
-                heartbeat_at = EXCLUDED.heartbeat_at,
-                updated_at = NOW()
-            """,
-            (
-                resource_kind,
-                resource_id,
-                owner_key,
-                self.LOCK_KIND,
-                int(lock_type),
-                self.lease_ttl_seconds,
-            ),
-        )
-
-    def _delete_lease(self, cur, resource_key, owner_key):
-        resource_kind, resource_id = resource_key
-        cur.execute(
-            """
-            DELETE FROM lock_leases
-            WHERE resource_kind = %s
-              AND resource_id = %s
-              AND owner_key = %s
-              AND lease_kind = %s
-            """,
-            (resource_kind, resource_id, owner_key, self.LOCK_KIND),
-        )
-
-    def _delete_range_leases(self, cur, resource_key, owner_key=None):
-        resource_kind, resource_id = resource_key
-        if owner_key is None:
-            cur.execute(
-                """
-                DELETE FROM lock_range_leases
-                WHERE resource_kind = %s
-                  AND resource_id = %s
-                """,
-                (resource_kind, resource_id),
-            )
-            return
-        cur.execute(
-            """
-            DELETE FROM lock_range_leases
-            WHERE resource_kind = %s
-              AND resource_id = %s
-              AND owner_key = %s
-            """,
-            (resource_kind, resource_id, owner_key),
-        )
-
     def _load_range_state(self, cur, resource_key):
+        repo, lib = self._rust_repo()
         resource_kind, resource_id = resource_key
-        cur.execute(
-            """
-            SELECT owner_key, lock_type, range_start, range_end
-            FROM lock_range_leases
-            WHERE resource_kind = %s
-              AND resource_id = %s
-              AND lease_expires_at > NOW()
-            ORDER BY owner_key, range_start, COALESCE(range_end, 9223372036854775807)
-            """,
-            (resource_kind, resource_id),
+        resource_kind_bytes = str(resource_kind).encode("utf-8")
+        out_ptr = ctypes.POINTER(ctypes.c_ubyte)()
+        out_len = ctypes.c_size_t()
+        status = lib.dbfs_rust_pg_repo_load_lock_range_state_blob(
+            repo,
+            resource_kind_bytes,
+            len(resource_kind_bytes),
+            int(resource_id),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
         )
+        if status != 0:
+            raise FuseOSError(errno.EIO)
+        if not out_ptr or out_len.value == 0:
+            return {}
+        try:
+            payload = ctypes.string_at(out_ptr, out_len.value).decode("utf-8")
+        finally:
+            lib.dbfs_free_bytes(out_ptr, out_len)
         state = {}
-        for owner_key, lock_type, start, end in cur.fetchall():
-            state.setdefault(int(owner_key), []).append(
-                {"type": int(lock_type), "start": int(start), "end": None if end is None else int(end)}
+        for line in payload.splitlines():
+            if not line:
+                continue
+            owner_key_text, lock_type_text, start_text, end_text = line.split("\t")
+            state.setdefault(int(owner_key_text), []).append(
+                {
+                    "type": int(lock_type_text),
+                    "start": int(start_text),
+                    "end": None if end_text == "" else int(end_text),
+                }
             )
         return state
 
     def _persist_range_state(self, cur, resource_key, state):
-        self._delete_range_leases(cur, resource_key)
+        repo, lib = self._rust_repo()
         resource_kind, resource_id = resource_key
+        resource_kind_bytes = str(resource_kind).encode("utf-8")
+        lines = []
         for owner_key, records in state.items():
             for record in records:
-                cur.execute(
-                    """
-                    INSERT INTO lock_range_leases (
-                        resource_kind,
-                        resource_id,
-                        owner_key,
-                        lock_type,
-                        range_start,
-                        range_end,
-                        lease_expires_at,
-                        heartbeat_at,
-                        created_at,
-                        updated_at
-                    ) VALUES (
-                        %s,
-                        %s,
-                        %s,
-                        %s,
-                        %s,
-                        %s,
-                        NOW() + (%s || ' seconds')::interval,
-                        NOW(),
-                        NOW(),
-                        NOW()
+                end_text = "" if record["end"] is None else str(int(record["end"]))
+                lines.append(
+                    "\t".join(
+                        [
+                            str(int(owner_key)),
+                            str(int(record["type"])),
+                            str(int(record["start"])),
+                            end_text,
+                        ]
                     )
-                    """,
-                    (
-                        resource_kind,
-                        resource_id,
-                        int(owner_key),
-                        int(record["type"]),
-                        int(record["start"]),
-                        record["end"],
-                        self.lease_ttl_seconds,
-                    ),
                 )
+        payload = "\n".join(lines).encode("utf-8")
+        status = lib.dbfs_rust_pg_repo_persist_lock_range_state_blob(
+            repo,
+            resource_kind_bytes,
+            len(resource_kind_bytes),
+            int(resource_id),
+            int(self.lease_ttl_seconds),
+            payload,
+            len(payload),
+        )
+        if status != 0:
+            raise FuseOSError(errno.EIO)
 
     def _range_active_snapshot(self):
         with self._active_guard:
@@ -412,86 +244,45 @@ class PostgresLeaseLockManager:
             for record in owner_records:
                 self._register_range_active(resource_key, owner_key, record["start"], record["end"])
 
-    def _heartbeat_range_leases(self):
-        snapshot = self._range_active_snapshot()
-        if not snapshot:
-            return
-        with self.owner.db_connection() as conn:
-            try:
-                with conn.cursor() as cur:
-                    for resource_kind, resource_id, owner_key, lease_kind, range_start, range_end in snapshot:
-                        cur.execute(
-                            """
-                            UPDATE lock_range_leases
-                            SET lease_expires_at = NOW() + (%s || ' seconds')::interval,
-                                heartbeat_at = NOW(),
-                                updated_at = NOW()
-                            WHERE resource_kind = %s
-                              AND resource_id = %s
-                              AND owner_key = %s
-                              AND range_start = %s
-                              AND range_end IS NOT DISTINCT FROM %s
-                            """,
-                            (self.lease_ttl_seconds, resource_kind, resource_id, owner_key, range_start, range_end),
-                        )
-                conn.commit()
-            except Exception:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-                logging.debug("Failed to heartbeat PostgreSQL range leases", exc_info=True)
-
     def _heartbeat_active_leases(self):
         snapshot = self._active_snapshot()
         if not snapshot:
             return
-        with self.owner.db_connection() as conn:
-            try:
-                with conn.cursor() as cur:
-                    for lease in snapshot:
-                        if len(lease) == 4:
-                            resource_kind, resource_id, owner_key, lease_kind = lease
-                            if lease_kind != self.LOCK_KIND:
-                                continue
-                            cur.execute(
-                                """
-                                UPDATE lock_leases
-                                SET lease_expires_at = NOW() + (%s || ' seconds')::interval,
-                                    heartbeat_at = NOW(),
-                                    updated_at = NOW()
-                                WHERE resource_kind = %s
-                                  AND resource_id = %s
-                                  AND owner_key = %s
-                                  AND lease_kind = %s
-                                """,
-                                (self.lease_ttl_seconds, resource_kind, resource_id, owner_key, lease_kind),
-                            )
-                            continue
-                        resource_kind, resource_id, owner_key, lease_kind, range_start, range_end = lease
-                        if lease_kind != self.RANGE_KIND:
-                            continue
-                        cur.execute(
-                            """
-                            UPDATE lock_range_leases
-                            SET lease_expires_at = NOW() + (%s || ' seconds')::interval,
-                                heartbeat_at = NOW(),
-                                updated_at = NOW()
-                            WHERE resource_kind = %s
-                              AND resource_id = %s
-                              AND owner_key = %s
-                              AND range_start = %s
-                              AND range_end IS NOT DISTINCT FROM %s
-                            """,
-                            (self.lease_ttl_seconds, resource_kind, resource_id, owner_key, range_start, range_end),
-                        )
-                conn.commit()
-            except Exception:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-                logging.debug("Failed to heartbeat PostgreSQL lock leases", exc_info=True)
+        repo, lib = self._rust_repo()
+        for lease in snapshot:
+            if len(lease) == 4:
+                resource_kind, resource_id, owner_key, lease_kind = lease
+                if lease_kind != self.LOCK_KIND:
+                    continue
+                resource_kind_bytes = str(resource_kind).encode("utf-8")
+                status = lib.dbfs_rust_pg_repo_heartbeat_lock_lease(
+                    repo,
+                    resource_kind_bytes,
+                    len(resource_kind_bytes),
+                    int(resource_id),
+                    int(owner_key),
+                    int(self.lease_ttl_seconds),
+                )
+                if status != 0:
+                    logging.debug("Failed to heartbeat PostgreSQL lock lease", exc_info=True)
+                continue
+            resource_kind, resource_id, owner_key, lease_kind, range_start, range_end = lease
+            if lease_kind != self.RANGE_KIND:
+                continue
+            resource_kind_bytes = str(resource_kind).encode("utf-8")
+            status = lib.dbfs_rust_pg_repo_heartbeat_lock_range_lease(
+                repo,
+                resource_kind_bytes,
+                len(resource_kind_bytes),
+                int(resource_id),
+                int(owner_key),
+                int(range_start),
+                0 if range_end is None else int(range_end),
+                ctypes.c_ubyte(0 if range_end is None else 1),
+                int(self.lease_ttl_seconds),
+            )
+            if status != 0:
+                logging.debug("Failed to heartbeat PostgreSQL range lease", exc_info=True)
 
     def _heartbeat_loop(self):
         while not self._stop_event.wait(self.heartbeat_interval_seconds):
@@ -508,61 +299,45 @@ class PostgresLeaseLockManager:
             raise FuseOSError(errno.EINVAL)
 
         resource_lock_id = self._resource_hash(resource_key)
+        repo, lib = self._rust_repo()
+        resource_kind, resource_id = resource_key
+        resource_kind_bytes = str(resource_kind).encode("utf-8")
         while True:
-            with self.owner.db_connection() as conn:
-                try:
-                    with conn.cursor() as cur:
-                        cur.execute("SELECT pg_try_advisory_xact_lock(%s)", (resource_lock_id,))
-                        if not cur.fetchone()[0]:
-                            conn.rollback()
-                            if nonblocking:
-                                raise FuseOSError(errno.EWOULDBLOCK)
-                            time.sleep(self.poll_interval_seconds)
-                            continue
-                        self._prune_expired(cur, resource_key)
-                        if self._find_conflict(cur, resource_key, owner_key, requested_type):
-                            conn.rollback()
-                            if nonblocking:
-                                raise FuseOSError(errno.EWOULDBLOCK)
-                            time.sleep(self.poll_interval_seconds)
-                            continue
-                        self._upsert_lease(cur, resource_key, owner_key, requested_type)
-                    conn.commit()
-                    self._register_active(resource_key, owner_key)
-                    return 0
-                except Exception:
-                    try:
-                        conn.rollback()
-                    except Exception:
-                        pass
-                    raise
-
+            status = lib.dbfs_rust_pg_repo_acquire_flock_lease(
+                repo,
+                int(resource_lock_id),
+                resource_kind_bytes,
+                len(resource_kind_bytes),
+                int(resource_id),
+                int(owner_key),
+                int(requested_type),
+                int(self.lease_ttl_seconds),
+            )
+            if status == 0:
+                self._register_active(resource_key, owner_key)
+                return 0
+            if status != 1:
+                raise FuseOSError(errno.EIO)
             if nonblocking:
                 raise FuseOSError(errno.EWOULDBLOCK)
+            time.sleep(self.poll_interval_seconds)
 
     def release(self, resource_key, owner_key):
-        resource_lock_id = self._resource_hash(resource_key)
-        while True:
-            with self.owner.db_connection() as conn:
-                try:
-                    with conn.cursor() as cur:
-                        cur.execute("SELECT pg_try_advisory_xact_lock(%s)", (resource_lock_id,))
-                        if not cur.fetchone()[0]:
-                            conn.rollback()
-                            time.sleep(self.poll_interval_seconds)
-                            continue
-                        self._delete_lease(cur, resource_key, owner_key)
-                        self._delete_range_leases(cur, resource_key, owner_key)
-                    conn.commit()
-                    self._unregister_active(resource_key, owner_key)
-                    self._clear_range_active(resource_key, owner_key)
-                    return 0
-                except Exception:
-                    try:
-                        conn.rollback()
-                    except Exception:
-                        pass
-                    raise
+        repo, lib = self._rust_repo()
+        resource_kind, resource_id = resource_key
+        resource_kind_bytes = str(resource_kind).encode("utf-8")
+        status = lib.dbfs_rust_pg_repo_release_flock_lease(
+            repo,
+            resource_kind_bytes,
+            len(resource_kind_bytes),
+            int(resource_id),
+            int(owner_key),
+        )
+        if status != 0:
+            raise FuseOSError(errno.EIO)
+        self._unregister_active(resource_key, owner_key)
+        self._clear_range_active(resource_key, owner_key)
+        return 0
 
     def cleanup(self):
         self._stop_event.set()
@@ -588,41 +363,37 @@ class PostgresLeaseLockManager:
     def get_range_conflict(self, resource_key, owner_key, requested_type, requested_start, requested_end):
         resource_lock_id = self._resource_hash(resource_key)
         while True:
-            with self.owner.db_connection() as conn:
-                try:
-                    with conn.cursor() as cur:
-                        cur.execute("SELECT pg_try_advisory_xact_lock(%s)", (resource_lock_id,))
-                        if not cur.fetchone()[0]:
-                            conn.rollback()
-                            time.sleep(self.poll_interval_seconds)
-                            continue
-                        self._prune_expired_range(cur, resource_key)
-                        state = self._load_range_state(cur, resource_key)
-                        _, conflict = self._find_range_conflict(state, owner_key, requested_type, requested_start, requested_end)
-                        if conflict is None:
-                            return None
-                        return conflict
-                except Exception:
-                    try:
-                        conn.rollback()
-                    except Exception:
-                        pass
-                    raise
+            repo, lib = self._rust_repo()
+            resource_kind, resource_id = resource_key
+            resource_kind_bytes = str(resource_kind).encode("utf-8")
+            lock_status = lib.dbfs_rust_pg_repo_try_advisory_xact_lock(repo, int(resource_lock_id))
+            if lock_status == 0:
+                self._prune_expired_range(None, resource_key)
+                state = self._load_range_state(None, resource_key)
+                _, conflict = self._find_range_conflict(state, owner_key, requested_type, requested_start, requested_end)
+                if conflict is None:
+                    return None
+                return conflict
+            if lock_status != 1:
+                raise FuseOSError(errno.EIO)
+            time.sleep(self.poll_interval_seconds)
 
     def _prune_expired_range(self, cur, resource_key=None):
+        repo, lib = self._rust_repo()
         if resource_key is None:
-            cur.execute("DELETE FROM lock_range_leases WHERE lease_expires_at <= NOW()")
-            return
-        resource_kind, resource_id = resource_key
-        cur.execute(
-            """
-            DELETE FROM lock_range_leases
-            WHERE resource_kind = %s
-              AND resource_id = %s
-              AND lease_expires_at <= NOW()
-            """,
-            (resource_kind, resource_id),
-        )
+            status = lib.dbfs_rust_pg_repo_prune_lock_range_leases(repo, None, 0, 0, ctypes.c_ubyte(0))
+        else:
+            resource_kind, resource_id = resource_key
+            resource_kind_bytes = str(resource_kind).encode("utf-8")
+            status = lib.dbfs_rust_pg_repo_prune_lock_range_leases(
+                repo,
+                resource_kind_bytes,
+                len(resource_kind_bytes),
+                int(resource_id),
+                ctypes.c_ubyte(1),
+            )
+        if status != 0:
+            raise FuseOSError(errno.EIO)
 
     def acquire_range(self, resource_key, owner_key, requested_type, requested_start, requested_end, nonblocking=False):
         if requested_type not in {fcntl.F_RDLCK, fcntl.F_WRLCK}:
@@ -630,61 +401,42 @@ class PostgresLeaseLockManager:
 
         resource_lock_id = self._resource_hash(resource_key)
         while True:
-            with self.owner.db_connection() as conn:
-                try:
-                    with conn.cursor() as cur:
-                        cur.execute("SELECT pg_try_advisory_xact_lock(%s)", (resource_lock_id,))
-                        if not cur.fetchone()[0]:
-                            conn.rollback()
-                            if nonblocking:
-                                raise FuseOSError(errno.EWOULDBLOCK)
-                            time.sleep(self.poll_interval_seconds)
-                            continue
-                        self._prune_expired_range(cur, resource_key)
-                        state = self._load_range_state(cur, resource_key)
-                        _, conflict = self._find_range_conflict(state, owner_key, requested_type, requested_start, requested_end)
-                        if conflict is not None:
-                            conn.rollback()
-                            if nonblocking:
-                                raise FuseOSError(errno.EWOULDBLOCK)
-                            time.sleep(self.poll_interval_seconds)
-                            continue
-                        self._unlock_range_records(state, owner_key, requested_start, requested_end)
-                        self._merge_range_record(
-                            state,
-                            owner_key,
-                            {"type": requested_type, "start": requested_start, "end": requested_end},
-                        )
-                        self._set_range_state(cur, resource_key, state)
-                    conn.commit()
-                    return 0
-                except Exception:
-                    try:
-                        conn.rollback()
-                    except Exception:
-                        pass
-                    raise
+            repo, lib = self._rust_repo()
+            lock_status = lib.dbfs_rust_pg_repo_try_advisory_xact_lock(repo, int(resource_lock_id))
+            if lock_status == 0:
+                self._prune_expired_range(None, resource_key)
+                state = self._load_range_state(None, resource_key)
+                _, conflict = self._find_range_conflict(state, owner_key, requested_type, requested_start, requested_end)
+                if conflict is not None:
+                    if nonblocking:
+                        raise FuseOSError(errno.EWOULDBLOCK)
+                    time.sleep(self.poll_interval_seconds)
+                    continue
+                self._unlock_range_records(state, owner_key, requested_start, requested_end)
+                self._merge_range_record(
+                    state,
+                    owner_key,
+                    {"type": requested_type, "start": requested_start, "end": requested_end},
+                )
+                self._set_range_state(None, resource_key, state)
+                return 0
+            if lock_status != 1:
+                raise FuseOSError(errno.EIO)
+            if nonblocking:
+                raise FuseOSError(errno.EWOULDBLOCK)
+            time.sleep(self.poll_interval_seconds)
 
     def unlock_range(self, resource_key, owner_key, unlock_start, unlock_end):
         resource_lock_id = self._resource_hash(resource_key)
         while True:
-            with self.owner.db_connection() as conn:
-                try:
-                    with conn.cursor() as cur:
-                        cur.execute("SELECT pg_try_advisory_xact_lock(%s)", (resource_lock_id,))
-                        if not cur.fetchone()[0]:
-                            conn.rollback()
-                            time.sleep(self.poll_interval_seconds)
-                            continue
-                        self._prune_expired_range(cur, resource_key)
-                        state = self._load_range_state(cur, resource_key)
-                        self._unlock_range_records(state, owner_key, unlock_start, unlock_end)
-                        self._set_range_state(cur, resource_key, state)
-                    conn.commit()
-                    return 0
-                except Exception:
-                    try:
-                        conn.rollback()
-                    except Exception:
-                        pass
-                    raise
+            repo, lib = self._rust_repo()
+            lock_status = lib.dbfs_rust_pg_repo_try_advisory_xact_lock(repo, int(resource_lock_id))
+            if lock_status == 0:
+                self._prune_expired_range(None, resource_key)
+                state = self._load_range_state(None, resource_key)
+                self._unlock_range_records(state, owner_key, unlock_start, unlock_end)
+                self._set_range_state(None, resource_key, state)
+                return 0
+            if lock_status != 1:
+                raise FuseOSError(errno.EIO)
+            time.sleep(self.poll_interval_seconds)

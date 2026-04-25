@@ -12,13 +12,13 @@ from dbfs_fuse import DBFS, FuseOSError, load_dsn_from_config
 
 
 def safe_unlink(fs, path):
-    kind, _ = fs.get_entry_kind_and_id(path)
+    kind, _ = fs.repository.get_entry_kind_and_id(path)
     if kind == "file":
         fs.unlink(path)
 
 
 def safe_rmdir(fs, path):
-    kind, _ = fs.get_entry_kind_and_id(path)
+    kind, _ = fs.repository.get_entry_kind_and_id(path)
     if kind == "dir":
         fs.rmdir(path)
 
@@ -52,7 +52,7 @@ def main():
         fs.unlink(file_path)
         fs.rmdir(dir_path)
 
-        kind, _ = fs.get_entry_kind_and_id(dir_path)
+        kind, _ = fs.repository.get_entry_kind_and_id(dir_path)
         if kind is not None:
             raise AssertionError("directory still exists after rmdir")
 

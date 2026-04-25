@@ -35,7 +35,7 @@ def main():
         linked_stat = fs.getattr(linked_path)
         assert linked_stat["st_ino"] == source_stat["st_ino"], (linked_stat, source_stat)
         assert linked_stat["st_nlink"] == 2, linked_stat
-        assert fs.path_has_children(fs.get_dir_id(dir_path)), dir_path
+        assert fs.storage.path_has_children(fs.repository.get_dir_id(dir_path)), dir_path
         assert fs.read(linked_path, len(payload), 0, fs.open(linked_path, os.O_RDONLY)) == payload
 
         fs.rename(linked_path, renamed_path)
@@ -46,7 +46,7 @@ def main():
         fs.unlink(source_path)
         remaining_stat = fs.getattr(renamed_path)
         assert remaining_stat["st_nlink"] == 1, remaining_stat
-        assert fs.path_has_children(fs.get_dir_id(dir_path)), dir_path
+        assert fs.storage.path_has_children(fs.repository.get_dir_id(dir_path)), dir_path
         assert fs.read(renamed_path, len(payload), 0, fs.open(renamed_path, os.O_RDONLY)) == payload
         fs.unlink(renamed_path)
         fs.rmdir(dir_path)

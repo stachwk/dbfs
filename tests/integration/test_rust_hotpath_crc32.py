@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+import ctypes
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -13,7 +14,8 @@ from dbfs_storage import StorageSupport
 
 def main() -> None:
     storage = StorageSupport(SimpleNamespace())
-    assert storage._load_rust_hotpath_lib() is not None, "expected built Rust hot-path library"
+    lib = storage._load_rust_hotpath_lib()
+    assert lib is not None, "expected built Rust hot-path library"
 
     cases = [
         (b"", 0x00000000),
@@ -23,9 +25,9 @@ def main() -> None:
     ]
 
     for payload, expected in cases:
-        rust_value = storage.python_to_rust_hotpath_crc32(payload)
-        assert rust_value is not None, payload
-        assert rust_value == expected, (payload, rust_value, expected)
+        buf = ctypes.create_string_buffer(payload, len(payload))
+        rust_value = lib.dbfs_crc32(ctypes.cast(buf, ctypes.POINTER(ctypes.c_ubyte)), len(payload))
+        assert int(rust_value) == expected, (payload, int(rust_value), expected)
 
     print("OK rust-hotpath-crc32")
 

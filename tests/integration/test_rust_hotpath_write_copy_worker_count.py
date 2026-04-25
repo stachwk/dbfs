@@ -8,12 +8,13 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from dbfs_storage import StorageSupport
+from dbfs_storage import DbfsBlockTransferPlan, DbfsWriteCopyPlan, StorageSupport
 
 
 def main() -> None:
     storage = StorageSupport(SimpleNamespace())
-    assert storage._load_rust_hotpath_lib() is not None, "expected built Rust hot-path library"
+    lib = storage._load_rust_hotpath_lib()
+    assert lib is not None, "expected built Rust hot-path library"
 
     cases = [
         ((0, 4, 8), 1),
@@ -24,32 +25,37 @@ def main() -> None:
     ]
 
     for args, expected in cases:
-        result = storage.python_to_rust_hotpath_write_copy_worker_count(*args)
-        assert result is not None, args
-        assert result == expected, (args, result, expected)
+        result = lib.dbfs_write_copy_worker_count(*args)
+        assert int(result) == expected, (args, int(result), expected)
 
     plan_cases = [
         ((0, 4096, 4, 8), (1, False, False, 1)),
         ((4096, 4096, 4, 8), (1, False, False, 1)),
-        ((65536, 4096, 4, 8), (16, False, True, 4)),
+        ((65536, 4096, 4, 8), (16, True, True, 4)),
     ]
 
     for args, expected in plan_cases:
-        result = storage.python_to_rust_hotpath_write_copy_plan(*args)
-        assert result is not None, args
-        assert result == expected, (args, result, expected)
+        length, block_size, workers_write, workers_write_min_blocks = args
+        result = lib.dbfs_write_copy_plan(length, block_size, workers_write, workers_write_min_blocks, 1, 16, 0)
+        assert int(result.total_blocks) == expected[0], (args, int(result.total_blocks), expected)
+        assert int(result.dedupe_enabled) == int(expected[1]), (args, int(result.dedupe_enabled), expected)
+        assert int(result.parallel) == int(expected[2]), (args, int(result.parallel), expected)
+        assert int(result.workers) == expected[3], (args, int(result.workers), expected)
 
     dedupe_cases = [
         ((0, 4096, 1, 1), (1, False, False, 1)),
         ((4096, 4096, 1, 1), (1, False, False, 1)),
-        ((65536, 4096, 1, 1), (16, False, False, 1)),
-        ((65536, 4096, 4, 8), (16, False, True, 4)),
+        ((65536, 4096, 1, 1), (16, True, False, 1)),
+        ((65536, 4096, 4, 8), (16, True, True, 4)),
     ]
 
     for args, expected in dedupe_cases:
-        result = storage.python_to_rust_hotpath_write_copy_plan(*args)
-        assert result is not None, args
-        assert result == expected, (args, result, expected)
+        length, block_size, workers_write, workers_write_min_blocks = args
+        result = lib.dbfs_write_copy_plan(length, block_size, workers_write, workers_write_min_blocks, 1, 16, 0)
+        assert int(result.total_blocks) == expected[0], (args, int(result.total_blocks), expected)
+        assert int(result.dedupe_enabled) == int(expected[1]), (args, int(result.dedupe_enabled), expected)
+        assert int(result.parallel) == int(expected[2]), (args, int(result.parallel), expected)
+        assert int(result.workers) == expected[3], (args, int(result.workers), expected)
 
     transfer_cases = [
         ((0, 4096, 4, 8, True), (1, False, 1)),
@@ -58,9 +64,10 @@ def main() -> None:
     ]
 
     for args, expected in transfer_cases:
-        result = storage.python_to_rust_hotpath_block_transfer_plan(*args)
-        assert result is not None, args
-        assert result == expected, (args, result, expected)
+        result = lib.dbfs_block_transfer_plan(*args)
+        assert int(result.total_blocks) == expected[0], (args, int(result.total_blocks), expected)
+        assert int(result.parallel) == int(expected[1]), (args, int(result.parallel), expected)
+        assert int(result.workers) == expected[2], (args, int(result.workers), expected)
 
     print("OK rust-hotpath-write-copy-worker-count")
 

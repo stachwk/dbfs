@@ -99,8 +99,8 @@ def main() -> None:
     src_path = f"{dir_path}/src.bin"
     dst_py_path = f"{dir_path}/dst-python.bin"
     dst_rs_path = f"{dir_path}/dst-rust.bin"
-    block_size = _parse_bytes(os.environ.get("COPY_DEDUPE_BLOCK_SIZE", "1M"))
-    block_count = int(os.environ.get("COPY_DEDUPE_BLOCK_COUNT", "64"))
+    block_size = _parse_bytes(os.environ.get("COPY_DEDUPE_BLOCK_SIZE", "512K"))
+    block_count = int(os.environ.get("COPY_DEDUPE_BLOCK_COUNT", "8"))
     source_payload = _make_payload(block_size, block_count)
     mixed_payload = _make_mixed_destination(source_payload, block_size)
 

@@ -50,9 +50,9 @@ def main() -> None:
 
     run_mkfs("init", env, extra_args=schema_args)
     status_after_init = run_mkfs("status", env).stdout
-    if "Schema version: 4" not in status_after_init:
+    if "Schema version: 5" not in status_after_init:
         raise AssertionError(status_after_init)
-    if "Latest migration version: 4" not in status_after_init:
+    if "Latest migration version: 5" not in status_after_init:
         raise AssertionError(status_after_init)
     if "Schema admin secret: present" not in status_after_init:
         raise AssertionError(status_after_init)
@@ -68,6 +68,8 @@ def main() -> None:
         raise AssertionError(status_after_init)
     if "0004: 0004_copy_block_crc.sql" not in status_after_init:
         raise AssertionError(status_after_init)
+    if "0005: 0005_data_objects.sql" not in status_after_init:
+        raise AssertionError(status_after_init)
 
     with psycopg2.connect(**db_config) as conn, conn.cursor() as cur:
         cur.execute(f"DELETE FROM {SCHEMA_VERSION_TABLE}")
@@ -80,7 +82,7 @@ def main() -> None:
         raise AssertionError(status_without_version)
     if "DBFS ready: no" not in status_without_version:
         raise AssertionError(status_without_version)
-    if "Pending migrations: 0001, 0002, 0003, 0004" not in status_without_version:
+    if "Pending migrations: 0001, 0002, 0003, 0004, 0005" not in status_without_version:
         raise AssertionError(status_without_version)
 
     with psycopg2.connect(**db_config) as conn, conn.cursor() as cur:

@@ -28,7 +28,8 @@ def main():
         else:
             raise AssertionError("mkdir unexpectedly created missing parents")
 
-        assert not fs.entry_exists_any(missing_parent), "missing parent should not have been created"
+        kind, entry_id = fs.repository.get_entry_kind_and_id(missing_parent)
+        assert kind is None and entry_id is None, "missing parent should not have been created"
         print("OK mkdir/parent-missing")
     finally:
         try:

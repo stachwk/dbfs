@@ -65,12 +65,12 @@ def main():
         fs.release(file_path, fh)
 
         fh = fs.open(file_path, os.O_RDONLY)
-        original_load = fs.load_file_bytes
+        original_load = fs.storage.load_file_bytes
 
         def fail_load(_file_id):
             raise AssertionError("read() unexpectedly fell back to load_file_bytes()")
 
-        fs.load_file_bytes = fail_load
+        fs.storage.load_file_bytes = fail_load
 
         offset = block_size - 7
         size = block_size + 33
@@ -81,11 +81,11 @@ def main():
         tail = fs.read(file_path, 64, tail_offset, fh)
         assert tail == pattern[tail_offset:], "tail read mismatch"
 
-        fs.load_file_bytes = original_load
+        fs.storage.load_file_bytes = original_load
         print("OK block-read/range")
     finally:
         if original_load is not None:
-            fs.load_file_bytes = original_load
+            fs.storage.load_file_bytes = original_load
         if fh is not None:
             try:
                 fs.release(file_path, fh)

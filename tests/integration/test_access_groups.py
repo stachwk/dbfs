@@ -39,7 +39,7 @@ class AccessGroupTests(unittest.TestCase):
             with fs.db_connection() as conn, conn.cursor() as cur:
                 cur.execute(
                     "UPDATE files SET uid = %s, gid = %s WHERE id_file = %s",
-                    (owner_uid, owner_gid, fs.get_file_id(file_path)),
+                    (owner_uid, owner_gid, fs.repository.get_file_id(file_path)),
                 )
                 conn.commit()
 

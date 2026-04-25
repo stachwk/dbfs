@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import ctypes
 import sys
 import uuid
 from pathlib import Path
@@ -16,6 +17,20 @@ if str(ROOT) not in sys.path:
 from dbfs_backend import load_dbfs_runtime_config, load_dsn_from_config
 from dbfs_fuse import DBFS
 from dbfs_schema import SCHEMA_VERSION
+from dbfs_storage import DbfsPersistBlockInput
+
+
+def _data_object_id(cur, file_id):
+    cur.execute("SELECT data_object_id FROM files WHERE id_file = %s", (file_id,))
+    row = cur.fetchone()
+    if row is None:
+        raise AssertionError(("missing data_object_id", file_id))
+    return int(row[0])
+
+
+def _rust_crc32(lib, payload):
+    buf = ctypes.create_string_buffer(payload, len(payload))
+    return int(lib.dbfs_crc32(ctypes.cast(buf, ctypes.POINTER(ctypes.c_ubyte)), len(payload)))
 
 
 def main() -> None:
@@ -26,8 +41,8 @@ def main() -> None:
     crc_helper = fs.storage
     assert crc_helper._load_rust_hotpath_lib() is not None, "expected built Rust hot-path library"
 
-    if fs.backend.schema_version() != SCHEMA_VERSION:
-        raise AssertionError((fs.backend.schema_version(), SCHEMA_VERSION))
+    if fs.schema_version() != SCHEMA_VERSION:
+        raise AssertionError((fs.schema_version(), SCHEMA_VERSION))
 
     suffix = uuid.uuid4().hex[:8]
     dir_path = f"/copy-crc-{suffix}"
@@ -57,8 +72,8 @@ def main() -> None:
         fs.release(dst_path, dst_fh)
         dst_fh = None
 
-        if fs.get_file_size(fs.get_file_id(dst_path)) != len(payload):
-            raise AssertionError((fs.get_file_size(fs.get_file_id(dst_path)), len(payload)))
+        if fs.get_file_size(fs.repository.get_file_id(dst_path)) != len(payload):
+            raise AssertionError((fs.get_file_size(fs.repository.get_file_id(dst_path)), len(payload)))
         read_fh = fs.open(dst_path, os.O_RDONLY)
         try:
             if fs.read(dst_path, len(payload), 0, read_fh) != payload:
@@ -73,12 +88,14 @@ def main() -> None:
         fs.rust_hotpath_copy_dedupe = False
         fs._io_profile.clear()
 
-        dst_file_id = fs.get_file_id(dst_path)
+        dst_file_id = fs.repository.get_file_id(dst_path)
         with fs.db_connection() as conn, conn.cursor() as cur:
-            cur.execute("DELETE FROM copy_block_crc WHERE id_file = %s", (dst_file_id,))
+            dst_object_id = _data_object_id(cur, dst_file_id)
+            cur.execute("DELETE FROM copy_block_crc WHERE data_object_id = %s", (dst_object_id,))
             conn.commit()
         with fs.db_connection() as conn, conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM copy_block_crc WHERE id_file = %s", (dst_file_id,))
+            dst_object_id = _data_object_id(cur, dst_file_id)
+            cur.execute("SELECT COUNT(*) FROM copy_block_crc WHERE data_object_id = %s", (dst_object_id,))
             initial_crc_rows = int(cur.fetchone()[0])
         if initial_crc_rows != 0:
             raise AssertionError(initial_crc_rows)
@@ -96,20 +113,22 @@ def main() -> None:
                 fs.release(dst_path, dst_fh)
 
         with fs.db_connection() as conn, conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM copy_block_crc WHERE id_file = %s", (dst_file_id,))
+            dst_object_id = _data_object_id(cur, dst_file_id)
+            cur.execute("SELECT COUNT(*) FROM copy_block_crc WHERE data_object_id = %s", (dst_object_id,))
             after_first_copy = int(cur.fetchone()[0])
         expected_full_blocks = len(payload) // block_size
         if after_first_copy != expected_full_blocks:
             raise AssertionError((after_first_copy, expected_full_blocks))
 
         with fs.db_connection() as conn, conn.cursor() as cur:
+            dst_object_id = _data_object_id(cur, dst_file_id)
             cur.execute(
-                "SELECT _order, crc32 FROM copy_block_crc WHERE id_file = %s ORDER BY _order",
-                (dst_file_id,),
+                "SELECT _order, crc32 FROM copy_block_crc WHERE data_object_id = %s ORDER BY _order",
+                (dst_object_id,),
             )
             crc_rows_after_first_copy = cur.fetchall()
         expected_source_crcs = [
-            crc_helper.python_to_rust_hotpath_crc32(payload[index * block_size : (index + 1) * block_size])
+            _rust_crc32(crc_helper, payload[index * block_size : (index + 1) * block_size])
             for index in range(expected_full_blocks)
         ]
         if any(value is None for value in expected_source_crcs):
@@ -120,9 +139,7 @@ def main() -> None:
         mutated_block = bytearray(payload[:block_size])
         mutated_block[0] ^= 0xFF
         mutated_payload = bytes(mutated_block) + payload[block_size:]
-        mutated_crc = crc_helper.python_to_rust_hotpath_crc32(mutated_payload[:block_size])
-        if mutated_crc is None:
-            raise AssertionError("expected Rust CRC32 to be available")
+        mutated_crc = _rust_crc32(crc_helper, mutated_payload[:block_size])
 
         dst_fh = fs.open(dst_path, os.O_WRONLY)
         try:
@@ -138,8 +155,8 @@ def main() -> None:
 
         with fs.db_connection() as conn, conn.cursor() as cur:
             cur.execute(
-                "SELECT crc32 FROM copy_block_crc WHERE id_file = %s AND _order = 0",
-                (dst_file_id,),
+                "SELECT crc32 FROM copy_block_crc WHERE data_object_id = %s AND _order = 0",
+                (_data_object_id(cur, dst_file_id),),
             )
             updated_crc = int(cur.fetchone()[0])
         if updated_crc != mutated_crc:
@@ -157,11 +174,12 @@ def main() -> None:
             fs.flush(victim_path, victim_seed_fh)
         finally:
             fs.release(victim_path, victim_seed_fh)
-        victim_file_id = fs.get_file_id(victim_path)
+        victim_file_id = fs.repository.get_file_id(victim_path)
         if victim_file_id is None:
             raise AssertionError("missing victim file id")
         with fs.db_connection() as conn, conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM copy_block_crc WHERE id_file = %s", (victim_file_id,))
+            victim_object_id = _data_object_id(cur, victim_file_id)
+            cur.execute("SELECT COUNT(*) FROM copy_block_crc WHERE data_object_id = %s", (victim_object_id,))
             victim_crc_rows_before = int(cur.fetchone()[0])
         if victim_crc_rows_before != 2:
             raise AssertionError(victim_crc_rows_before)
@@ -174,21 +192,32 @@ def main() -> None:
             fs.flush(move_src_path, move_src_fh)
         finally:
             fs.release(move_src_path, move_src_fh)
-        move_src_file_id = fs.get_file_id(move_src_path)
+        move_src_file_id = fs.repository.get_file_id(move_src_path)
         if move_src_file_id is None:
             raise AssertionError("missing move-src file id")
         with fs.db_connection() as conn, conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM copy_block_crc WHERE id_file = %s", (move_src_file_id,))
+            move_src_object_id = _data_object_id(cur, move_src_file_id)
+            cur.execute("SELECT COUNT(*) FROM copy_block_crc WHERE data_object_id = %s", (move_src_object_id,))
             move_src_crc_rows = int(cur.fetchone()[0])
         if move_src_crc_rows != 2:
             raise AssertionError(move_src_crc_rows)
 
         fs.rename(move_src_path, victim_path)
         with fs.db_connection() as conn, conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM copy_block_crc WHERE id_file = %s", (victim_file_id,))
+            cur.execute("SELECT COUNT(*) FROM copy_block_crc WHERE data_object_id = %s", (victim_object_id,))
             after_rename_crc_rows = int(cur.fetchone()[0])
         if after_rename_crc_rows != 0:
             raise AssertionError(after_rename_crc_rows)
+
+        replaced_victim_file_id = fs.repository.get_file_id(victim_path)
+        if replaced_victim_file_id is None:
+            raise AssertionError("missing replaced victim file id")
+        with fs.db_connection() as conn, conn.cursor() as cur:
+            replaced_victim_object_id = _data_object_id(cur, replaced_victim_file_id)
+            cur.execute("SELECT COUNT(*) FROM copy_block_crc WHERE data_object_id = %s", (replaced_victim_object_id,))
+            replaced_victim_crc_rows = int(cur.fetchone()[0])
+        if replaced_victim_crc_rows != 2:
+            raise AssertionError(replaced_victim_crc_rows)
 
         dst_fh = fs.open(dst_path, os.O_WRONLY)
         try:
@@ -203,15 +232,17 @@ def main() -> None:
                 fs.release(dst_path, dst_fh)
 
         with fs.db_connection() as conn, conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM copy_block_crc WHERE id_file = %s", (dst_file_id,))
+            dst_object_id = _data_object_id(cur, dst_file_id)
+            cur.execute("SELECT COUNT(*) FROM copy_block_crc WHERE data_object_id = %s", (dst_object_id,))
             after_second_copy = int(cur.fetchone()[0])
         if after_second_copy != expected_full_blocks:
             raise AssertionError((after_second_copy, expected_full_blocks))
 
         with fs.db_connection() as conn, conn.cursor() as cur:
+            dst_object_id = _data_object_id(cur, dst_file_id)
             cur.execute(
-                "SELECT _order, crc32 FROM copy_block_crc WHERE id_file = %s ORDER BY _order",
-                (dst_file_id,),
+                "SELECT _order, crc32 FROM copy_block_crc WHERE data_object_id = %s ORDER BY _order",
+                (dst_object_id,),
             )
             crc_rows_after_second_copy = cur.fetchall()
         if [int(row[1]) for row in crc_rows_after_second_copy] != expected_source_crcs:
@@ -225,9 +256,11 @@ def main() -> None:
         if read_back != payload:
             raise AssertionError("copy block crc payload mismatch")
 
+        with fs.db_connection() as conn, conn.cursor() as cur:
+            dst_object_id = _data_object_id(cur, dst_file_id)
         fs.unlink(dst_path)
         with fs.db_connection() as conn, conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM copy_block_crc WHERE id_file = %s", (dst_file_id,))
+            cur.execute("SELECT COUNT(*) FROM copy_block_crc WHERE data_object_id = %s", (dst_object_id,))
             after_unlink_crc_rows = int(cur.fetchone()[0])
         if after_unlink_crc_rows != 0:
             raise AssertionError(after_unlink_crc_rows)

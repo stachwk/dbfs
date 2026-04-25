@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ctypes
+import errno
 import os
 import time
 
@@ -7,6 +9,13 @@ import time
 class MetadataSupport:
     def __init__(self, owner):
         self.owner = owner
+
+    def _rust_repo(self):
+        repo = self.owner.backend._load_rust_pg_repo()
+        lib = self.owner.backend._load_rust_hotpath_lib()
+        if repo is None or lib is None:
+            raise self.owner.FuseOSError(errno.EIO)
+        return repo, lib
 
     def _clear_cache_bucket(self, guard, bucket, path=None):
         normalized_path = self.owner.normalize_path(path) if path is not None else None
@@ -89,100 +98,86 @@ class MetadataSupport:
             self.owner._statfs_cache = (time.time() + self.owner.statfs_cache_ttl_seconds, cached_value)
 
     def load_symlink_target(self, symlink_id):
-        with self.owner.db_connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT target FROM symlinks WHERE id_symlink = %s",
-                (symlink_id,),
-            )
-            result = cur.fetchone()
-            return result[0] if result else None
+        repo, lib = self._rust_repo()
+        out_ptr = ctypes.POINTER(ctypes.c_ubyte)()
+        out_len = ctypes.c_size_t()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_load_symlink_target(
+            repo,
+            int(symlink_id),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+            ctypes.byref(out_found),
+        )
+        if status != 0:
+            raise self.owner.FuseOSError(errno.EIO)
+        if not out_found.value:
+            return None
+        try:
+            return ctypes.string_at(out_ptr, out_len.value).decode("utf-8")
+        finally:
+            lib.dbfs_free_bytes(out_ptr, out_len)
 
     def get_symlink_attrs(self, path):
         path = self.owner.normalize_path(path)
-        parent_path = os.path.dirname(path)
-        name = os.path.basename(path)
-        parent_id = self.owner.get_dir_id(parent_path)
-
-        with self.owner.db_connection() as conn, conn.cursor() as cur:
-            symlink_ctime = self.owner.ctime_column("symlinks")
-            if parent_id is None:
-                cur.execute(
-                    """
-                    SELECT id_symlink, target, modification_date, access_date, {symlink_ctime}, uid, gid
-                    FROM symlinks
-                    WHERE name = %s AND id_parent IS NULL
-                    """.format(symlink_ctime=symlink_ctime),
-                    (name,),
-                )
-            else:
-                cur.execute(
-                    """
-                    SELECT id_symlink, target, modification_date, access_date, {symlink_ctime}, uid, gid
-                    FROM symlinks
-                    WHERE name = %s AND id_parent = %s
-                    """.format(symlink_ctime=symlink_ctime),
-                    (name, parent_id),
-                )
-
-            result = cur.fetchone()
-            return result if result else None
+        repo, lib = self._rust_repo()
+        path_bytes = str(path).encode("utf-8")
+        out_symlink_id = ctypes.c_uint64()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_get_symlink_id(
+            repo,
+            path_bytes,
+            len(path_bytes),
+            ctypes.byref(out_symlink_id),
+            ctypes.byref(out_found),
+        )
+        if status != 0:
+            raise self.owner.FuseOSError(errno.EIO)
+        if not out_found.value:
+            return None
+        target = self.load_symlink_target(int(out_symlink_id.value))
+        if target is None:
+            return None
+        return int(out_symlink_id.value), target
 
     def get_special_file_metadata(self, file_id):
-        with self.owner.db_connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT file_type, rdev_major, rdev_minor FROM special_files WHERE id_file = %s",
-                (file_id,),
-            )
-            result = cur.fetchone()
-            if not result:
-                return None
-            file_type, rdev_major, rdev_minor = result
-            rdev = os.makedev(int(rdev_major), int(rdev_minor)) if hasattr(os, "makedev") else 0
-            return file_type, rdev
+        repo, lib = self._rust_repo()
+        out_ptr = ctypes.POINTER(ctypes.c_ubyte)()
+        out_len = ctypes.c_size_t()
+        out_rdev_major = ctypes.c_uint32()
+        out_rdev_minor = ctypes.c_uint32()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_get_special_file_metadata(
+            repo,
+            int(file_id),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+            ctypes.byref(out_rdev_major),
+            ctypes.byref(out_rdev_minor),
+            ctypes.byref(out_found),
+        )
+        if status != 0:
+            raise self.owner.FuseOSError(errno.EIO)
+        if not out_found.value:
+            return None
+        try:
+            file_type = ctypes.string_at(out_ptr, out_len.value).decode("utf-8")
+        finally:
+            lib.dbfs_free_bytes(out_ptr, out_len)
+        rdev = os.makedev(int(out_rdev_major.value), int(out_rdev_minor.value)) if hasattr(os, "makedev") else 0
+        return file_type, rdev
 
     def count_directory_children(self, directory_id):
-        with self.owner.db_connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT
-                    (SELECT COUNT(*) FROM directories WHERE id_parent = %s)
-                  + (SELECT COUNT(*) FROM files WHERE id_directory = %s)
-                  + (SELECT COUNT(*) FROM hardlinks WHERE id_directory = %s)
-                  + (SELECT COUNT(*) FROM symlinks WHERE id_parent = %s)
-                """,
-                (directory_id, directory_id, directory_id, directory_id),
-            )
-            return cur.fetchone()[0]
+        return self.owner.storage.count_directory_children(directory_id)
 
     def count_directory_subdirs(self, directory_id):
-        with self.owner.db_connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT COUNT(*) FROM directories WHERE id_parent = %s",
-                (directory_id,),
-            )
-            return cur.fetchone()[0]
+        return self.owner.storage.count_directory_subdirs(directory_id)
 
     def count_root_directory_children(self):
-        with self.owner.db_connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT
-                    COUNT(*)
-                FROM directories
-                WHERE id_parent IS NULL AND name != '/'
-                """,
-            )
-            return cur.fetchone()[0]
+        return self.owner.storage.count_root_directory_children()
 
     def count_file_blocks(self, file_id):
-        with self.owner.db_connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                "SELECT COUNT(*) FROM data_blocks WHERE id_file = %s",
-                (file_id,),
-            )
-            return cur.fetchone()[0]
+        return self.owner.storage.count_file_blocks(file_id)
 
     def count_symlinks(self):
-        with self.owner.db_connection() as conn, conn.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM symlinks")
-            return cur.fetchone()[0]
+        return self.owner.storage.count_symlinks()

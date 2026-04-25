@@ -184,6 +184,13 @@ unsafe fn slice_from_raw<'a>(ptr: *const u8, len: usize) -> Option<&'a [u8]> {
     Some(slice::from_raw_parts(ptr, len))
 }
 
+fn bytes_to_raw(mut bytes: Vec<u8>) -> (*mut u8, usize) {
+    let len = bytes.len();
+    let ptr = bytes.as_mut_ptr();
+    std::mem::forget(bytes);
+    (ptr, len)
+}
+
 unsafe fn write_boxed_output<T>(
     values: Vec<T>,
     out_ptr: *mut *mut T,
@@ -768,6 +775,264 @@ pub extern "C" fn dbfs_rust_pg_repo_path_has_children(
         match (*repo_ptr).repo.path_has_children(directory_id) {
             Ok(value) => {
                 *out_value = if value { 1 } else { 0 };
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_count_directory_children(
+    repo_ptr: *mut DbfsPgRepo,
+    directory_id: u64,
+    out_value: *mut u64,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_value.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.count_directory_children(directory_id) {
+            Ok(value) => {
+                *out_value = value;
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_count_directory_subdirs(
+    repo_ptr: *mut DbfsPgRepo,
+    directory_id: u64,
+    out_value: *mut u64,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_value.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.count_directory_subdirs(directory_id) {
+            Ok(value) => {
+                *out_value = value;
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_count_root_directory_children(
+    repo_ptr: *mut DbfsPgRepo,
+    out_value: *mut u64,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_value.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.count_root_directory_children() {
+            Ok(value) => {
+                *out_value = value;
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_count_symlinks(
+    repo_ptr: *mut DbfsPgRepo,
+    out_value: *mut u64,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_value.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.count_symlinks() {
+            Ok(value) => {
+                *out_value = value;
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_load_symlink_target(
+    repo_ptr: *mut DbfsPgRepo,
+    symlink_id: u64,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+    out_found: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_found.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.load_symlink_target(symlink_id) {
+            Ok(Some(value)) => {
+                *out_found = 1;
+                write_boxed_output(value.into_bytes(), out_ptr, out_len)
+            }
+            Ok(None) => {
+                *out_found = 0;
+                if !out_ptr.is_null() {
+                    *out_ptr = std::ptr::null_mut();
+                }
+                if !out_len.is_null() {
+                    *out_len = 0;
+                }
+                0
+            }
+            Err(_) => {
+                *out_found = 0;
+                3
+            }
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_get_special_file_metadata(
+    repo_ptr: *mut DbfsPgRepo,
+    file_id: u64,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+    out_rdev_major: *mut u32,
+    out_rdev_minor: *mut u32,
+    out_found: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_found.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.get_special_file_metadata(file_id) {
+            Ok(Some((file_type, rdev_major, rdev_minor))) => {
+                if !out_rdev_major.is_null() {
+                    *out_rdev_major = rdev_major;
+                }
+                if !out_rdev_minor.is_null() {
+                    *out_rdev_minor = rdev_minor;
+                }
+                *out_found = 1;
+                write_boxed_output(file_type.into_bytes(), out_ptr, out_len)
+            }
+            Ok(None) => {
+                *out_found = 0;
+                if !out_ptr.is_null() {
+                    *out_ptr = std::ptr::null_mut();
+                }
+                if !out_len.is_null() {
+                    *out_len = 0;
+                }
+                0
+            }
+            Err(_) => {
+                *out_found = 0;
+                3
+            }
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_count_files(
+    repo_ptr: *mut DbfsPgRepo,
+    out_value: *mut u64,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_value.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.count_files() {
+            Ok(value) => {
+                *out_value = value;
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_count_directories(
+    repo_ptr: *mut DbfsPgRepo,
+    out_value: *mut u64,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_value.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.count_directories() {
+            Ok(value) => {
+                *out_value = value;
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_total_data_size(
+    repo_ptr: *mut DbfsPgRepo,
+    out_value: *mut u64,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_value.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.total_data_size() {
+            Ok(value) => {
+                *out_value = value;
                 0
             }
             Err(_) => 3,
@@ -1378,6 +1643,292 @@ pub extern "C" fn dbfs_rust_pg_repo_promote_hardlink_to_primary(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_count_file_blocks(
+    repo_ptr: *mut DbfsPgRepo,
+    file_id: u64,
+    out_count: *mut u64,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_count.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.count_file_blocks(file_id) {
+            Ok(value) => {
+                *out_count = value;
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_file_data_object_id(
+    repo_ptr: *mut DbfsPgRepo,
+    file_id: u64,
+    out_data_object_id: *mut u64,
+    out_found: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_data_object_id.is_null() || out_found.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.file_data_object_id(file_id) {
+            Ok(Some(value)) => {
+                *out_data_object_id = value;
+                *out_found = 1;
+                0
+            }
+            Ok(None) => {
+                *out_found = 0;
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_file_size(
+    repo_ptr: *mut DbfsPgRepo,
+    file_id: u64,
+    out_file_size: *mut u64,
+    out_found: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_file_size.is_null() || out_found.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.file_size(file_id) {
+            Ok(Some(value)) => {
+                *out_file_size = value;
+                *out_found = 1;
+                0
+            }
+            Ok(None) => {
+                *out_found = 0;
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_load_block(
+    repo_ptr: *mut DbfsPgRepo,
+    file_id: u64,
+    block_index: u64,
+    block_size: u64,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+    out_found: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_ptr.is_null() || out_len.is_null() || out_found.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.load_block(file_id, block_index, block_size) {
+            Ok(Some(value)) => {
+                *out_found = 1;
+                write_boxed_output(value, out_ptr, out_len)
+            }
+            Ok(None) => {
+                *out_found = 0;
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_fetch_block_range(
+    repo_ptr: *mut DbfsPgRepo,
+    file_id: u64,
+    first_block: u64,
+    last_block: u64,
+    block_size: u64,
+    out_ptr: *mut *mut DbfsReadBlock,
+    out_len: *mut usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_ptr.is_null() || out_len.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.fetch_block_range(file_id, first_block, last_block, block_size) {
+            Ok(blocks) => {
+                let output = blocks
+                    .into_iter()
+                    .map(|(index, data)| {
+                        let mut bytes = data.into_boxed_slice();
+                        let len = bytes.len();
+                        let ptr = bytes.as_mut_ptr();
+                        std::mem::forget(bytes);
+                        DbfsReadBlock { index, ptr, len }
+                    })
+                    .collect::<Vec<_>>();
+                write_boxed_output(output, out_ptr, out_len)
+            }
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_assemble_file_slice(
+    repo_ptr: *mut DbfsPgRepo,
+    file_id: u64,
+    first_block: u64,
+    last_block: u64,
+    offset: u64,
+    end_offset: u64,
+    block_size: u64,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_ptr.is_null() || out_len.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.assemble_file_slice(
+            file_id,
+            first_block,
+            last_block,
+            offset,
+            end_offset,
+            block_size,
+        ) {
+            Ok(value) => write_boxed_output(value, out_ptr, out_len),
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_create_data_object(
+    repo_ptr: *mut DbfsPgRepo,
+    file_size: u64,
+    content_hash_ptr: *const u8,
+    content_hash_len: usize,
+    out_data_object_id: *mut u64,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_data_object_id.is_null() {
+            return 1;
+        }
+        let content_hash = if content_hash_len == 0 {
+            None
+        } else {
+            let bytes = match slice_from_raw(content_hash_ptr, content_hash_len) {
+                Some(bytes) => bytes,
+                None => return 1,
+            };
+            match std::str::from_utf8(bytes) {
+                Ok(value) => Some(value),
+                Err(_) => return 3,
+            }
+        };
+        match (*repo_ptr).repo.create_data_object(file_size, content_hash) {
+            Ok(value) => {
+                *out_data_object_id = value;
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_touch_data_object(
+    repo_ptr: *mut DbfsPgRepo,
+    data_object_id: u64,
+    file_size: u64,
+    has_file_size: u8,
+    out_touched: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_touched.is_null() {
+            return 1;
+        }
+        let file_size = if has_file_size == 0 { None } else { Some(file_size) };
+        match (*repo_ptr).repo.touch_data_object(data_object_id, file_size) {
+            Ok(value) => {
+                *out_touched = if value { 1 } else { 0 };
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_adopt_source_data_object(
+    repo_ptr: *mut DbfsPgRepo,
+    src_file_id: u64,
+    dst_file_id: u64,
+    out_adopted: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_adopted.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.adopt_source_data_object(src_file_id, dst_file_id) {
+            Ok(value) => {
+                *out_adopted = if value { 1 } else { 0 };
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn dbfs_rust_pg_repo_persist_copy_block_crc_rows(
     repo_ptr: *mut DbfsPgRepo,
     file_id: u64,
@@ -1660,6 +2211,1163 @@ pub extern "C" fn dbfs_rust_pg_repo_fetch_xattr_value(
         }
     });
 
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_list_xattr_names_for_owner(
+    repo_ptr: *mut DbfsPgRepo,
+    owner_kind_ptr: *const u8,
+    owner_kind_len: usize,
+    owner_id: u64,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+    out_found: *mut u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_found.is_null() {
+            return 1;
+        }
+        let owner_kind = match slice_from_raw(owner_kind_ptr, owner_kind_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let owner_kind = match std::str::from_utf8(owner_kind) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.list_xattr_names_for_owner(owner_kind, owner_id) {
+            Ok(values) => {
+                *out_found = 1;
+                let joined = values.join("\n");
+                write_boxed_output(joined.into_bytes(), out_ptr, out_len)
+            }
+            Err(_) => {
+                *out_found = 0;
+                3
+            }
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_store_xattr_value_for_owner(
+    repo_ptr: *mut DbfsPgRepo,
+    owner_kind_ptr: *const u8,
+    owner_kind_len: usize,
+    owner_id: u64,
+    name_ptr: *const u8,
+    name_len: usize,
+    value_ptr: *const u8,
+    value_len: usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let owner_kind = match slice_from_raw(owner_kind_ptr, owner_kind_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let owner_kind = match std::str::from_utf8(owner_kind) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        let name = match slice_from_raw(name_ptr, name_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let name = match std::str::from_utf8(name) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        let value = match slice_from_raw(value_ptr, value_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        match (*repo_ptr).repo.store_xattr_value_for_owner(owner_kind, owner_id, name, value) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_delete_owner_xattrs(
+    repo_ptr: *mut DbfsPgRepo,
+    owner_kind_ptr: *const u8,
+    owner_kind_len: usize,
+    owner_id: u64,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let owner_kind = match slice_from_raw(owner_kind_ptr, owner_kind_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let owner_kind = match std::str::from_utf8(owner_kind) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.delete_owner_xattrs(owner_kind, owner_id) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_remove_xattr_for_owner(
+    repo_ptr: *mut DbfsPgRepo,
+    owner_kind_ptr: *const u8,
+    owner_kind_len: usize,
+    owner_id: u64,
+    name_ptr: *const u8,
+    name_len: usize,
+    out_deleted: *mut u64,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let owner_kind = match slice_from_raw(owner_kind_ptr, owner_kind_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let owner_kind = match std::str::from_utf8(owner_kind) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        let name = match slice_from_raw(name_ptr, name_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let name = match std::str::from_utf8(name) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.remove_xattr_for_owner(owner_kind, owner_id, name) {
+            Ok(value) => {
+                if !out_deleted.is_null() {
+                    *out_deleted = value;
+                }
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_update_file_mode(
+    repo_ptr: *mut DbfsPgRepo,
+    file_id: u64,
+    mode_ptr: *const u8,
+    mode_len: usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let mode = match slice_from_raw(mode_ptr, mode_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let mode = match std::str::from_utf8(mode) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.update_file_mode(file_id, mode) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_update_directory_mode(
+    repo_ptr: *mut DbfsPgRepo,
+    directory_id: u64,
+    mode_ptr: *const u8,
+    mode_len: usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let mode = match slice_from_raw(mode_ptr, mode_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let mode = match std::str::from_utf8(mode) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.update_directory_mode(directory_id, mode) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_update_file_owner(
+    repo_ptr: *mut DbfsPgRepo,
+    file_id: u64,
+    uid: u32,
+    gid: u32,
+    mode_ptr: *const u8,
+    mode_len: usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let mode = match slice_from_raw(mode_ptr, mode_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let mode = match std::str::from_utf8(mode) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.update_file_owner(file_id, uid, gid, mode) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_update_directory_owner(
+    repo_ptr: *mut DbfsPgRepo,
+    directory_id: u64,
+    uid: u32,
+    gid: u32,
+    mode_ptr: *const u8,
+    mode_len: usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let mode = match slice_from_raw(mode_ptr, mode_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let mode = match std::str::from_utf8(mode) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.update_directory_owner(directory_id, uid, gid, mode) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_update_symlink_owner(
+    repo_ptr: *mut DbfsPgRepo,
+    symlink_id: u64,
+    uid: u32,
+    gid: u32,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.update_symlink_owner(symlink_id, uid, gid) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_touch_file_times(
+    repo_ptr: *mut DbfsPgRepo,
+    file_id: u64,
+    atime_ptr: *const u8,
+    atime_len: usize,
+    mtime_ptr: *const u8,
+    mtime_len: usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let atime = match slice_from_raw(atime_ptr, atime_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let atime = match std::str::from_utf8(atime) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        let mtime = match slice_from_raw(mtime_ptr, mtime_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let mtime = match std::str::from_utf8(mtime) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.touch_file_times(file_id, atime, mtime) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_touch_directory_times(
+    repo_ptr: *mut DbfsPgRepo,
+    directory_id: u64,
+    atime_ptr: *const u8,
+    atime_len: usize,
+    mtime_ptr: *const u8,
+    mtime_len: usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let atime = match slice_from_raw(atime_ptr, atime_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let atime = match std::str::from_utf8(atime) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        let mtime = match slice_from_raw(mtime_ptr, mtime_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let mtime = match std::str::from_utf8(mtime) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.touch_directory_times(directory_id, atime, mtime) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_update_file_access_date(
+    repo_ptr: *mut DbfsPgRepo,
+    file_id: u64,
+    atime_ptr: *const u8,
+    atime_len: usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let atime = match slice_from_raw(atime_ptr, atime_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let atime = match std::str::from_utf8(atime) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.update_file_access_date(file_id, atime) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_update_directory_access_date(
+    repo_ptr: *mut DbfsPgRepo,
+    directory_id: u64,
+    atime_ptr: *const u8,
+    atime_len: usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let atime = match slice_from_raw(atime_ptr, atime_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let atime = match std::str::from_utf8(atime) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.update_directory_access_date(directory_id, atime) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_append_journal_event(
+    repo_ptr: *mut DbfsPgRepo,
+    id_user: u32,
+    directory_id: u64,
+    directory_found: u8,
+    file_id: u64,
+    file_found: u8,
+    action_ptr: *const u8,
+    action_len: usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let action = match slice_from_raw(action_ptr, action_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let action = match std::str::from_utf8(action) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        let directory = if directory_found != 0 { Some(directory_id) } else { None };
+        let file = if file_found != 0 { Some(file_id) } else { None };
+        match (*repo_ptr).repo.append_journal_event(id_user, directory, file, action) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_ensure_lock_schema(repo_ptr: *mut DbfsPgRepo) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.ensure_lock_schema() {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_prune_lock_leases(
+    repo_ptr: *mut DbfsPgRepo,
+    resource_kind_ptr: *const u8,
+    resource_kind_len: usize,
+    resource_id: u64,
+    has_resource_id: u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let resource_kind = if resource_kind_ptr.is_null() && resource_kind_len == 0 {
+            None
+        } else {
+            let bytes = match slice_from_raw(resource_kind_ptr, resource_kind_len) {
+                Some(slice) => slice,
+                None => return 1,
+            };
+            match std::str::from_utf8(bytes) {
+                Ok(value) => Some(value),
+                Err(_) => return 1,
+            }
+        };
+        let resource_id = if has_resource_id != 0 { Some(resource_id) } else { None };
+        match (*repo_ptr).repo.prune_lock_leases(resource_kind, resource_id) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_delete_lock_lease(
+    repo_ptr: *mut DbfsPgRepo,
+    resource_kind_ptr: *const u8,
+    resource_kind_len: usize,
+    resource_id: u64,
+    owner_key: u64,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let resource_kind = match slice_from_raw(resource_kind_ptr, resource_kind_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let resource_kind = match std::str::from_utf8(resource_kind) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.delete_lock_lease(resource_kind, resource_id, owner_key) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_prune_lock_range_leases(
+    repo_ptr: *mut DbfsPgRepo,
+    resource_kind_ptr: *const u8,
+    resource_kind_len: usize,
+    resource_id: u64,
+    has_resource_id: u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let resource_kind = if resource_kind_ptr.is_null() && resource_kind_len == 0 {
+            None
+        } else {
+            let bytes = match slice_from_raw(resource_kind_ptr, resource_kind_len) {
+                Some(slice) => slice,
+                None => return 1,
+            };
+            match std::str::from_utf8(bytes) {
+                Ok(value) => Some(value),
+                Err(_) => return 1,
+            }
+        };
+        let resource_id = if has_resource_id != 0 { Some(resource_id) } else { None };
+        match (*repo_ptr).repo.prune_lock_range_leases(resource_kind, resource_id) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_delete_range_leases(
+    repo_ptr: *mut DbfsPgRepo,
+    resource_kind_ptr: *const u8,
+    resource_kind_len: usize,
+    resource_id: u64,
+    owner_key: u64,
+    has_owner_key: u8,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let resource_kind = match slice_from_raw(resource_kind_ptr, resource_kind_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let resource_kind = match std::str::from_utf8(resource_kind) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        let owner_key = if has_owner_key != 0 { Some(owner_key) } else { None };
+        match (*repo_ptr).repo.delete_range_leases(resource_kind, resource_id, owner_key) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_acquire_flock_lease(
+    repo_ptr: *mut DbfsPgRepo,
+    resource_lock_id: i64,
+    resource_kind_ptr: *const u8,
+    resource_kind_len: usize,
+    resource_id: u64,
+    owner_key: u64,
+    requested_type: i32,
+    lease_ttl_seconds: u64,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let resource_kind = match slice_from_raw(resource_kind_ptr, resource_kind_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let resource_kind = match std::str::from_utf8(resource_kind) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr)
+            .repo
+            .acquire_flock_lease(resource_kind, resource_id, owner_key, requested_type, lease_ttl_seconds, resource_lock_id)
+        {
+            Ok(true) => 0,
+            Ok(false) => 1,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_release_flock_lease(
+    repo_ptr: *mut DbfsPgRepo,
+    resource_kind_ptr: *const u8,
+    resource_kind_len: usize,
+    resource_id: u64,
+    owner_key: u64,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let resource_kind = match slice_from_raw(resource_kind_ptr, resource_kind_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let resource_kind = match std::str::from_utf8(resource_kind) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.release_flock_lease(resource_kind, resource_id, owner_key) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_try_advisory_xact_lock(
+    repo_ptr: *mut DbfsPgRepo,
+    resource_lock_id: i64,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.try_advisory_xact_lock(resource_lock_id) {
+            Ok(true) => 0,
+            Ok(false) => 1,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_heartbeat_lock_lease(
+    repo_ptr: *mut DbfsPgRepo,
+    resource_kind_ptr: *const u8,
+    resource_kind_len: usize,
+    resource_id: u64,
+    owner_key: u64,
+    lease_ttl_seconds: u64,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let resource_kind = match slice_from_raw(resource_kind_ptr, resource_kind_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let resource_kind = match std::str::from_utf8(resource_kind) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr)
+            .repo
+            .heartbeat_lock_lease(resource_kind, resource_id, owner_key, lease_ttl_seconds)
+        {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_heartbeat_lock_range_lease(
+    repo_ptr: *mut DbfsPgRepo,
+    resource_kind_ptr: *const u8,
+    resource_kind_len: usize,
+    resource_id: u64,
+    owner_key: u64,
+    range_start: u64,
+    range_end: u64,
+    has_range_end: u8,
+    lease_ttl_seconds: u64,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let resource_kind = match slice_from_raw(resource_kind_ptr, resource_kind_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let resource_kind = match std::str::from_utf8(resource_kind) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        let range_end = if has_range_end != 0 { Some(range_end) } else { None };
+        match (*repo_ptr)
+            .repo
+            .heartbeat_lock_range_lease(resource_kind, resource_id, owner_key, range_start, range_end, lease_ttl_seconds)
+        {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_load_lock_range_state_blob(
+    repo_ptr: *mut DbfsPgRepo,
+    resource_kind_ptr: *const u8,
+    resource_kind_len: usize,
+    resource_id: u64,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_ptr.is_null() || out_len.is_null() {
+            return 1;
+        }
+        let resource_kind = match slice_from_raw(resource_kind_ptr, resource_kind_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let resource_kind = match std::str::from_utf8(resource_kind) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.load_lock_range_state_blob(resource_kind, resource_id) {
+            Ok(bytes) => {
+                let (ptr, len) = bytes_to_raw(bytes);
+                *out_ptr = ptr;
+                *out_len = len;
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_persist_lock_range_state_blob(
+    repo_ptr: *mut DbfsPgRepo,
+    resource_kind_ptr: *const u8,
+    resource_kind_len: usize,
+    resource_id: u64,
+    lease_ttl_seconds: u64,
+    payload_ptr: *const u8,
+    payload_len: usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let resource_kind = match slice_from_raw(resource_kind_ptr, resource_kind_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let resource_kind = match std::str::from_utf8(resource_kind) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        let payload = match slice_from_raw(payload_ptr, payload_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let payload = match std::str::from_utf8(payload) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.persist_lock_range_state_blob(resource_kind, resource_id, lease_ttl_seconds, payload) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_list_directory_entries(
+    repo_ptr: *mut DbfsPgRepo,
+    path_ptr: *const u8,
+    path_len: usize,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_ptr.is_null() || out_len.is_null() {
+            return 1;
+        }
+        let path = match slice_from_raw(path_ptr, path_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let path = match std::str::from_utf8(path) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.list_directory_entries_blob(path) {
+            Ok(Some(bytes)) => {
+                let (ptr, len) = bytes_to_raw(bytes);
+                *out_ptr = ptr;
+                *out_len = len;
+                0
+            }
+            Ok(None) => {
+                *out_ptr = std::ptr::null_mut();
+                *out_len = 0;
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_fetch_path_attrs(
+    repo_ptr: *mut DbfsPgRepo,
+    path_ptr: *const u8,
+    path_len: usize,
+    out_ptr: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() || out_ptr.is_null() || out_len.is_null() {
+            return 1;
+        }
+        let path = match slice_from_raw(path_ptr, path_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let path = match std::str::from_utf8(path) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        match (*repo_ptr).repo.fetch_path_attrs_blob(path) {
+            Ok(Some(bytes)) => {
+                let (ptr, len) = bytes_to_raw(bytes);
+                *out_ptr = ptr;
+                *out_len = len;
+                0
+            }
+            Ok(None) => {
+                *out_ptr = std::ptr::null_mut();
+                *out_len = 0;
+                0
+            }
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_rename_file_entry(
+    repo_ptr: *mut DbfsPgRepo,
+    file_id: u64,
+    new_parent_id: u64,
+    new_parent_found: u8,
+    new_name_ptr: *const u8,
+    new_name_len: usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let new_name = match slice_from_raw(new_name_ptr, new_name_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let new_name = match std::str::from_utf8(new_name) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        let parent = if new_parent_found != 0 { Some(new_parent_id) } else { None };
+        match (*repo_ptr).repo.rename_file_entry(file_id, parent, new_name) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_rename_hardlink_entry(
+    repo_ptr: *mut DbfsPgRepo,
+    hardlink_id: u64,
+    new_parent_id: u64,
+    new_parent_found: u8,
+    new_name_ptr: *const u8,
+    new_name_len: usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let new_name = match slice_from_raw(new_name_ptr, new_name_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let new_name = match std::str::from_utf8(new_name) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        let parent = if new_parent_found != 0 { Some(new_parent_id) } else { None };
+        match (*repo_ptr).repo.rename_hardlink_entry(hardlink_id, parent, new_name) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_rename_symlink_entry(
+    repo_ptr: *mut DbfsPgRepo,
+    symlink_id: u64,
+    new_parent_id: u64,
+    new_parent_found: u8,
+    new_name_ptr: *const u8,
+    new_name_len: usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let new_name = match slice_from_raw(new_name_ptr, new_name_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let new_name = match std::str::from_utf8(new_name) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        let parent = if new_parent_found != 0 { Some(new_parent_id) } else { None };
+        match (*repo_ptr).repo.rename_symlink_entry(symlink_id, parent, new_name) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_rename_directory_entry(
+    repo_ptr: *mut DbfsPgRepo,
+    directory_id: u64,
+    new_parent_id: u64,
+    new_parent_found: u8,
+    new_name_ptr: *const u8,
+    new_name_len: usize,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        let new_name = match slice_from_raw(new_name_ptr, new_name_len) {
+            Some(slice) => slice,
+            None => return 1,
+        };
+        let new_name = match std::str::from_utf8(new_name) {
+            Ok(value) => value,
+            Err(_) => return 1,
+        };
+        let parent = if new_parent_found != 0 { Some(new_parent_id) } else { None };
+        match (*repo_ptr).repo.rename_directory_entry(directory_id, parent, new_name) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_delete_hardlink_entry(
+    repo_ptr: *mut DbfsPgRepo,
+    hardlink_id: u64,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.delete_hardlink_entry(hardlink_id) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_delete_symlink_entry(
+    repo_ptr: *mut DbfsPgRepo,
+    symlink_id: u64,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.delete_symlink_entry(symlink_id) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_delete_directory_entry(
+    repo_ptr: *mut DbfsPgRepo,
+    directory_id: u64,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.delete_directory_entry(directory_id) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
     match result {
         Ok(status) => status,
         Err(_) => 2,
@@ -2307,13 +4015,29 @@ pub extern "C" fn dbfs_free_bytes(ptr: *mut u8, len: usize) {
     }
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn dbfs_free_read_blocks(ptr: *mut DbfsReadBlock, len: usize) {
+    if ptr.is_null() || len == 0 {
+        return;
+    }
+
+    unsafe {
+        let blocks = std::slice::from_raw_parts_mut(ptr, len);
+        for block in blocks.iter_mut() {
+            if !block.ptr.is_null() && block.len > 0 {
+                let _ = Vec::from_raw_parts(block.ptr as *mut u8, block.len, block.len);
+            }
+        }
+        let _ = Vec::from_raw_parts(ptr, len, len);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         dbfs_block_count_for_length, dbfs_copy_dedupe, dbfs_copy_pack, dbfs_copy_plan,
         dbfs_crc32, dbfs_free_bytes, dbfs_free_copy_segments, dbfs_free_persist_blocks,
-        dbfs_free_persist_crc_rows,
-        dbfs_free_ranges, dbfs_persist_block_plan, dbfs_persist_pad, dbfs_read_assemble,
+        dbfs_free_persist_crc_rows, dbfs_free_ranges, dbfs_persist_block_plan, dbfs_persist_pad, dbfs_read_assemble,
         dbfs_read_ahead_blocks, dbfs_read_fetch_bounds, dbfs_read_missing_range_worker_count,
         dbfs_read_sequence_step, dbfs_read_slice_plan, dbfs_sorted_contiguous_ranges,
         dbfs_block_transfer_plan, dbfs_dirty_block_ranges_plan, dbfs_logical_resize_plan,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,12 +9,13 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from dbfs_storage import StorageSupport
+from dbfs_storage import DbfsRange, StorageSupport
 
 
 def main() -> None:
     storage = StorageSupport(SimpleNamespace())
-    assert storage._load_rust_hotpath_lib() is not None, "expected built Rust hot-path library"
+    lib = storage._load_rust_hotpath_lib()
+    assert lib is not None, "expected built Rust hot-path library"
 
     cases = [
         ([], []),
@@ -24,8 +26,24 @@ def main() -> None:
     ]
 
     for missing, expected in cases:
-        result = storage.python_to_rust_hotpath_sorted_contiguous_ranges(missing)
-        assert result is not None, missing
+        values = [int(block_index) for block_index in missing]
+        if not values:
+            result = []
+        else:
+            values_array = (ctypes.c_uint64 * len(values))(*values)
+            out_ptr = ctypes.POINTER(DbfsRange)()
+            out_len = ctypes.c_size_t()
+            rc = lib.dbfs_sorted_contiguous_ranges(
+                values_array,
+                ctypes.c_size_t(len(values)),
+                ctypes.byref(out_ptr),
+                ctypes.byref(out_len),
+            )
+            assert rc == 0, (missing, rc)
+            try:
+                result = [(int(out_ptr[i].start), int(out_ptr[i].end)) for i in range(out_len.value)]
+            finally:
+                lib.dbfs_free_ranges(out_ptr, out_len)
         assert result == expected, (missing, result, expected)
         assert storage._missing_block_ranges(missing) == expected
 

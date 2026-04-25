@@ -2,11 +2,18 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import ctypes
 import errno
 import os
 import stat
 
-import psycopg2
+
+def _rust_repo_and_lib(dbfs):
+    repo = dbfs.backend._load_rust_pg_repo()
+    lib = dbfs.backend._load_rust_hotpath_lib()
+    if repo is None or lib is None:
+        raise dbfs.FuseOSError(errno.EIO)
+    return repo, lib
 
 
 class NamespaceRepositoryCreateMutations:
@@ -26,44 +33,35 @@ class NamespaceRepositoryCreateMutations:
         uid, gid = dbfs.creation_uid_gid(parent_path)
         inherited_mode = dbfs.inherited_directory_mode(parent_path, mode)
         inode_seed = dbfs.generate_inode_seed()
-        rust_dir_id = dbfs.backend.python_to_rust_namespace_create_directory(
-            parent_id,
-            dir_name,
-            inherited_mode,
-            uid,
-            gid,
-            inode_seed,
+        repo, lib = _rust_repo_and_lib(dbfs)
+        out_value = ctypes.c_uint64()
+        out_found = ctypes.c_ubyte()
+        dir_name_bytes = str(dir_name).encode("utf-8")
+        inode_seed_bytes = str(inode_seed).encode("utf-8")
+        status = lib.dbfs_rust_pg_repo_create_directory(
+            repo,
+            int(parent_id or 0),
+            ctypes.c_ubyte(1 if parent_id is not None else 0),
+            dir_name_bytes,
+            len(dir_name_bytes),
+            ctypes.c_uint32(int(inherited_mode)),
+            ctypes.c_uint32(int(uid)),
+            ctypes.c_uint32(int(gid)),
+            inode_seed_bytes,
+            len(inode_seed_bytes),
+            ctypes.byref(out_value),
+            ctypes.byref(out_found),
         )
-        if rust_dir_id is not None:
-            with dbfs.db_connection() as conn, conn.cursor() as cur:
-                dbfs.copy_default_acl_to_child(parent_path, path, child_is_dir=True, cur=cur, owner_key=("dir", rust_dir_id))
-                dbfs.append_journal_event(cur, "mkdir", path, directory_id=rust_dir_id)
-                conn.commit()
-            dbfs.touch_namespace_epoch()
-            dbfs.invalidate_metadata_cache(include_statfs=True)
-            return
+        if status != 0 or not out_found.value:
+            raise dbfs.FuseOSError(errno.EIO)
+        rust_dir_id = int(out_value.value)
 
         with dbfs.db_connection() as conn, conn.cursor() as cur:
-            try:
-                dir_ctime = dbfs.ctime_column("directories")
-                cur.execute(
-                    f"INSERT INTO directories (id_parent, name, mode, uid, gid, inode_seed, {dir_ctime}, creation_date, modification_date, access_date) VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW(), NOW(), NOW()) RETURNING id_directory",
-                    (parent_id, dir_name, oct(inherited_mode)[2:], uid, gid, dbfs.generate_inode_seed()),
-                )
-                created_dir_id = cur.fetchone()[0]
-                dbfs.copy_default_acl_to_child(parent_path, path, child_is_dir=True, cur=cur, owner_key=("dir", created_dir_id))
-                if parent_id is not None:
-                    cur.execute(
-                        f"UPDATE directories SET modification_date = NOW(), {dbfs.ctime_column('directories')} = NOW() WHERE id_directory = %s",
-                        (parent_id,),
-                    )
-                dbfs.append_journal_event(cur, "mkdir", path, directory_id=created_dir_id)
-                conn.commit()
-                dbfs.touch_namespace_epoch()
-                dbfs.invalidate_metadata_cache(include_statfs=True)
-            except psycopg2.IntegrityError as exc:
-                conn.rollback()
-                raise dbfs.FuseOSError(errno.EEXIST) from exc
+            dbfs.copy_default_acl_to_child(parent_path, path, child_is_dir=True, cur=cur, owner_key=("dir", rust_dir_id))
+            dbfs.append_journal_event(cur, "mkdir", path, directory_id=rust_dir_id)
+            conn.commit()
+        dbfs.touch_namespace_epoch()
+        dbfs.invalidate_metadata_cache(include_statfs=True)
 
     def symlink(self, target, source):
         dbfs = self.dbfs
@@ -80,47 +78,37 @@ class NamespaceRepositoryCreateMutations:
 
         uid, gid = dbfs.creation_uid_gid(parent_path)
         inode_seed = dbfs.generate_inode_seed()
-        rust_symlink_id = dbfs.backend.python_to_rust_namespace_create_symlink(
-            parent_id,
-            link_name,
-            source,
-            uid,
-            gid,
-            inode_seed,
+        repo, lib = _rust_repo_and_lib(dbfs)
+        out_value = ctypes.c_uint64()
+        out_found = ctypes.c_ubyte()
+        link_name_bytes = str(link_name).encode("utf-8")
+        source_bytes = str(source).encode("utf-8")
+        inode_seed_bytes = str(inode_seed).encode("utf-8")
+        status = lib.dbfs_rust_pg_repo_create_symlink(
+            repo,
+            int(parent_id or 0),
+            ctypes.c_ubyte(1 if parent_id is not None else 0),
+            link_name_bytes,
+            len(link_name_bytes),
+            source_bytes,
+            len(source_bytes),
+            ctypes.c_uint32(int(uid)),
+            ctypes.c_uint32(int(gid)),
+            inode_seed_bytes,
+            len(inode_seed_bytes),
+            ctypes.byref(out_value),
+            ctypes.byref(out_found),
         )
-        if rust_symlink_id is not None:
-            with dbfs.db_connection() as conn, conn.cursor() as cur:
-                dbfs.append_journal_event(cur, "symlink", target, directory_id=parent_id)
-                conn.commit()
-            dbfs.touch_namespace_epoch()
-            dbfs.invalidate_metadata_cache(include_statfs=True)
-            return 0
+        if status != 0 or not out_found.value:
+            raise dbfs.FuseOSError(errno.EIO)
+        rust_symlink_id = int(out_value.value)
 
         with dbfs.db_connection() as conn, conn.cursor() as cur:
-            try:
-                symlink_ctime = dbfs.ctime_column("symlinks")
-                cur.execute(
-                    """
-                    INSERT INTO symlinks (id_parent, name, target, uid, gid, inode_seed, {symlink_ctime}, creation_date, modification_date, access_date)
-                    VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW(), NOW(), NOW())
-                    RETURNING id_symlink
-                    """.format(symlink_ctime=symlink_ctime),
-                    (parent_id, link_name, source, uid, gid, dbfs.generate_inode_seed()),
-                )
-                cur.fetchone()[0]
-                if parent_id is not None:
-                    cur.execute(
-                        f"UPDATE directories SET modification_date = NOW(), {dbfs.ctime_column('directories')} = NOW() WHERE id_directory = %s",
-                        (parent_id,),
-                    )
-                dbfs.append_journal_event(cur, "symlink", target, directory_id=parent_id)
-                conn.commit()
-                dbfs.touch_namespace_epoch()
-                dbfs.invalidate_metadata_cache(include_statfs=True)
-                return 0
-            except psycopg2.IntegrityError as exc:
-                conn.rollback()
-                raise dbfs.FuseOSError(errno.EEXIST) from exc
+            dbfs.append_journal_event(cur, "symlink", target, directory_id=parent_id)
+            conn.commit()
+        dbfs.touch_namespace_epoch()
+        dbfs.invalidate_metadata_cache(include_statfs=True)
+        return 0
 
     def link(self, target, source):
         dbfs = self.dbfs
@@ -129,12 +117,12 @@ class NamespaceRepositoryCreateMutations:
         dbfs.require_writable()
         dbfs.logging.debug("link request target=%s source=%s", target, source)
 
-        source_file_id = dbfs.get_file_id(source)
+        source_file_id = dbfs.repository.get_file_id(source)
         if source_file_id is None:
             raise dbfs.FuseOSError(errno.ENOENT)
         dbfs.persist_buffer(source_file_id)
 
-        source_kind, _ = dbfs.get_entry_kind_and_id(source)
+        source_kind, _ = dbfs.repository.get_entry_kind_and_id(source)
         if source_kind == "dir":
             raise dbfs.FuseOSError(errno.EPERM)
         if stat.S_IFMT(dbfs.getattr(source).get("st_mode", stat.S_IFREG)) != stat.S_IFREG:
@@ -149,41 +137,33 @@ class NamespaceRepositoryCreateMutations:
             raise dbfs.FuseOSError(errno.ENOENT)
 
         uid, gid = dbfs.current_uid_gid()
-        rust_hardlink_id = dbfs.backend.python_to_rust_namespace_create_hardlink(
-            source_file_id,
-            target_parent_id,
-            target_name,
-            uid,
-            gid,
+        repo, lib = _rust_repo_and_lib(dbfs)
+        out_value = ctypes.c_uint64()
+        out_found = ctypes.c_ubyte()
+        target_name_bytes = str(target_name).encode("utf-8")
+        status = lib.dbfs_rust_pg_repo_create_hardlink(
+            repo,
+            int(source_file_id),
+            int(target_parent_id or 0),
+            ctypes.c_ubyte(1 if target_parent_id is not None else 0),
+            target_name_bytes,
+            len(target_name_bytes),
+            ctypes.c_uint32(int(uid)),
+            ctypes.c_uint32(int(gid)),
+            ctypes.byref(out_value),
+            ctypes.byref(out_found),
         )
+        if status != 0 or not out_found.value:
+            raise dbfs.FuseOSError(errno.EIO)
+        rust_hardlink_id = int(out_value.value)
 
         with dbfs.db_connection() as conn, conn.cursor() as cur:
-            try:
-                hardlink_ctime = dbfs.ctime_column("hardlinks")
-                if rust_hardlink_id is None:
-                    cur.execute(
-                        """
-                        INSERT INTO hardlinks (id_file, id_directory, name, uid, gid, {hardlink_ctime}, creation_date, modification_date, access_date)
-                        VALUES (%s, %s, %s, %s, %s, NOW(), NOW(), NOW(), NOW())
-                        RETURNING id_hardlink
-                        """.format(hardlink_ctime=hardlink_ctime),
-                        (source_file_id, target_parent_id, target_name, uid, gid),
-                    )
-                    rust_hardlink_id = cur.fetchone()[0]
-                    if target_parent_id is not None:
-                        cur.execute(
-                            f"UPDATE directories SET modification_date = NOW(), {dbfs.ctime_column('directories')} = NOW() WHERE id_directory = %s",
-                            (target_parent_id,),
-                        )
-                dbfs.append_journal_event(cur, "link", target, file_id=source_file_id, directory_id=target_parent_id)
-                conn.commit()
-                dbfs.touch_namespace_epoch()
-                dbfs.invalidate_metadata_cache(include_statfs=True)
-                dbfs.logging.debug("link created target=%s source=%s file_id=%s hardlink_id=%s", target, source, source_file_id, rust_hardlink_id)
-                return 0
-            except psycopg2.IntegrityError as exc:
-                conn.rollback()
-                raise dbfs.FuseOSError(errno.EEXIST) from exc
+            dbfs.append_journal_event(cur, "link", target, file_id=source_file_id, directory_id=target_parent_id)
+            conn.commit()
+        dbfs.touch_namespace_epoch()
+        dbfs.invalidate_metadata_cache(include_statfs=True)
+        dbfs.logging.debug("link created target=%s source=%s file_id=%s hardlink_id=%s", target, source, source_file_id, rust_hardlink_id)
+        return 0
 
     def create(self, path, mode, fi=None):
         dbfs = self.dbfs
@@ -200,50 +180,36 @@ class NamespaceRepositoryCreateMutations:
 
         uid, gid = dbfs.creation_uid_gid(parent_path)
         inode_seed = dbfs.generate_inode_seed()
-        rust_file_id = dbfs.backend.python_to_rust_namespace_create_file(
-            parent_id,
-            file_name,
-            mode,
-            uid,
-            gid,
-            inode_seed,
+        repo, lib = _rust_repo_and_lib(dbfs)
+        out_value = ctypes.c_uint64()
+        out_found = ctypes.c_ubyte()
+        file_name_bytes = str(file_name).encode("utf-8")
+        inode_seed_bytes = str(inode_seed).encode("utf-8")
+        status = lib.dbfs_rust_pg_repo_create_file(
+            repo,
+            int(parent_id or 0),
+            ctypes.c_ubyte(1 if parent_id is not None else 0),
+            file_name_bytes,
+            len(file_name_bytes),
+            ctypes.c_uint32(int(mode)),
+            ctypes.c_uint32(int(uid)),
+            ctypes.c_uint32(int(gid)),
+            inode_seed_bytes,
+            len(inode_seed_bytes),
+            ctypes.byref(out_value),
+            ctypes.byref(out_found),
         )
-        if rust_file_id is not None:
-            with dbfs.db_connection() as conn, conn.cursor() as cur:
-                dbfs.copy_default_acl_to_child(parent_path, path, child_is_dir=False, cur=cur, owner_key=("file", rust_file_id))
-                dbfs.append_journal_event(cur, "create", path, file_id=rust_file_id, directory_id=parent_id)
-                conn.commit()
-            dbfs.touch_namespace_epoch()
-            dbfs.invalidate_metadata_cache(include_statfs=True)
-            return rust_file_id
+        if status != 0 or not out_found.value:
+            raise dbfs.FuseOSError(errno.EIO)
+        rust_file_id = int(out_value.value)
 
         with dbfs.db_connection() as conn, conn.cursor() as cur:
-            try:
-                file_ctime = dbfs.ctime_column("files")
-                cur.execute(
-                    """
-                    INSERT INTO files (id_directory, name, size, mode, uid, gid, inode_seed, modification_date, access_date, {file_ctime}, creation_date)
-                    VALUES (%s, %s, 0, %s, %s, %s, %s, NOW(), NOW(), NOW(), NOW())
-                    RETURNING id_file
-                """.format(file_ctime=file_ctime),
-                    (parent_id, file_name, oct(mode)[2:], uid, gid, dbfs.generate_inode_seed()),
-                )
-
-                id_file = cur.fetchone()[0]
-                dbfs.copy_default_acl_to_child(parent_path, path, child_is_dir=False, cur=cur, owner_key=("file", id_file))
-                if parent_id is not None:
-                    cur.execute(
-                        f"UPDATE directories SET modification_date = NOW(), {dbfs.ctime_column('directories')} = NOW() WHERE id_directory = %s",
-                        (parent_id,),
-                    )
-                dbfs.append_journal_event(cur, "create", path, file_id=id_file, directory_id=parent_id)
-                conn.commit()
-                dbfs.touch_namespace_epoch()
-                dbfs.invalidate_metadata_cache(include_statfs=True)
-                return id_file
-            except psycopg2.IntegrityError as exc:
-                conn.rollback()
-                raise dbfs.FuseOSError(errno.EEXIST) from exc
+            dbfs.copy_default_acl_to_child(parent_path, path, child_is_dir=False, cur=cur, owner_key=("file", rust_file_id))
+            dbfs.append_journal_event(cur, "create", path, file_id=rust_file_id, directory_id=parent_id)
+            conn.commit()
+        dbfs.touch_namespace_epoch()
+        dbfs.invalidate_metadata_cache(include_statfs=True)
+        return rust_file_id
 
     def mknod(self, path, mode, dev=0):
         dbfs = self.dbfs
@@ -263,97 +229,76 @@ class NamespaceRepositoryCreateMutations:
 
         uid, gid = dbfs.creation_uid_gid(parent_path)
         inode_seed = dbfs.generate_inode_seed()
+        repo, lib = _rust_repo_and_lib(dbfs)
+        out_value = ctypes.c_uint64()
+        out_found = ctypes.c_ubyte()
+        file_name_bytes = str(file_name).encode("utf-8")
+        inode_seed_bytes = str(inode_seed).encode("utf-8")
         if file_type in {stat.S_IFCHR, stat.S_IFBLK}:
             major = os.major(dev) if hasattr(os, "major") else 0
             minor = os.minor(dev) if hasattr(os, "minor") else 0
-            rust_file_id = dbfs.backend.python_to_rust_namespace_create_special_file(
-                parent_id,
-                file_name,
-                mode,
-                uid,
-                gid,
-                inode_seed,
-                "char" if file_type == stat.S_IFCHR else "block",
-                major,
-                minor,
+            file_kind_bytes = b"char" if file_type == stat.S_IFCHR else b"block"
+            status = lib.dbfs_rust_pg_repo_create_special_file(
+                repo,
+                int(parent_id or 0),
+                ctypes.c_ubyte(1 if parent_id is not None else 0),
+                file_name_bytes,
+                len(file_name_bytes),
+                ctypes.c_uint32(int(mode)),
+                ctypes.c_uint32(int(uid)),
+                ctypes.c_uint32(int(gid)),
+                inode_seed_bytes,
+                len(inode_seed_bytes),
+                file_kind_bytes,
+                len(file_kind_bytes),
+                ctypes.c_uint32(int(major)),
+                ctypes.c_uint32(int(minor)),
+                ctypes.byref(out_value),
+                ctypes.byref(out_found),
             )
         elif file_type == stat.S_IFIFO:
-            rust_file_id = dbfs.backend.python_to_rust_namespace_create_special_file(
-                parent_id,
-                file_name,
-                mode,
-                uid,
-                gid,
-                inode_seed,
-                "fifo",
-                0,
-                0,
+            file_kind_bytes = b"fifo"
+            status = lib.dbfs_rust_pg_repo_create_special_file(
+                repo,
+                int(parent_id or 0),
+                ctypes.c_ubyte(1 if parent_id is not None else 0),
+                file_name_bytes,
+                len(file_name_bytes),
+                ctypes.c_uint32(int(mode)),
+                ctypes.c_uint32(int(uid)),
+                ctypes.c_uint32(int(gid)),
+                inode_seed_bytes,
+                len(inode_seed_bytes),
+                file_kind_bytes,
+                len(file_kind_bytes),
+                ctypes.c_uint32(0),
+                ctypes.c_uint32(0),
+                ctypes.byref(out_value),
+                ctypes.byref(out_found),
             )
         else:
-            rust_file_id = dbfs.backend.python_to_rust_namespace_create_file(
-                parent_id,
-                file_name,
-                mode,
-                uid,
-                gid,
-                inode_seed,
+            status = lib.dbfs_rust_pg_repo_create_file(
+                repo,
+                int(parent_id or 0),
+                ctypes.c_ubyte(1 if parent_id is not None else 0),
+                file_name_bytes,
+                len(file_name_bytes),
+                ctypes.c_uint32(int(mode)),
+                ctypes.c_uint32(int(uid)),
+                ctypes.c_uint32(int(gid)),
+                inode_seed_bytes,
+                len(inode_seed_bytes),
+                ctypes.byref(out_value),
+                ctypes.byref(out_found),
             )
-        if rust_file_id is not None:
-            with dbfs.db_connection() as conn, conn.cursor() as cur:
-                dbfs.copy_default_acl_to_child(parent_path, path, child_is_dir=False, cur=cur, owner_key=("file", rust_file_id))
-                dbfs.append_journal_event(cur, "mknod", path, file_id=rust_file_id, directory_id=parent_id)
-                conn.commit()
-            dbfs.touch_namespace_epoch()
-            dbfs.invalidate_metadata_cache(include_statfs=True)
-            return 0
+        if status != 0 or not out_found.value:
+            raise dbfs.FuseOSError(errno.EIO)
+        rust_file_id = int(out_value.value)
 
         with dbfs.db_connection() as conn, conn.cursor() as cur:
-            try:
-                file_ctime = dbfs.ctime_column("files")
-                cur.execute(
-                    """
-                    INSERT INTO files (id_directory, name, size, mode, uid, gid, inode_seed, modification_date, access_date, {file_ctime}, creation_date)
-                    VALUES (%s, %s, 0, %s, %s, %s, %s, NOW(), NOW(), NOW(), NOW())
-                    RETURNING id_file
-                """.format(file_ctime=file_ctime),
-                    (parent_id, file_name, oct(mode)[2:], uid, gid, dbfs.generate_inode_seed()),
-                )
-
-                id_file = cur.fetchone()[0]
-                if file_type in {stat.S_IFCHR, stat.S_IFBLK}:
-                    major = os.major(dev) if hasattr(os, "major") else 0
-                    minor = os.minor(dev) if hasattr(os, "minor") else 0
-                    cur.execute(
-                        """
-                        INSERT INTO special_files (id_file, file_type, rdev_major, rdev_minor)
-                        VALUES (%s, %s, %s, %s)
-                        """,
-                        (
-                            id_file,
-                            "char" if file_type == stat.S_IFCHR else "block",
-                            major,
-                            minor,
-                        ),
-                    )
-                elif file_type == stat.S_IFIFO:
-                    cur.execute(
-                        """
-                        INSERT INTO special_files (id_file, file_type, rdev_major, rdev_minor)
-                        VALUES (%s, %s, 0, 0)
-                        """,
-                        (id_file, "fifo"),
-                    )
-                dbfs.copy_default_acl_to_child(parent_path, path, child_is_dir=False, cur=cur, owner_key=("file", id_file))
-                if parent_id is not None:
-                    cur.execute(
-                        f"UPDATE directories SET modification_date = NOW(), {dbfs.ctime_column('directories')} = NOW() WHERE id_directory = %s",
-                        (parent_id,),
-                    )
-                dbfs.append_journal_event(cur, "mknod", path, file_id=id_file, directory_id=parent_id)
-                conn.commit()
-                dbfs.touch_namespace_epoch()
-                dbfs.invalidate_metadata_cache(include_statfs=True)
-                return 0
-            except psycopg2.IntegrityError as exc:
-                conn.rollback()
-                raise dbfs.FuseOSError(errno.EEXIST) from exc
+            dbfs.copy_default_acl_to_child(parent_path, path, child_is_dir=False, cur=cur, owner_key=("file", rust_file_id))
+            dbfs.append_journal_event(cur, "mknod", path, file_id=rust_file_id, directory_id=parent_id)
+            conn.commit()
+        dbfs.touch_namespace_epoch()
+        dbfs.invalidate_metadata_cache(include_statfs=True)
+        return 0

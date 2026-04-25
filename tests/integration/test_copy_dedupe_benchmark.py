@@ -102,8 +102,8 @@ def main() -> None:
     src_path = f"{dir_path}/src.bin"
     dst_off_path = f"{dir_path}/dst-off.bin"
     dst_on_path = f"{dir_path}/dst-on.bin"
-    block_size = _parse_bytes(os.environ.get("COPY_DEDUPE_BLOCK_SIZE", "4M"))
-    block_count = int(os.environ.get("COPY_DEDUPE_BLOCK_COUNT", "16"))
+    block_size = _parse_bytes(os.environ.get("COPY_DEDUPE_BLOCK_SIZE", "512K"))
+    block_count = int(os.environ.get("COPY_DEDUPE_BLOCK_COUNT", "8"))
     payload = (b"dbfs-copy-dedupe-" * ((block_size * block_count) // 17 + 4))[: block_size * block_count]
 
     try:

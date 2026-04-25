@@ -37,7 +37,6 @@ from dbfs_identity import (
     normalize_path as identity_normalize_path,
     stable_inode as identity_stable_inode,
 )
-from dbfs_namespace import NamespaceSupport
 from dbfs_xattr_acl import XattrAclSupport
 from dbfs_locking import LockingSupport
 from dbfs_permissions import PermissionPolicy
@@ -45,7 +44,6 @@ from dbfs_repository import NamespaceRepository
 from dbfs_time import db_timestamp_to_epoch, epoch_to_utc_datetime
 from dbfs_storage import StorageSupport
 from dbfs_metadata import MetadataSupport
-from dbfs_journal import JournalSupport
 from dbfs_xattr_store import XattrStore
 from dbfs_runtime_validation import validate_runtime_config
 
@@ -59,6 +57,81 @@ def configure_logging(level_name=None):
 class DBFS(Operations):
     DEFAULT_WRITE_FLUSH_THRESHOLD_BYTES = 64 * 1024 * 1024
 
+    def _rust_repo_and_lib(self):
+        repo = self.backend._load_rust_pg_repo()
+        lib = self.backend._load_rust_hotpath_lib()
+        if repo is None or lib is None:
+            raise FuseOSError(errno.EIO)
+        return repo, lib
+
+    def _rust_pg_query_scalar_text(self, sql):
+        repo, lib = self._rust_repo_and_lib()
+        sql_bytes = str(sql).encode("utf-8")
+        out_ptr = ctypes.POINTER(ctypes.c_ubyte)()
+        out_len = ctypes.c_size_t()
+        status = lib.dbfs_rust_pg_repo_query_scalar_text(
+            repo,
+            sql_bytes,
+            len(sql_bytes),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+        )
+        if status != 0 or not out_ptr:
+            return None
+        try:
+            return ctypes.string_at(out_ptr, out_len.value).decode("utf-8").strip()
+        finally:
+            lib.dbfs_free_bytes(out_ptr, out_len)
+
+    def _rust_pg_get_config_value(self, key):
+        repo, lib = self._rust_repo_and_lib()
+        key_bytes = str(key).encode("utf-8")
+        out_ptr = ctypes.POINTER(ctypes.c_ubyte)()
+        out_len = ctypes.c_size_t()
+        out_found = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_get_config_value(
+            repo,
+            key_bytes,
+            len(key_bytes),
+            ctypes.byref(out_ptr),
+            ctypes.byref(out_len),
+            ctypes.byref(out_found),
+        )
+        if status != 0 or not out_found.value:
+            return None
+        try:
+            return ctypes.string_at(out_ptr, out_len.value).decode("utf-8")
+        finally:
+            lib.dbfs_free_bytes(out_ptr, out_len)
+
+    def _rust_pg_startup_snapshot(self):
+        repo, lib = self._rust_repo_and_lib()
+        out_block_size = ctypes.c_uint32()
+        out_block_size_found = ctypes.c_ubyte()
+        out_is_in_recovery = ctypes.c_ubyte()
+        out_schema_version = ctypes.c_uint32()
+        out_schema_version_found = ctypes.c_ubyte()
+        out_schema_is_initialized = ctypes.c_ubyte()
+        status = lib.dbfs_rust_pg_repo_bootstrap_snapshot(
+            repo,
+            ctypes.byref(out_block_size),
+            ctypes.byref(out_block_size_found),
+            ctypes.byref(out_is_in_recovery),
+            ctypes.byref(out_schema_version),
+            ctypes.byref(out_schema_version_found),
+            ctypes.byref(out_schema_is_initialized),
+        )
+        if status != 0:
+            return None
+        return {
+            "block_size": int(out_block_size.value),
+            "block_size_found": bool(out_block_size_found.value),
+            "is_in_recovery": bool(out_is_in_recovery.value),
+            "schema_version": int(out_schema_version.value),
+            "schema_version_found": bool(out_schema_version_found.value),
+            "schema_is_initialized": bool(out_schema_is_initialized.value),
+        }
+
     def __init__(self, dsn, db_config, runtime_config=None, selinux_mode="off", acl_mode="off", role="auto", pool_max_connections=10):
         self.dsn = dsn
         self.db_config = db_config
@@ -71,7 +144,7 @@ class DBFS(Operations):
             pool_max_connections=pool_max_connections,
             synchronous_commit=self.synchronous_commit,
         )
-        self._startup_snapshot = self.backend.python_to_rust_pg_startup_snapshot()
+        self._startup_snapshot = self._rust_pg_startup_snapshot()
         self.pool_max_connections = self.backend.pool_max_connections
         self.connection_pool = self.backend.connection_pool
         self.xattr_acl = XattrAclSupport(self)
@@ -146,9 +219,7 @@ class DBFS(Operations):
         self._path_locks = self.locking._path_locks
         self._flock_locks = self.locking._flock_locks
         self.permissions = PermissionPolicy(self)
-        self.namespace = NamespaceSupport(self)
         self.metadata = MetadataSupport(self)
-        self.journal = JournalSupport(self)
         self.logging = logging
         self.FuseOSError = FuseOSError
         self.repository = NamespaceRepository(self)
@@ -242,7 +313,7 @@ class DBFS(Operations):
             return str(runtime_path).strip()
 
         try:
-            data_directory = self.backend.python_to_rust_pg_query_scalar_text("SHOW data_directory")
+            data_directory = self._rust_pg_query_scalar_text("SHOW data_directory")
         except Exception:
             return None
         if not data_directory:
@@ -618,7 +689,7 @@ class DBFS(Operations):
     def estimate_blocks(self, obj_type, size, entry_id=None):
         size = max(0, int(size))
         if obj_type == "dir":
-            child_count = self.count_directory_children(entry_id) if entry_id is not None else 0
+            child_count = self.storage.count_directory_children(entry_id) if entry_id is not None else 0
             estimated_bytes = 256 + (child_count * 128)
             return max(1, (estimated_bytes + 511) // 512)
         if obj_type in {"file", "hardlink"}:
@@ -654,9 +725,6 @@ class DBFS(Operations):
     def _iter_lock_records(self, resource_state):
         return self.locking._iter_lock_records(resource_state)
 
-    def _lock_record_conflicts(self, record, requested_type, requested_start, requested_end):
-        return self.locking._lock_record_conflicts(record, requested_type, requested_start, requested_end)
-
     def _unlock_lock_records(self, records, owner_key, unlock_start, unlock_end):
         return self.locking._unlock_lock_records(records, owner_key, unlock_start, unlock_end)
 
@@ -677,9 +745,6 @@ class DBFS(Operations):
     def _clear_path_lock_state(self, resource_key, owner_key=None):
         return self.locking._clear_path_lock_state(resource_key, owner_key)
 
-    def _get_flock_state(self, resource_key):
-        return self.locking._get_flock_state(resource_key)
-
     def _clear_flock_state(self, resource_key, owner_key=None):
         return self.locking._clear_flock_state(resource_key, owner_key)
 
@@ -697,7 +762,7 @@ class DBFS(Operations):
 
         for file_id in list(file_ids_to_flush):
             try:
-                self.persist_buffer(file_id)
+                self.storage.persist_buffer(file_id)
             except Exception as exc:
                 logging.debug("Failed to persist buffer during cleanup for %s: %s", file_id, exc)
 
@@ -719,12 +784,6 @@ class DBFS(Operations):
     def _lock_resource_key(self, path):
         return self.locking._lock_resource_key(path)
 
-    def _lock_conflicts(self, state, request_type):
-        return self.locking._lock_conflicts(state, request_type)
-
-    def _describe_conflicting_lock(self, state, requested_type):
-        return self.locking._describe_conflicting_lock(state, requested_type)
-
     def resolve_runtime_role(self, requested_role, startup_snapshot=None):
         if requested_role in {"primary", "replica"}:
             return requested_role
@@ -733,7 +792,12 @@ class DBFS(Operations):
             snapshot = startup_snapshot or getattr(self, "_startup_snapshot", None)
             if snapshot and snapshot.get("is_in_recovery") is not None:
                 return "replica" if snapshot.get("is_in_recovery") else "primary"
-            return "replica" if self.backend.is_in_recovery() else "primary"
+            repo, lib = self._rust_repo_and_lib()
+            out_value = ctypes.c_ubyte()
+            status = lib.dbfs_rust_pg_repo_is_in_recovery(repo, ctypes.byref(out_value))
+            if status == 0:
+                return "replica" if out_value.value else "primary"
+            raise FuseOSError(errno.EIO)
         except Exception as exc:
             logging.warning("Unable to detect DBFS role from PostgreSQL; defaulting to primary: %s", exc)
             return "primary"
@@ -857,12 +921,27 @@ class DBFS(Operations):
         return self.atime_policy not in {"noatime", "nodiratime"}
 
     def update_access_date(self, table_name, id_column, entry_id, timestamp):
-        with self.db_connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                f"UPDATE {table_name} SET access_date = %s WHERE {id_column} = %s",
-                (epoch_to_utc_datetime(timestamp).replace(tzinfo=None), entry_id),
+        repo, lib = self._rust_repo_and_lib()
+        atime_text = epoch_to_utc_datetime(timestamp).replace(tzinfo=None).isoformat(sep=" ")
+        atime_bytes = atime_text.encode("utf-8")
+        if table_name == "files":
+            status = lib.dbfs_rust_pg_repo_update_file_access_date(
+                repo,
+                int(entry_id),
+                atime_bytes,
+                len(atime_bytes),
             )
-            conn.commit()
+        elif table_name == "directories":
+            status = lib.dbfs_rust_pg_repo_update_directory_access_date(
+                repo,
+                int(entry_id),
+                atime_bytes,
+                len(atime_bytes),
+            )
+        else:
+            raise FuseOSError(errno.EINVAL)
+        if status != 0:
+            raise FuseOSError(errno.EIO)
 
     def update_access_date_once(self, table_name, id_column, entry_id, timestamp, touch_key):
         with self._timestamp_touch_guard:
@@ -989,10 +1068,26 @@ class DBFS(Operations):
             yield conn
 
     def append_journal_event(self, cur, action, path=None, file_id=None, directory_id=None):
-        return self.journal.append_journal_event(cur, action, path=path, file_id=file_id, directory_id=directory_id)
+        repo, lib = self._rust_repo_and_lib()
+        current_uid, _ = self.current_uid_gid()
+        action_text = action if path is None else f"{action}:{path}"
+        action_bytes = action_text.encode("utf-8")
+        status = lib.dbfs_rust_pg_repo_append_journal_event(
+            repo,
+            ctypes.c_uint32(int(current_uid)),
+            ctypes.c_uint64(int(directory_id or 0)),
+            ctypes.c_ubyte(1 if directory_id is not None else 0),
+            ctypes.c_uint64(int(file_id or 0)),
+            ctypes.c_ubyte(1 if file_id is not None else 0),
+            action_bytes,
+            len(action_bytes),
+        )
+        if status != 0:
+            raise FuseOSError(errno.EIO)
 
     def get_config_value(self, key, default=None):
-        return self.backend.get_config_value(key, default)
+        value = self._rust_pg_get_config_value(key)
+        return default if value is None else value
 
     def load_block_size(self, startup_snapshot=None):
         snapshot = startup_snapshot or getattr(self, "_startup_snapshot", None)
@@ -1015,134 +1110,31 @@ class DBFS(Operations):
             except Exception:
                 pass
 
-        rust_value = self.backend.schema_version()
-        if rust_value is not None:
-            return rust_value
-
-        with self.connection() as conn, conn.cursor() as cur:
-            cur.execute("SELECT version FROM schema_version ORDER BY applied_at DESC LIMIT 1")
-            result = cur.fetchone()
-            return int(result[0]) if result else None
+        try:
+            repo, lib = self._rust_repo_and_lib()
+            out_value = ctypes.c_uint32()
+            out_found = ctypes.c_ubyte()
+            status = lib.dbfs_rust_pg_repo_schema_version(repo, ctypes.byref(out_value), ctypes.byref(out_found))
+            if status == 0 and out_found.value:
+                return int(out_value.value)
+        except Exception as exc:
+            raise FuseOSError(errno.EIO) from exc
+        raise FuseOSError(errno.EIO)
 
     def schema_is_initialized(self, startup_snapshot=None):
         snapshot = startup_snapshot or getattr(self, "_startup_snapshot", None)
         if snapshot and snapshot.get("schema_is_initialized") is not None:
             return bool(snapshot.get("schema_is_initialized"))
 
-        rust_value = self.backend.schema_is_initialized()
-        if rust_value is not None:
-            return rust_value
-
-        with self.connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT
-                    to_regclass('public.directories') IS NOT NULL
-                    AND to_regclass('public.files') IS NOT NULL
-                    AND to_regclass('public.schema_version') IS NOT NULL
-                """
-            )
-            result = cur.fetchone()
-            return bool(result[0]) if result else False
-
-    def get_file_id(self, path):
-        return self.repository.get_file_id(path)
-
-    def get_file_mode_value(self, path):
-        return self.repository.get_file_mode_value(path)
-
-    def get_special_file_metadata(self, file_id):
-        return self.metadata.get_special_file_metadata(file_id)
-
-    def get_hardlink_id(self, path):
-        return self.repository.get_hardlink_id(path)
-
-    def get_hardlink_file_id(self, hardlink_id):
-        return self.repository.get_hardlink_file_id(hardlink_id)
-
-    def get_symlink_id(self, path):
-        return self.repository.get_symlink_id(path)
-
-    def get_dir_id_by_path(self, path):
-        return self.repository.get_dir_id_by_path(path)
-
-    def get_entry_kind_and_id(self, path):
-        return self.repository.get_entry_kind_and_id(path)
-
-    def entry_exists(self, path, entry_kind):
-        return self.repository.entry_exists(path, entry_kind)
-
-    def entry_exists_any(self, path):
-        return self.repository.entry_exists_any(path)
-
-    def count_file_links(self, file_id):
-        return self.repository.count_file_links(file_id)
-
-    def promote_hardlink_to_primary(self, file_id, cur):
-        return self.repository.promote_hardlink_to_primary(file_id, cur)
-
-    def load_file_bytes(self, file_id):
-        return self.storage.load_file_bytes(file_id)
-
-    def get_file_size(self, file_id):
-        return self.storage.get_file_size(file_id)
-
-    def load_symlink_target(self, symlink_id):
-        return self.metadata.load_symlink_target(symlink_id)
-
-    def path_has_children(self, directory_id):
-        return self.storage.path_has_children(directory_id)
-
-    def count_directory_children(self, directory_id):
-        return self.metadata.count_directory_children(directory_id)
-
-    def count_directory_subdirs(self, directory_id):
-        return self.metadata.count_directory_subdirs(directory_id)
-
-    def count_root_directory_children(self):
-        return self.metadata.count_root_directory_children()
-
-    def count_file_blocks(self, file_id):
-        return self.metadata.count_file_blocks(file_id)
-
-    def count_symlinks(self):
-        return self.metadata.count_symlinks()
-
-    def delete_path_xattrs(self, path, recursive=False, cur=None):
-        return self.xattr_store.delete_inode_xattrs(path, cur=cur)
-
-    def move_path_xattrs(self, old_path, new_path, recursive=False, cur=None):
-        return self.xattr_store.move_path_xattrs(old_path, new_path, recursive=recursive, cur=cur)
-
-    def ensure_write_buffer(self, file_id):
-        return self.storage.ensure_write_buffer(file_id)
-
-    def mark_write_buffer_dirty(self, file_id):
-        self.storage.mark_write_buffer_dirty(file_id)
-
-    def mark_write_range_dirty(self, file_id, start_offset, end_offset):
-        self.storage.mark_write_range_dirty(file_id, start_offset, end_offset)
-
-    def dirty_write_buffer_bytes(self, file_id):
-        return self.storage.dirty_write_buffer_bytes(file_id)
-
-    def maybe_flush_dirty_write_buffer(self, file_id):
-        return self.storage.maybe_flush_dirty_write_buffer(file_id)
-
-    def clear_write_buffer_dirty(self, file_id):
-        return self.storage.clear_write_buffer_dirty(file_id)
-
-    def is_write_buffer_dirty(self, file_id):
-        return self.storage.is_write_buffer_dirty(file_id)
-
-    def persist_buffer(self, file_id):
-        return self.storage.persist_buffer(file_id)
-
-    def read_file_slice(self, file_id, offset, size):
-        return self.storage.read_file_slice(file_id, offset, size)
-
-    def clear_read_cache(self, file_id=None):
-        return self.storage.clear_read_cache(file_id)
+        try:
+            repo, lib = self._rust_repo_and_lib()
+            out_value = ctypes.c_ubyte()
+            status = lib.dbfs_rust_pg_repo_schema_is_initialized(repo, ctypes.byref(out_value))
+            if status == 0:
+                return bool(out_value.value)
+        except Exception as exc:
+            raise FuseOSError(errno.EIO) from exc
+        raise FuseOSError(errno.EIO)
 
     def allocate_file_handle(self, file_id, flags=0, initial_offset=0):
         with self._handle_guard:
@@ -1199,7 +1191,7 @@ class DBFS(Operations):
         path = self.normalize_path(path)
         if path == "/":
             return path
-        kind, _ = self.get_entry_kind_and_id(path)
+        kind, _ = self.repository.get_entry_kind_and_id(path)
         if kind is None:
             raise FuseOSError(errno.ENOENT)
         if kind != "dir":
@@ -1224,7 +1216,7 @@ class DBFS(Operations):
 
         if cached_entries is not None:
             if path != "/" and self.should_update_dir_atime():
-                directory_id = cached_directory_id if cached_directory_id is not None else self.get_dir_id(path)
+                directory_id = cached_directory_id if cached_directory_id is not None else self.repository.get_dir_id(path)
                 if directory_id is not None:
                     touch_key = ("dir", fh if fh is not None else directory_id)
                     if self.update_access_date_once("directories", "id_directory", directory_id, time.time(), touch_key):
@@ -1237,7 +1229,7 @@ class DBFS(Operations):
 
         if path != "/" and self.should_update_dir_atime():
             if directory_id is None:
-                directory_id = self.get_dir_id(path)
+                directory_id = self.repository.get_dir_id(path)
             if directory_id is not None:
                 touch_key = ("dir", fh if fh is not None else directory_id)
                 if self.update_access_date_once("directories", "id_directory", directory_id, time.time(), touch_key):
@@ -1256,7 +1248,7 @@ class DBFS(Operations):
 
         if path == '/':
             uid, gid = self.current_uid_gid()
-            root_child_count = self.count_root_directory_children()
+            root_child_count = self.storage.count_root_directory_children()
             root_epoch = max(now, self.namespace_epoch())
             attrs = {
                 'st_ino': self.stable_inode("dir", "root", 1),
@@ -1304,12 +1296,6 @@ class DBFS(Operations):
             return 0
         raise FuseOSError(errno.EACCES)
 
-    def get_dir_id(self, path):
-        return self.repository.get_dir_id(path)
-
-    def get_symlink_attrs(self, path):
-        return self.repository.get_symlink_attrs(path)
-
     def mkdir(self, path, mode):
         return self.repository.mkdir(path, mode)
 
@@ -1324,11 +1310,11 @@ class DBFS(Operations):
 
     def read(self, path, size, offset, fh):
         path = self.normalize_path(path)
-        file_id = self.file_id_for_handle(fh) if fh is not None else self.get_file_id(path)
+        file_id = self.file_id_for_handle(fh) if fh is not None else self.repository.get_file_id(path)
         if file_id is None:
             raise FuseOSError(errno.ENOENT)
 
-        data = self.read_file_slice(file_id, offset, size)
+        data = self.storage.read_file_slice(file_id, offset, size)
 
         if self.should_update_file_atime():
             now = time.time()
@@ -1346,11 +1332,11 @@ class DBFS(Operations):
 
     def poll(self, path, fh=None, events=0):
         path = self.normalize_path(path)
-        kind, _ = self.get_entry_kind_and_id(path)
+        kind, _ = self.repository.get_entry_kind_and_id(path)
         if kind not in {"file", "hardlink"}:
             raise FuseOSError(errno.EINVAL)
 
-        file_id = self.file_id_for_handle(fh) if fh is not None else self.get_file_id(path)
+        file_id = self.file_id_for_handle(fh) if fh is not None else self.repository.get_file_id(path)
         if file_id is None:
             raise FuseOSError(errno.ENOENT)
 
@@ -1367,11 +1353,11 @@ class DBFS(Operations):
 
     def lseek(self, path, offset, whence, fh=None):
         path = self.normalize_path(path)
-        kind, _ = self.get_entry_kind_and_id(path)
+        kind, _ = self.repository.get_entry_kind_and_id(path)
         if kind not in {"file", "hardlink"}:
             raise FuseOSError(errno.EINVAL)
 
-        file_id = self.file_id_for_handle(fh) if fh is not None else self.get_file_id(path)
+        file_id = self.file_id_for_handle(fh) if fh is not None else self.repository.get_file_id(path)
         if file_id is None:
             raise FuseOSError(errno.ENOENT)
 
@@ -1426,13 +1412,6 @@ class DBFS(Operations):
         return self.write(path, buf, offset, fh)
 
 
-    def flush_to_db(self, fh):
-        self.require_writable()
-        file_id = self.file_id_for_handle(fh)
-        if file_id is None:
-            raise FuseOSError(errno.ENOENT)
-        self.persist_buffer(file_id)
-
     def getxattr(self, path, name, position=0):
         acl_enabled = bool(getattr(self, "acl_enabled", False))
         selinux_enabled = bool(getattr(self, "selinux_enabled", False))
@@ -1448,7 +1427,7 @@ class DBFS(Operations):
 
         path = self.normalize_path(path)
         xattr_name = self.normalize_xattr_name(name)
-        entry_kind, _ = self.get_entry_kind_and_id(path)
+        entry_kind, _ = self.repository.get_entry_kind_and_id(path)
         if entry_kind is None:
             raise FuseOSError(errno.ENOENT)
         if self.is_posix_acl_xattr(xattr_name) and not self.acl_enabled:
@@ -1465,7 +1444,7 @@ class DBFS(Operations):
         path = self.normalize_path(path)
         self.require_writable()
         xattr_name = self.normalize_xattr_name(name)
-        entry_kind, _ = self.get_entry_kind_and_id(path)
+        entry_kind, _ = self.repository.get_entry_kind_and_id(path)
         if entry_kind is None:
             raise FuseOSError(errno.ENOENT)
         if self.is_posix_acl_xattr(xattr_name) and not self.acl_enabled:
@@ -1483,7 +1462,7 @@ class DBFS(Operations):
 
     def listxattr(self, path):
         path = self.normalize_path(path)
-        entry_kind, _ = self.get_entry_kind_and_id(path)
+        entry_kind, _ = self.repository.get_entry_kind_and_id(path)
         if entry_kind is None:
             raise FuseOSError(errno.ENOENT)
         names = self.xattr_store.list_xattr_names(path)
@@ -1500,7 +1479,7 @@ class DBFS(Operations):
         path = self.normalize_path(path)
         self.require_writable()
         xattr_name = self.normalize_xattr_name(name)
-        entry_kind, _ = self.get_entry_kind_and_id(path)
+        entry_kind, _ = self.repository.get_entry_kind_and_id(path)
         if entry_kind is None:
             raise FuseOSError(errno.ENOENT)
         if self.is_posix_acl_xattr(xattr_name) and not self.acl_enabled:
@@ -1529,7 +1508,7 @@ class DBFS(Operations):
         path = self.normalize_path(path)
         self.require_writable()
 
-        id_file = self.file_id_for_handle(fh) if fh is not None else self.get_file_id(path)
+        id_file = self.file_id_for_handle(fh) if fh is not None else self.repository.get_file_id(path)
         if id_file is None:
             raise FuseOSError(errno.ENOENT)
 
@@ -1540,25 +1519,18 @@ class DBFS(Operations):
         self.storage.truncate_to_size(id_file, length)
         self.storage.maybe_flush_dirty_write_buffer(id_file)
 
-        rust_updated = self.backend.python_to_rust_pg_repo_set_file_size(id_file, length)
-        if not rust_updated:
-            with self.db_connection() as conn, conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE files
-                    SET size = %s, modification_date = NOW(), {file_ctime} = NOW()
-                    WHERE id_file = %s
-                    """.format(file_ctime=self.ctime_column("files")),
-                    (length, id_file),
-                )
-                self.append_journal_event(cur, "truncate", path, file_id=id_file)
-                conn.commit()
-        else:
-            with self.db_connection() as conn, conn.cursor() as cur:
-                self.append_journal_event(cur, "truncate", path, file_id=id_file)
-                conn.commit()
+        repo = self.backend._load_rust_pg_repo()
+        lib = self.backend._load_rust_hotpath_lib()
+        if repo is None or lib is None:
+            raise FuseOSError(errno.EIO)
+        status = lib.dbfs_rust_pg_repo_set_file_size(repo, int(id_file), int(length))
+        if status != 0:
+            raise FuseOSError(errno.EIO)
+        with self.db_connection() as conn, conn.cursor() as cur:
+            self.append_journal_event(cur, "truncate", path, file_id=id_file)
+            conn.commit()
 
-        self.clear_read_cache(id_file)
+        self.storage.clear_read_cache(id_file)
         self.invalidate_metadata_cache(path, include_statfs=True)
 
     def fallocate(self, path, mode, offset, length, fh=None):
@@ -1570,14 +1542,21 @@ class DBFS(Operations):
         if mode not in (0,):
             raise FuseOSError(errno.EOPNOTSUPP)
 
-        id_file = self.file_id_for_handle(fh) if fh is not None else self.get_file_id(path)
+        id_file = self.file_id_for_handle(fh) if fh is not None else self.repository.get_file_id(path)
         if id_file is None:
             raise FuseOSError(errno.ENOENT)
 
         old_size = self.storage.get_logical_file_size(id_file)
         end_offset = offset + length
         new_size = max(old_size, end_offset)
-        resize_plan = self.storage.python_to_rust_hotpath_logical_resize_plan(old_size, new_size, self.block_size)
+        lib = self.backend._load_rust_hotpath_lib()
+        if lib is None:
+            raise FuseOSError(errno.EIO)
+        resize_plan = lib.dbfs_logical_resize_plan(
+            int(old_size),
+            int(new_size),
+            int(self.block_size),
+        )
         new_size = int(resize_plan.new_size)
 
         # W modelu overlay nie ladujemy calego pliku do RAM.
@@ -1587,25 +1566,18 @@ class DBFS(Operations):
 
         self.storage.truncate_to_size(id_file, new_size)
 
-        rust_updated = self.backend.python_to_rust_pg_repo_set_file_size(id_file, new_size)
-        if not rust_updated:
-            with self.db_connection() as conn, conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE files
-                    SET size = %s, modification_date = NOW(), {file_ctime} = NOW()
-                    WHERE id_file = %s
-                    """.format(file_ctime=self.ctime_column("files")),
-                    (new_size, id_file),
-                )
-                self.append_journal_event(cur, "fallocate", path, file_id=id_file)
-                conn.commit()
-        else:
-            with self.db_connection() as conn, conn.cursor() as cur:
-                self.append_journal_event(cur, "fallocate", path, file_id=id_file)
-                conn.commit()
+        repo = self.backend._load_rust_pg_repo()
+        lib = self.backend._load_rust_hotpath_lib()
+        if repo is None or lib is None:
+            raise FuseOSError(errno.EIO)
+        status = lib.dbfs_rust_pg_repo_set_file_size(repo, int(id_file), int(new_size))
+        if status != 0:
+            raise FuseOSError(errno.EIO)
+        with self.db_connection() as conn, conn.cursor() as cur:
+            self.append_journal_event(cur, "fallocate", path, file_id=id_file)
+            conn.commit()
 
-        self.clear_read_cache(id_file)
+        self.storage.clear_read_cache(id_file)
         self.invalidate_metadata_cache(path, include_statfs=True)
         return 0
         
@@ -1619,8 +1591,8 @@ class DBFS(Operations):
         if flags not in (0, None):
             raise FuseOSError(errno.EOPNOTSUPP)
 
-        src_file_id = self.file_id_for_handle(fh_in) if fh_in is not None else self.get_file_id(path_in)
-        dst_file_id = self.file_id_for_handle(fh_out) if fh_out is not None else self.get_file_id(path_out)
+        src_file_id = self.file_id_for_handle(fh_in) if fh_in is not None else self.repository.get_file_id(path_in)
+        dst_file_id = self.file_id_for_handle(fh_out) if fh_out is not None else self.repository.get_file_id(path_out)
         if src_file_id is None or dst_file_id is None:
             raise FuseOSError(errno.ENOENT)
         if src_file_id == dst_file_id and off_in == off_out:
@@ -1633,25 +1605,21 @@ class DBFS(Operations):
         self.storage.maybe_flush_dirty_write_buffer(dst_file_id)
 
         new_size = self.storage.get_logical_file_size(dst_file_id)
+        repo, lib = self._rust_repo_and_lib()
+        status = lib.dbfs_rust_pg_repo_set_file_size(repo, int(dst_file_id), int(new_size))
+        if status != 0:
+            raise FuseOSError(errno.EIO)
         with self.db_connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE files
-                SET size = %s, modification_date = NOW(), {file_ctime} = NOW()
-                WHERE id_file = %s
-                """.format(file_ctime=self.ctime_column("files")),
-                (new_size, dst_file_id),
-            )
             self.append_journal_event(cur, "copy_file_range", path_out, file_id=dst_file_id)
             conn.commit()
 
-        self.clear_read_cache(dst_file_id)
+        self.storage.clear_read_cache(dst_file_id)
         self.invalidate_metadata_cache(path_out, include_statfs=True)
         return copied
 
     def ioctl(self, path, cmd, arg, fip, flags, data):
         path = self.normalize_path(path)
-        kind, _ = self.get_entry_kind_and_id(path)
+        kind, _ = self.repository.get_entry_kind_and_id(path)
         if kind not in {"file", "hardlink"}:
             raise FuseOSError(errno.ENOTTY)
 
@@ -1659,7 +1627,7 @@ class DBFS(Operations):
             raise FuseOSError(errno.ENOTTY)
 
         fh = getattr(fip, "fh", None)
-        file_id = self.file_id_for_handle(fh) if fh is not None else self.get_file_id(path)
+        file_id = self.file_id_for_handle(fh) if fh is not None else self.repository.get_file_id(path)
         if file_id is None:
             raise FuseOSError(errno.ENOENT)
 
@@ -1713,14 +1681,14 @@ class DBFS(Operations):
 
     def bmap(self, path, blocksize, idx):
         path = self.normalize_path(path)
-        kind, _ = self.get_entry_kind_and_id(path)
+        kind, _ = self.repository.get_entry_kind_and_id(path)
         if kind not in {"file", "hardlink"}:
             raise FuseOSError(errno.EOPNOTSUPP)
         blocksize = int(blocksize)
         if blocksize <= 0:
             raise FuseOSError(errno.EINVAL)
 
-        file_id = self.get_file_id(path)
+        file_id = self.repository.get_file_id(path)
         if file_id is None:
             raise FuseOSError(errno.ENOENT)
 
@@ -1749,7 +1717,7 @@ class DBFS(Operations):
             access_mode = os.R_OK
         if not self.acl_allows(path, attrs, access_mode):
             raise FuseOSError(errno.EACCES)
-        id_file = self.get_file_id(path)
+        id_file = self.repository.get_file_id(path)
         if id_file is None:
             raise FuseOSError(errno.ENOENT)
         return self.allocate_file_handle(id_file, flags=int(flags), initial_offset=0)
@@ -1760,9 +1728,9 @@ class DBFS(Operations):
         file_id = self.file_id_for_handle(fh)
         if file_id is None:
             raise FuseOSError(errno.ENOENT)
-        if self.is_write_buffer_dirty(file_id):
+        if self.storage.is_write_buffer_dirty(file_id):
             started = time.perf_counter()
-            self.persist_buffer(file_id)
+            self.storage.persist_buffer(file_id)
             self.record_io_profile("flush", time.perf_counter() - started)
         return 0
 
@@ -1780,9 +1748,9 @@ class DBFS(Operations):
             self.clear_read_sequence_state(fh)
             return 0
 
-        started = time.perf_counter() if (file_id is not None and self.is_write_buffer_dirty(file_id)) else None
+        started = time.perf_counter() if (file_id is not None and self.storage.is_write_buffer_dirty(file_id)) else None
         if started is not None:
-            self.persist_buffer(file_id)
+            self.storage.persist_buffer(file_id)
         self.close_file_handle(fh)
         self.clear_timestamp_touch_state(resource_key)
         self.clear_read_sequence_state(fh)
@@ -1815,9 +1783,9 @@ class DBFS(Operations):
         file_id = self.file_id_for_handle(fh)
         if file_id is None:
             raise FuseOSError(errno.ENOENT)
-        if self.is_write_buffer_dirty(file_id):
+        if self.storage.is_write_buffer_dirty(file_id):
             started = time.perf_counter()
-            self.persist_buffer(file_id)
+            self.storage.persist_buffer(file_id)
             self.record_io_profile("fsync", time.perf_counter() - started)
         return 0
 
@@ -1843,24 +1811,30 @@ class DBFS(Operations):
     def chmod(self, path, mode):
         path = self.normalize_path(path)
         self.require_writable()
-        kind, entry_id = self.get_entry_kind_and_id(path)
-        file_id = self.get_file_id(path)
-        parent_id = self.get_dir_id(os.path.dirname(path))
+        kind, entry_id = self.repository.get_entry_kind_and_id(path)
+        file_id = self.repository.get_file_id(path)
+        parent_id = self.repository.get_dir_id(os.path.dirname(path))
 
+        if kind == "symlink":
+            raise FuseOSError(errno.EPERM)
+        attrs = self.getattr(path)
+        if not self.can_modify_metadata(attrs):
+            raise FuseOSError(errno.EPERM)
+        current_mode = attrs.get("st_mode", 0) & 0o7777
+        new_mode = int(mode) & 0o7777
+        if current_mode == new_mode:
+            return 0
+        repo, lib = self._rust_repo_and_lib()
+        mode_text = oct(new_mode)[2:]
+        if kind in {"file", "hardlink"} and file_id is not None:
+            status = lib.dbfs_rust_pg_repo_update_file_mode(repo, int(file_id), mode_text.encode("utf-8"), len(mode_text))
+            if status != 0:
+                raise FuseOSError(errno.EIO)
+        elif kind == "dir":
+            status = lib.dbfs_rust_pg_repo_update_directory_mode(repo, int(entry_id), mode_text.encode("utf-8"), len(mode_text))
+            if status != 0:
+                raise FuseOSError(errno.EIO)
         with self.db_connection() as conn, conn.cursor() as cur:
-            if kind == "symlink":
-                raise FuseOSError(errno.EPERM)
-            attrs = self.getattr(path)
-            if not self.can_modify_metadata(attrs):
-                raise FuseOSError(errno.EPERM)
-            current_mode = attrs.get("st_mode", 0) & 0o7777
-            new_mode = int(mode) & 0o7777
-            if current_mode == new_mode:
-                return 0
-            if kind in {"file", "hardlink"} and file_id is not None:
-                cur.execute(f"UPDATE files SET mode = %s, {self.ctime_column('files')} = NOW() WHERE id_file = %s", (oct(new_mode)[2:], file_id))
-            elif kind == "dir":
-                cur.execute(f"UPDATE directories SET mode = %s, {self.ctime_column('directories')} = NOW() WHERE id_directory = %s", (oct(new_mode)[2:], entry_id))
             self.append_journal_event(cur, "chmod", path, directory_id=parent_id)
             conn.commit()
         self.invalidate_metadata_cache(path, include_statfs=False)
@@ -1872,9 +1846,9 @@ class DBFS(Operations):
         self.require_writable()
         if uid == -1 and gid == -1:
             return 0
-        kind, entry_id = self.get_entry_kind_and_id(path)
-        file_id = self.get_file_id(path)
-        parent_id = self.get_dir_id(os.path.dirname(path))
+        kind, entry_id = self.repository.get_entry_kind_and_id(path)
+        file_id = self.repository.get_file_id(path)
+        parent_id = self.repository.get_dir_id(os.path.dirname(path))
 
         with self.db_connection() as conn, conn.cursor() as cur:
             attrs = self.getattr(path)
@@ -1890,28 +1864,46 @@ class DBFS(Operations):
                 raise FuseOSError(errno.EPERM)
 
             new_uid = attrs.get("st_uid") if uid == -1 else uid
-            new_gid = attrs.get("st_gid") if gid == -1 else gid
-            if not ownership_changed:
-                return 0
-            if kind in {"file", "hardlink"} and file_id is not None:
-                current_mode = self.getattr(path).get("st_mode", 0)
-                if current_uid != 0 and ownership_changed:
-                    current_mode &= ~stat.S_ISUID
-                    current_mode &= ~stat.S_ISGID
-                cur.execute(
-                    f"UPDATE files SET uid = %s, gid = %s, mode = %s, {self.ctime_column('files')} = NOW() WHERE id_file = %s",
-                    (new_uid, new_gid, oct(current_mode)[2:], file_id),
-                )
-            elif kind == "dir":
-                current_mode = self.getattr(path).get("st_mode", 0)
-                if current_uid != 0 and ownership_changed:
-                    current_mode &= ~stat.S_ISUID
-                cur.execute(
-                    f"UPDATE directories SET uid = %s, gid = %s, mode = %s, {self.ctime_column('directories')} = NOW() WHERE id_directory = %s",
-                    (new_uid, new_gid, oct(current_mode)[2:], entry_id),
-                )
-            elif kind == "symlink":
-                cur.execute(f"UPDATE symlinks SET uid = %s, gid = %s, {self.ctime_column('symlinks')} = NOW() WHERE id_symlink = %s", (new_uid, new_gid, entry_id))
+        new_gid = attrs.get("st_gid") if gid == -1 else gid
+        if not ownership_changed:
+            return 0
+        repo, lib = self._rust_repo_and_lib()
+        if kind in {"file", "hardlink"} and file_id is not None:
+            current_mode = self.getattr(path).get("st_mode", 0)
+            if current_uid != 0 and ownership_changed:
+                current_mode &= ~stat.S_ISUID
+                current_mode &= ~stat.S_ISGID
+            mode_text = oct(current_mode)[2:]
+            status = lib.dbfs_rust_pg_repo_update_file_owner(
+                repo,
+                int(file_id),
+                int(new_uid),
+                int(new_gid),
+                mode_text.encode("utf-8"),
+                len(mode_text),
+            )
+            if status != 0:
+                raise FuseOSError(errno.EIO)
+        elif kind == "dir":
+            current_mode = self.getattr(path).get("st_mode", 0)
+            if current_uid != 0 and ownership_changed:
+                current_mode &= ~stat.S_ISUID
+            mode_text = oct(current_mode)[2:]
+            status = lib.dbfs_rust_pg_repo_update_directory_owner(
+                repo,
+                int(entry_id),
+                int(new_uid),
+                int(new_gid),
+                mode_text.encode("utf-8"),
+                len(mode_text),
+            )
+            if status != 0:
+                raise FuseOSError(errno.EIO)
+        elif kind == "symlink":
+            status = lib.dbfs_rust_pg_repo_update_symlink_owner(repo, int(entry_id), int(new_uid), int(new_gid))
+            if status != 0:
+                raise FuseOSError(errno.EIO)
+        with self.db_connection() as conn, conn.cursor() as cur:
             self.append_journal_event(cur, "chown", path, directory_id=parent_id)
             conn.commit()
         self.invalidate_metadata_cache(path, include_statfs=False)
@@ -1924,26 +1916,41 @@ class DBFS(Operations):
         now = time.time()
         atime, mtime = times if times else (now, now)
 
-        kind, entry_id = self.get_entry_kind_and_id(path)
-        file_id = self.get_file_id(path)
-        parent_id = self.get_dir_id(os.path.dirname(path))
+        kind, entry_id = self.repository.get_entry_kind_and_id(path)
+        file_id = self.repository.get_file_id(path)
+        parent_id = self.repository.get_dir_id(os.path.dirname(path))
         attrs = self.getattr(path)
         current_atime = attrs.get("st_atime")
         current_mtime = attrs.get("st_mtime")
         if current_atime == atime and current_mtime == mtime:
             return 0
 
+        atime_text = epoch_to_utc_datetime(atime).replace(tzinfo=None).isoformat(sep=" ")
+        mtime_text = epoch_to_utc_datetime(mtime).replace(tzinfo=None).isoformat(sep=" ")
+        repo, lib = self._rust_repo_and_lib()
+        if kind in {"file", "hardlink"} and file_id is not None:
+            status = lib.dbfs_rust_pg_repo_touch_file_times(
+                repo,
+                int(file_id),
+                atime_text.encode("utf-8"),
+                len(atime_text),
+                mtime_text.encode("utf-8"),
+                len(mtime_text),
+            )
+            if status != 0:
+                raise FuseOSError(errno.EIO)
+        elif kind == "dir":
+            status = lib.dbfs_rust_pg_repo_touch_directory_times(
+                repo,
+                int(entry_id),
+                atime_text.encode("utf-8"),
+                len(atime_text),
+                mtime_text.encode("utf-8"),
+                len(mtime_text),
+            )
+            if status != 0:
+                raise FuseOSError(errno.EIO)
         with self.db_connection() as conn, conn.cursor() as cur:
-            if kind in {"file", "hardlink"} and file_id is not None:
-                cur.execute("""
-                    UPDATE files SET access_date = %s, modification_date = %s, {file_ctime} = NOW()
-                    WHERE id_file = %s
-                """.format(file_ctime=self.ctime_column("files")), (epoch_to_utc_datetime(atime).replace(tzinfo=None), epoch_to_utc_datetime(mtime).replace(tzinfo=None), file_id))
-            elif kind == "dir":
-                cur.execute("""
-                    UPDATE directories SET access_date = %s, modification_date = %s, {dir_ctime} = NOW()
-                    WHERE id_directory = %s
-                """.format(dir_ctime=self.ctime_column("directories")), (epoch_to_utc_datetime(atime).replace(tzinfo=None), epoch_to_utc_datetime(mtime).replace(tzinfo=None), entry_id))
             self.append_journal_event(cur, "utimens", path, directory_id=parent_id)
             conn.commit()
         self.invalidate_metadata_cache(path, include_statfs=False)
@@ -1953,44 +1960,53 @@ class DBFS(Operations):
         cached_statfs = self._statfs_cache_get()
         if cached_statfs is not None:
             return cached_statfs
-        with self.db_connection() as conn, conn.cursor() as cur:
-            cur.execute("SELECT value FROM config WHERE key = 'block_size'")
-            block_size_result = cur.fetchone()
-            block_size = block_size_result[0] if block_size_result else self.default_block_size
+        repo, lib = self._rust_repo_and_lib()
+        block_size = int(self.get_config_value("block_size", self.default_block_size))
 
-            cur.execute("SELECT COUNT(*) FROM files")
-            file_count = cur.fetchone()[0]
+        out_file_count = ctypes.c_uint64()
+        out_dir_count = ctypes.c_uint64()
+        out_symlink_count = ctypes.c_uint64()
+        out_total_data_size = ctypes.c_uint64()
 
-            cur.execute("SELECT COUNT(*) FROM directories")
-            dir_count = cur.fetchone()[0]
+        status = lib.dbfs_rust_pg_repo_count_files(repo, ctypes.byref(out_file_count))
+        if status != 0:
+            raise FuseOSError(errno.EIO)
+        status = lib.dbfs_rust_pg_repo_count_directories(repo, ctypes.byref(out_dir_count))
+        if status != 0:
+            raise FuseOSError(errno.EIO)
+        status = lib.dbfs_rust_pg_repo_count_symlinks(repo, ctypes.byref(out_symlink_count))
+        if status != 0:
+            raise FuseOSError(errno.EIO)
+        status = lib.dbfs_rust_pg_repo_total_data_size(repo, ctypes.byref(out_total_data_size))
+        if status != 0:
+            raise FuseOSError(errno.EIO)
 
-            cur.execute("SELECT COUNT(*) FROM symlinks")
-            symlink_count = cur.fetchone()[0]
+        file_count = int(out_file_count.value)
+        dir_count = int(out_dir_count.value)
+        symlink_count = int(out_symlink_count.value)
+        total_data_size = int(out_total_data_size.value)
+        max_fs_size_bytes = self.resolve_max_fs_size_bytes()
 
-            cur.execute("SELECT COALESCE(SUM(LENGTH(data)), 0) FROM data_blocks")
-            total_data_size = cur.fetchone()[0]
-            max_fs_size_bytes = self.resolve_max_fs_size_bytes()
+        max_blocks = max_fs_size_bytes // block_size
+        used_blocks = (total_data_size + block_size - 1) // block_size if total_data_size else 0
+        free_blocks = max(0, max_blocks - used_blocks)
 
-            max_blocks = max_fs_size_bytes // block_size
-            used_blocks = (total_data_size + block_size - 1) // block_size
-            free_blocks = max(0, max_blocks - used_blocks)
-
-            inode_total = max(1000000, file_count + dir_count + symlink_count + 1024)
-            inode_free = max(0, inode_total - (file_count + dir_count + symlink_count))
-            result = {
-                "f_bsize": block_size,
-                "f_frsize": block_size,
-                "f_blocks": max_blocks,
-                "f_bfree": free_blocks,
-                "f_bavail": free_blocks,
-                "f_files": inode_total,
-                "f_ffree": inode_free,
-                "f_favail": inode_free,
-                "f_flag": 0,
-                "f_namemax": 255,
-            }
-            self._statfs_cache_set(result)
-            return result
+        inode_total = max(1000000, file_count + dir_count + symlink_count + 1024)
+        inode_free = max(0, inode_total - (file_count + dir_count + symlink_count))
+        result = {
+            "f_bsize": block_size,
+            "f_frsize": block_size,
+            "f_blocks": max_blocks,
+            "f_bfree": free_blocks,
+            "f_bavail": free_blocks,
+            "f_files": inode_total,
+            "f_ffree": inode_free,
+            "f_favail": inode_free,
+            "f_flag": 0,
+            "f_namemax": 255,
+        }
+        self._statfs_cache_set(result)
+        return result
 
 if __name__ == '__main__':
     os.environ.setdefault("DBFS_USE_FUSE_CONTEXT", "1")

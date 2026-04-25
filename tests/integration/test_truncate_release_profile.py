@@ -21,6 +21,15 @@ def profile_seconds(profile: dict, key: str) -> float:
     return float(stats.get("seconds", 0.0))
 
 
+def assert_count(profile: dict, key: str, expected: int) -> None:
+    stats = profile.get(key)
+    if stats is None:
+        raise AssertionError(f"missing profile activity for {key}")
+    actual = int(stats.get("count", 0))
+    if actual != expected:
+        raise AssertionError(f"unexpected profile count for {key}: expected={expected} actual={actual} stats={stats}")
+
+
 def main() -> None:
     dsn, db_config = load_dsn_from_config(ROOT)
     fs = DBFS(dsn, db_config)
@@ -53,6 +62,7 @@ def main() -> None:
         persist_seconds = profile_seconds(fs._io_profile, "persist_buffer")
         flush_seconds = profile_seconds(fs._io_profile, "flush")
         release_seconds = profile_seconds(fs._io_profile, "release")
+        assert_count(fs._io_profile, "release", 1)
         finalization_seconds = persist_seconds + flush_seconds + release_seconds
 
         print(

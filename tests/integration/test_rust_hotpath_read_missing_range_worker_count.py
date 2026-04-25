@@ -13,7 +13,8 @@ from dbfs_storage import StorageSupport
 
 def main() -> None:
     storage = StorageSupport(SimpleNamespace())
-    assert storage._load_rust_hotpath_lib() is not None, "expected built Rust hot-path library"
+    lib = storage._load_rust_hotpath_lib()
+    assert lib is not None, "expected built Rust hot-path library"
 
     cases = [
         ((1, 8, 10, 3), 1),
@@ -24,9 +25,8 @@ def main() -> None:
     ]
 
     for args, expected in cases:
-        result = storage.python_to_rust_hotpath_read_missing_range_worker_count(*args)
-        assert result is not None, args
-        assert result == expected, (args, result, expected)
+        result = lib.dbfs_read_missing_range_worker_count(*args)
+        assert int(result) == expected, (args, int(result), expected)
 
     print("OK rust-hotpath-read-missing-range-worker-count")
 
