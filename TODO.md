@@ -329,3 +329,61 @@ Status: active design direction, but the main decisions below are already taken.
 - the public roadmap lives in `ROADMAP.md`, and the current comparison baselines live in `BENCHMARKS.md`; keep both in sync with changes to CI or runtime tuning.
 - PostgreSQL-backed advisory locking is the supported production path for both `flock` and `fcntl` range locks; crash-recovery/TTL-expiry coverage is in place, and the remaining work is mostly operational hardening plus any edge-case cleanup.
 - For Linux VFS, the main priority now is to keep metadata, permission checks, `statfs`, and the repository/FUSE boundary sane and consistent.
+
+
+------->>2026.04.25 18:45<<----------------
+
+Goal:
+Add a mechanism for detecting identical regular files that may have different names and may be located in different directories, but have the same file size and the same content hash. In such cases, DBFS should be able to reuse the same stored data object instead of storing duplicate content.
+
+Scope:
+- Applies only to regular files.
+- File identity for deduplication should be based on:
+  - file size,
+  - full content hash.
+- Preferred final hash: SHA256 or BLAKE3.
+- A fast hash may be used only as a preliminary filter.
+- In safe mode, DBFS may additionally verify equality by byte-by-byte comparison.
+- Different paths and filenames may reference the same stored data object.
+- Removing one path must not remove the shared data while other references still exist.
+- Modifying one file that shares data must either:
+  - use copy-on-write, or
+  - follow explicit hardlink semantics, depending on the selected DBFS mode.
+
+Preferred implementation model:
+- Do not automatically create true POSIX hardlinks at the inode/file_id level.
+- Start with data-object deduplication instead:
+
+  path_a -> file_id_a -> data_object_id_x
+  path_b -> file_id_b -> data_object_id_x
+
+- When one of the files is modified, DBFS should detach it from the shared data_object_id and create a new data object.
+
+Design tasks:
+- Review the current DBFS metadata model.
+- Identify where file_id/inode metadata is stored.
+- Identify where chunks/blocks are stored.
+- Add or design a data_objects/content_objects table.
+- Store file_size, content_hash, reference_count, and data object metadata.
+- Decide when the content hash is calculated:
+  - on file release,
+  - on flush,
+  - after completed import,
+  - or during a dedicated dedupe scan.
+- Add protection against deduplicating files that are still open for writing.
+- Add protection against deduplicating incomplete temporary files.
+- Consider a dedicated command or maintenance mode:
+
+  dbfs dedupe scan
+
+Notes:
+- File size alone is not sufficient.
+- Weak checksums such as CRC32 should not be used as the final identity check.
+- The minimum safe practical identity key should be:
+
+  file_size + strong_content_hash
+
+- Automatic deduplication should prefer copy-on-write semantics.
+- True hardlink behavior should remain an explicit operation handled by link().
+
+------->>2026.04.25 18:45<<----------------

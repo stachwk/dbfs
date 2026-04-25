@@ -8,6 +8,7 @@ import logging
 import os
 import uuid
 import select
+import sys
 import struct
 import stat
 import time
@@ -1433,6 +1434,18 @@ class DBFS(Operations):
         self.persist_buffer(file_id)
 
     def getxattr(self, path, name, position=0):
+        acl_enabled = bool(getattr(self, "acl_enabled", False))
+        selinux_enabled = bool(getattr(self, "selinux_enabled", False))
+
+        if name == "security.capability":
+            raise FuseOSError(errno.ENODATA)
+
+        if not selinux_enabled and name == "security.selinux":
+            raise FuseOSError(errno.ENODATA)
+
+        if not acl_enabled and name in ("system.posix_acl_access", "system.posix_acl_default"):
+            raise FuseOSError(errno.EOPNOTSUPP)
+
         path = self.normalize_path(path)
         xattr_name = self.normalize_xattr_name(name)
         entry_kind, _ = self.get_entry_kind_and_id(path)
@@ -1445,6 +1458,7 @@ class DBFS(Operations):
         value = self.fetch_xattr_value(path, xattr_name)
         if value is None:
             raise FuseOSError(errno.ENODATA)
+
         return value
 
     def setxattr(self, path, name, value, options, position=0):
@@ -1813,6 +1827,8 @@ class DBFS(Operations):
         return 0
 
     def lock(self, path, fh, cmd, lock):
+        print(f"stderr: lock enter path={path} fh={fh} cmd={cmd} lock={lock}", file=sys.stderr)
+        sys.stderr.flush()
         return self.locking.lock(path, fh, cmd, lock)
 
     def flock(self, path, fh, op):
