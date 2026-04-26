@@ -1,0 +1,10 @@
+prefix=/usr
+exec_prefix=${prefix}
+libdir=/lib/x86_64-linux-gnu
+includedir=/usr/include/fuse3
+
+Name: fuse3
+Description: FUSE 3 library
+Version: 3.14.0
+Libs: -L${libdir} -lfuse3
+Cflags: -I${includedir}

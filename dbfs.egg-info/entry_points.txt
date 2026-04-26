@@ -1,3 +1,0 @@
-[console_scripts]
-dbfs-bootstrap = dbfs_bootstrap:main
-mkfs.dbfs = dbfs_mkfs:main

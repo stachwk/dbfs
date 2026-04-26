@@ -1,2 +1,0 @@
-fusepy
-psycopg2-binary

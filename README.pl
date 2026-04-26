@@ -18,17 +18,17 @@ Projekt skupia się na:
 - Odczyty korzystają teraz z blokowego ładowania z małym cache i read-ahead zamiast pełnego ładowania pliku przy każdym dostępie.
 - Test porównujący uprawnienia jest świadomie local-filesystem-vs-DBFS, a nie tylko ext4-vs-DBFS; porównuje hostowy zapisywalny local filesystem z DBFS i sprawdza zgodność semantyki dla mode, ownership, access checków, sticky-bit unlink/rmdir oraz plików należących do root.
 - Widoczność `allow_other` zależy od hosta: dedykowany test robi skip, jeśli host nie wystawia mounta dla `nobody`, więc jest to test diagnostyczny, a nie uniwersalna gwarancja pass/fail.
-- Warstwa lookup/namespace została wydzielona do `dbfs_namespace.py`, a logika repository jest teraz w `mod/repository/` jako wrapper oraz `lookup.py`, `attrs_listing.py`, `create.py`, `delete.py` i `mutations.py`, więc główny moduł FUSE nie trzyma już bezpośrednio logiki rozwiązywania ścieżek, ID ani CRUD dla namespace. Rozwiązywanie katalogów używa teraz cache'owanych rekursywnych CTE, a rozwiązywanie wpisów jest zebrane tak, by zmniejszyć liczbę round-tripów do namespace.
-- Warstwa metadanych/zapytań oraz krótkie cache TTL zostały wydzielone do `dbfs_metadata.py`, logika dopisywania do journala żyje teraz bezpośrednio w `dbfs_fuse.py` i Rust, polityka uprawnień/własności została wydzielona do `dbfs_permissions.py`, a walidacja mount/runtime żyje teraz w `dbfs_runtime_validation.py`, więc główny moduł FUSE nie trzyma już bezpośrednio tych warstw helperów.
+- Runtime jest teraz w całości oparty o Rust: frontend mounta żyje w `rust_fuse`, a bootstrap/schemat/mkfs w `rust_mkfs`.
+- Lookup, CRUD namespace, metadane, permissions, xattr, locking, storage i journal handling żyją już w Rust zamiast w Pythonowych helperach.
 - SELinux działa jako xattr z runtime gating; pełna polityka mount-label jest celowo poza zakresem.
 - PostgreSQL TLS jest opcjonalny i konfigurowalny; DBFS może też wygenerować lokalną parę certyfikat/klucz na żądanie.
 - Przejściowe zerwania połączenia PostgreSQL w gorącej ścieżce odczytu/zapisu są ponawiane raz, z zachowaniem stanu po stronie procesu klienta, więc aktywny dirty write state i cache odczytu mogą przetrwać próbę reconnect.
 - Migracja lock managera już się dokonała: PostgreSQL-backed leases są produkcyjną ścieżką dla zarówno `flock`, jak i range-locków `fcntl`, z TTL i heartbeat. `make test-locking` pozostaje zestawem semantyki locków, a `make test-pg-lock-manager` pokrywa produkcyjny backend PostgreSQL, w tym regresję dla dwóch klientów piszących do tego samego pliku, która pokazuje że DBFS nie pozwala im rozjechać zapisów chronionych lockiem.
 - `make test-pg-lock-manager` pokrywa produkcyjny backend locków oparty o PostgreSQL, w tym regresję dla dwóch klientów piszących do tego samego pliku, która pokazuje że DBFS nie pozwala im rozjechać zapisów chronionych lockiem.
-- Zmiany schematu żyją teraz w `migrations/` z sekwencyjnymi wersjami, jawnym eksportem `mkfs.dbfs.py status` i ścieżką upgrade ze starszych stanów schematu.
-- Obecna wersja DBFS jest zdefiniowna w dbfs_version.py, a `dbfs_bootstrap.py --version` i `mkfs.dbfs.py --version` wypisują tę samą wartość.
+- Zmiany schematu żyją teraz w `migrations/` z sekwencyjnymi wersjami, jawnym eksportem `mkfs.dbfs status` i ścieżką upgrade ze starszych stanów schematu.
+- Obecna wersja DBFS jest zdefiniowana w pomocniczym binarium Rust `dbfs-config`, a `dbfs-bootstrap --version` i `mkfs.dbfs --version` wypisują tę samą wartość.
 - Prace nad wydajnością są już w kodzie, a aktualne baseline'y benchmarków są zapisane w `BENCHMARKS.md`.
-- Rustowy hot-path działa teraz głównie przez `libdbfs-2.so` i obejmuje planner, changed-run packing, padding bloków, składanie odczytu, logical resize planner dla `truncate()`/`fallocate()` oraz pierwsze lookupi/mutacje repo. Changed-copy dedupe zostaje opt-in, bo potrafi zauważalnie spowolnić workloady kopiujące. Repo nie instaluje już osobnych helper-binarek w normalnym flow; współdzielona biblioteka jest główną ścieżką hot-path.
+- Rustowy hot-path działa teraz w natywnym backendzie i współdzielonej bibliotece hot-path. Obejmuje planner, changed-run packing, padding bloków, składanie odczytu, logical resize planner dla `truncate()`/`fallocate()` oraz pierwsze lookupi/mutacje repo. Changed-copy dedupe zostaje opt-in, bo potrafi zauważalnie spowolnić workloady kopiujące.
 - Lokalny stack Docker Compose preloaduje `pg_stat_statements`, więc analiza zapytań i profilowanie runtime mogą korzystać z trwałych statystyk PostgreSQL.
 - `TODO.md` służy teraz jako log decyzji i notatek, a nie aktywny backlog implementacyjny.
 
@@ -66,9 +66,7 @@ Licencja: MIT
 
 ## Wymagania
 
-- Python 3
-- `fusepy` (`pip install fusepy`)
-- `psycopg2` albo `psycopg2-binary`
+- Rust toolchain (`cargo`)
 - PostgreSQL
 - wsparcie FUSE na hoście
 - `openssl`, jeśli DBFS ma automatycznie generować parę certyfikat/klucz TLS dla PostgreSQL
@@ -78,8 +76,7 @@ Licencja: MIT
 DBFS można zainstalować do virtualenv przez pip:
 
 ```bash
-make venv
-make pip-install-editable
+make install-on-root
 ```
 
 To instaluje skrypty projektu do aktywnego venv:
@@ -88,8 +85,7 @@ To instaluje skrypty projektu do aktywnego venv:
 - `mkfs.dbfs`
 - `mount.dbfs`
 
-W katalogu źródłowym nadal zostają bezpośrednie skrypty `dbfs_bootstrap.py` i `mkfs.dbfs.py`; pakiet pip instaluje krótsze nazwy poleceń powyżej. Jeśli chcesz instalację bez trybu editable, użyj `make pip-install`. Editable działa przez `make pip-install-editable`, jeśli venv widzi `setuptools`. Metadane pakietu są w `setup.py`.
-Zainstalowany `mount.dbfs` najpierw wybiera `.venv/bin/dbfs-bootstrap` z bieżącego projektu, potem `dbfs-bootstrap` z `PATH`. Jeśli `DBFS_CONFIG` nie jest ustawione, a w bieżącym katalogu istnieje lokalny `./dbfs_config.ini`, wrapper eksportuje go automatycznie. Jeśli nie znajdzie żadnego poprawnego bootstrappera ani sensownego pliku konfiguracyjnego, kończy się jasnym komunikatem zamiast zgadywać interpreter Pythona.
+W drzewie źródłowym nie ma już Pythonowych launcherów runtime. DBFS dostarcza bezpośrednio binaria Rust: `dbfs-bootstrap`, `dbfs-config` i `mkfs.dbfs`. Zainstalowany `mount.dbfs` najpierw wybiera `rust_mkfs/target/debug/dbfs-bootstrap` z bieżącego projektu, potem `dbfs-bootstrap` z `PATH`. Jeśli `DBFS_CONFIG` nie jest ustawione, a w bieżącym katalogu istnieje lokalny `./dbfs_config.ini`, wrapper eksportuje go automatycznie. Jeśli nie znajdzie żadnego poprawnego bootstrappera ani sensownego pliku konfiguracyjnego, kończy się jasnym komunikatem zamiast zgadywać interpreter Pythona.
 
 Przykład:
 
@@ -188,13 +184,13 @@ Jeżeli uruchamiasz DBFS pierwszy raz, zrób to w takiej kolejności:
 1. Utwórz schemat:
 
    ```bash
-   python3 mkfs.dbfs.py init
+   mkfs.dbfs init
    ```
 
 1. Zamontuj filesystem:
 
    ```bash
-   python3 dbfs_bootstrap.py -f /ścieżka/do/mountpointu
+   dbfs-bootstrap -f /ścieżka/do/mountpointu
    ```
 
 1. Zapisz plik do montażu, odczytaj go ponownie i sprawdź, czy dane przeżywają ponowne zamontowanie.
@@ -221,7 +217,7 @@ make install-config-user
 make mount-user
 ```
 
-`make install-on-root` łączy `install-config`, `pip-install`, `install-root-scripts`, `install-rust-hotpath` i `install-mount-helper` w jeden krok dla instalacji typu root-style. To instaluje config, pakiet, `libdbfs-2.so`, polecenia `dbfs-bootstrap`/`mkfs.dbfs` oraz helper mounta.
+`make install-on-root` łączy `install-config`, `install-root-scripts`, `install-rust-hotpath` i `install-mount-helper` w jeden krok dla instalacji typu root-style. To instaluje config, Rustowe binarki, współdzieloną bibliotekę hot-path oraz helper mounta.
 
 `make install-on-root-venv` to odpowiednik `make venv` + `make install-on-root`.
 
@@ -229,31 +225,31 @@ make mount-user
 
 1. Skonfiguruj `/etc/dbfs/dbfs_config.ini` albo lokalny `dbfs_config.ini`.
 1. Opcjonalnie uruchom `make install-config`, żeby skopiować `dbfs_config.ini` do `/etc/dbfs/dbfs_config.ini`.
-1. Dla instalacji typu root-style uruchom `make install-on-root`, żeby zainstalować config, pakiet pip, `libdbfs-2.so` i helper mounta jednym krokiem.
+1. Dla instalacji typu root-style uruchom `make install-on-root`, żeby zainstalować config, Rustowe binarki, współdzieloną bibliotekę hot-path i helper mounta jednym krokiem.
 1. Dla lokalnego developmentu możesz uruchomić `make install-config-user`, żeby zainstalować `dbfs_config.ini` do `~/.config/dbfs/dbfs_config.ini` bez `sudo`.
 1. `make config-show` pokazuje, którego pliku konfiguracyjnego DBFS użyje, a `make mount-user` wymusza user-level `~/.config/dbfs/dbfs_config.ini`.
 1. Zainicjalizuj schemat:
 
    ```bash
-   python3 mkfs.dbfs.py init
+   mkfs.dbfs init
    ```
 
    Jeśli chcesz, żeby DBFS wygenerował lokalną parę certyfikat/klucz TLS PostgreSQL podczas tworzenia schematu, użyj:
 
    ```bash
-   python3 mkfs.dbfs.py init --generate-client-tls-pair 1
+   mkfs.dbfs init --generate-client-tls-pair 1
    ```
 
    Ta sama opcja działa też z `upgrade`:
 
    ```bash
-   python3 mkfs.dbfs.py upgrade --generate-client-tls-pair 1
+   mkfs.dbfs upgrade --generate-client-tls-pair 1
    ```
 
 1. Zamontuj filesystem:
 
    ```bash
-   python3 dbfs_bootstrap.py -f /ścieżka/do/mountpointu
+   dbfs-bootstrap -f /ścieżka/do/mountpointu
    ```
 
 ## Obsługiwane parametry
@@ -328,9 +324,9 @@ Może też zawierać sekcję `[dbfs]` z:
 
 ### Narzędzie do tworzenia schematu
 
-`mkfs.dbfs.py` obsługuje:
+`mkfs.dbfs` obsługuje:
 
-`init` jest idempotentne i nie usuwa `public`; `upgrade` odtwarza brakujące obiekty DBFS i przywraca `schema_version`; `clean` to jedyna destrukcyjna operacja narzędzia schematu, a po usunięciu publicznego schematu DBFS staje się no-opem. Narzędzie schematu używa jednego jawnego źródła hasła administracyjnego schematu: `--schema-admin-password`. Jeśli hasła brakuje, `init`, `upgrade` i `clean` kończą się natychmiast, bez promptu i bez ukrytej generacji sekretu. `mkfs.dbfs.py status` pokazuje tylko, czy sekret administracyjny schematu jest obecny i czy DBFS jest gotowy, bez ujawniania samego sekretu.
+`init` jest idempotentne i nie usuwa `public`; `upgrade` odtwarza brakujące obiekty DBFS i przywraca `schema_version`; `clean` to jedyna destrukcyjna operacja narzędzia schematu, a po usunięciu publicznego schematu DBFS staje się no-opem. Narzędzie schematu używa jednego jawnego źródła hasła administracyjnego schematu: `--schema-admin-password`. Jeśli hasła brakuje, `init`, `upgrade` i `clean` kończą się natychmiast, bez promptu i bez ukrytej generacji sekretu. `mkfs.dbfs status` pokazuje tylko, czy sekret administracyjny schematu jest obecny i czy DBFS jest gotowy, bez ujawniania samego sekretu.
 
 | Parametr | Typ | Domyślnie | Efekt |
 | --- | --- | --- | --- |
@@ -502,7 +498,7 @@ Jeśli potrzebujesz `allow_other`, uruchom mount z `DBFS_ALLOW_OTHER=1`, ale tyl
 W `/etc/dbfs/dbfs_config.ini` można też dodać sekcję `[dbfs]` z `pool_max_connections = N`, żeby ograniczyć liczbę połączeń PostgreSQL, które może otworzyć pula DBFS. Ta sama sekcja może także ustawiać domyślne parametry storage/read, takie jak `write_flush_threshold_bytes`, `max_fs_size_bytes`, `read_cache_blocks`, `read_ahead_blocks`, `sequential_read_ahead_blocks`, `small_file_read_threshold_blocks`, `metadata_cache_ttl_seconds` i `statfs_cache_ttl_seconds`. `max_fs_size_bytes` przyjmuje zwykłe bajty albo binarne rozmiary typu `50GiB` czy `1TiB`, a `pg_visible_path` pozwala wskazać ścieżkę, którą PostgreSQL faktycznie widzi na dysku, żeby `statfs()` mógł ograniczyć raportowany rozmiar do rzeczywistego. Jeśli tego pliku nie ma, DBFS użyje `dbfs_config.ini` z katalogu projektu.
 Ta sama sekcja może też ustawiać parametry wielowątkowości dla większych odczytów i kopiowania, takie jak `workers_read`, `workers_read_min_blocks`, `workers_write` i `workers_write_min_blocks`, oraz `persist_buffer_chunk_blocks`, które decyduje o wielkości paczek `execute_values()` podczas flushu. `workers_read` jest używane tylko wtedy, gdy brakujące bloki w odczycie dzielą się na kilka rozłącznych zakresów, a `workers_write` tylko wtedy, gdy kopiowanie można podzielić na kilka segmentów źródłowych. `block_size` nadal ma znaczenie, bo heurystyki workerów działają na blokach, a nie na surowych bajtach, więc mniejszy albo większy blok zmienia moment, w którym wielowątkowość zaczyna mieć sens, ale nie oznacza automatycznie "4 KiB = jeden wątek". Dla powtarzanych kopii typu rsync można też włączyć `copy_dedupe_enabled`, żeby porównywać bloki docelowe i pomijać niezmienione zakresy podczas `copy_file_range()`; `copy_dedupe_min_blocks` jest dolną bramką, `copy_dedupe_max_blocks` opcjonalnym górnym limitem dla bardzo dużych plików, a `copy_dedupe_crc_table` może przy tym utrzymywać tabelę CRC w PostgreSQL i uzupełniać ją lazy podczas porównań. Knoby dedupe zostają domyślnie wyłączone, jeśli nie wiesz, że workload faktycznie na tym korzysta, a `rust_hotpath_copy_dedupe` zostaje wyłączony, dopóki nie włączysz go jawnie. Może też ustawiać `synchronous_commit`, żeby sterować trwałością sesji PostgreSQL dla każdego połączenia; dozwolone wartości to `on`, `off`, `local`, `remote_write` i `remote_apply`.
 Jeśli chcesz gotowy preset produkcyjny, ustaw `DBFS_PROFILE=bulk_write`, `DBFS_PROFILE=metadata_heavy` albo `DBFS_PROFILE=pg_locking` przed mountem. Wybrany profil nadpisuje bazowe wartości z `[dbfs]` w `dbfs_config.ini`.
-Profil możesz też podać jawnie jako `--profile bulk_write` do `dbfs_bootstrap.py` / `dbfs-bootstrap` albo jako `-o profile=bulk_write` do `mount.dbfs`.
+Profil możesz też podać jawnie jako `--profile bulk_write` do `dbfs-bootstrap` albo jako `-o profile=bulk_write` do `mount.dbfs`.
 Ta sama zmienna `DBFS_PROFILE` działa też z `make mount`, `make mount-user` i `make demo`.
 Na primary DBFS używa backendu locków PostgreSQL lease, a na replice przełącza się na backend pamięciowy, bo mount i tak jest tylko do odczytu.
 
@@ -516,7 +512,7 @@ Przy starcie DBFS loguje efektywny profil runtime, wersję schematu, ustawienia 
 `statfs_cache_ttl_seconds` steruje krótkim cache TTL dla `statfs()`. Domyślna wartość to `2` sekundy.
 `DBFS_METADATA_CACHE_TTL_SECONDS` i `DBFS_STATFS_CACHE_TTL_SECONDS` nadpisują odpowiednie wartości z `dbfs_config.ini`, jeśli chcesz stroić te cache per środowisko.
 `DBFS_PROFILE` wybiera nazwany profil runtime z `dbfs_config.ini`, na przykład `bulk_write` albo `metadata_heavy`.
-`DBFS_ATIME_POLICY` jest wewnętrznym przełącznikiem DBFS, a nie surową opcją mounta FUSE. Steruje tym, kiedy DBFS aktualizuje `atime` w swoim własnym read path; `noatime`, `nodiratime`, `relatime` i `strictatime` są obsługiwane wewnętrznie i nie są przekazywane do `fusepy`.
+`DBFS_ATIME_POLICY` jest wewnętrznym przełącznikiem DBFS, a nie surową opcją mounta FUSE. Steruje tym, kiedy DBFS aktualizuje `atime` w swoim własnym read path; `noatime`, `nodiratime`, `relatime` i `strictatime` są obsługiwane wewnętrznie i nie są przekazywane do frontendu mounta.
 Dla jednego uchwytu DBFS zapisuje `access_date` tylko raz, aby nie przepisywać ciągle tego samego rekordu podczas pojedynczej sekwencji open/read lub open/readdir. Kolejne dotknięcia są pomijane aż do zwolnienia uchwytu.
 Ten sam model dotyczy też zapisu `mtime`/`ctime`: wiele zapisów na tym samym otwartym pliku aktualizuje te znaczniki dopiero przy persystencji dirty bufora, a nie przy każdym pośrednim wywołaniu `write()`.
 Cache odczytu domyślnie ma większy blokowy LRU, a sekwencyjne odczyty automatycznie zwiększają read-ahead, dzięki czemu sąsiednie odczyty częściej trafiają w prefetche zamiast ponownie walić w PostgreSQL.
@@ -545,14 +541,14 @@ Opcje widoczne w mount:
 - To zachowanie jest celowe: w tym repo pełna polityka mount-label jest poza zakresem, a zachowanie SELinux opiera się na host policy plus przechowywaniu xattr.
 - `mknod` tworzy FIFO i char device metadata; `st_rdev` i `st_dev` są raportowane, ale `open` dla special node'ów nadal jest unsupported.
 - `system.posix_acl_*` działa dla access ACL i default ACL inheritance; backend zapisuje, propaguje i egzekwuje ACL.
-- `poll` działa jako backend helper dla zwykłych plików; natywny hook FUSE nadal zależy od możliwości `fusepy`.
+- `poll` działa przez Rustowy frontend mounta dla zwykłych plików.
 
 ## Troubleshooting
 
-- Zacznij od `mkfs.dbfs.py status`, żeby zobaczyć, czy sekret administracyjny schematu jest obecny i czy DBFS jest gotowy.
-- Jeśli `mkfs.dbfs.py init` kończy się błędem, sprawdź czy PostgreSQL działa i czy dane w `dbfs_config.ini` zgadzają się z serwerem.
-- Jeśli montowanie kończy się `DBFS schema is not initialized`, uruchom najpierw `make init`; dla operacji `mkfs.dbfs.py` zawsze podawaj `--schema-admin-password`.
-- Jeśli montowanie kończy się `DBFS schema version mismatch`, uruchom `mkfs.dbfs.py upgrade` z sekretem administracyjnym schematu, żeby wersja schematu zgadzała się z kodem.
+- Zacznij od `mkfs.dbfs status`, żeby zobaczyć, czy sekret administracyjny schematu jest obecny i czy DBFS jest gotowy.
+- Jeśli `mkfs.dbfs init` kończy się błędem, sprawdź czy PostgreSQL działa i czy dane w `dbfs_config.ini` zgadzają się z serwerem.
+- Jeśli montowanie kończy się `DBFS schema is not initialized`, uruchom najpierw `make init`; dla operacji `mkfs.dbfs` zawsze podawaj `--schema-admin-password`.
+- Jeśli montowanie kończy się `DBFS schema version mismatch`, uruchom `mkfs.dbfs upgrade` z sekretem administracyjnym schematu, żeby wersja schematu zgadzała się z kodem.
 - Przy udanym starcie mounta DBFS loguje `DBFS schema version=<db> expected=<code>`, więc możesz od razu potwierdzić zgodność wersji przed użyciem mounta.
 - Jeśli montowanie kończy się `ENOTCONN` albo błędem połączenia, uruchom najpierw `make smoke`, żeby potwierdzić łączność z bazą.
 - Jeśli brakuje `fusermount3`, spróbuj `fusermount` albo doinstaluj narzędzia userspace FUSE dla swojej dystrybucji.
@@ -591,4 +587,4 @@ DBFS pozostaje teraz celowo jako Pythonowy frontend FUSE:
 
 - Python odpowiada za bootstrap, `mkfs`, ładowanie configów i profili, callbacki FUSE, logikę administracyjną, migracje schematu, testy integracyjne oraz warstwy polityk typu ACL/permissions/journal/runtime validation.
 - Rust jest najbardziej prawdopodobnym długoterminowym silnikiem hot-path dla składania bloków, write overlay, segmentacji copy i przygotowania persist, jeśli i kiedy ten kod zostanie wyjęty z Pythona.
-- Cel to cieńszy `dbfs_fuse.py`, więcej delegacji do osobnych modułów i przyszły natywny core tylko tam, gdzie benchmarki pokażą realny zysk.
+- Cel to cieńszy Rustowy frontend mounta i Rustowy core storage, z Pythonem ograniczonym do dokumentacji i testów tam, gdzie jeszcze jest potrzebny.

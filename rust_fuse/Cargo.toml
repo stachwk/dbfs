@@ -1,0 +1,12 @@
+[package]
+name = "dbfs-rust-fuse"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+clap = { version = "4", features = ["derive"] }
+fuser = { version = "0.14", features = ["abi-7-11", "abi-7-17"] }
+libc = "0.2"
+rust_hotpath = { package = "dbfs-rust-hotpath", path = "../rust_hotpath" }

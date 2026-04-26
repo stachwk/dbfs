@@ -1,78 +1,80 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import os
 import sys
+import tempfile
 import uuid
+from pathlib import Path
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if ROOT not in sys.path:
-    sys.path.insert(0, ROOT)
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-from dbfs_fuse import DBFS, load_dsn_from_config
+from tests.integration.dbfs_mount import DBFSMount
 
 
 def main():
-    dsn, db_config = load_dsn_from_config(ROOT)
     suffix = uuid.uuid4().hex[:8]
-    dir_path = f"/inode_{suffix}"
-    file_path = f"{dir_path}/payload.txt"
-    hardlink_path = f"{dir_path}/payload-hard.txt"
-    symlink_path = f"{dir_path}/payload-link.txt"
+    dir_name = f"inode_{suffix}"
+    file_name = f"payload.txt"
+    hardlink_name = f"payload-hard.txt"
+    symlink_name = f"payload-link.txt"
     payload = b"inode-model\n"
 
-    fs = DBFS(dsn, db_config)
-    try:
-        fs.mkdir(dir_path, 0o755)
-        fh = fs.create(file_path, 0o644)
-        fs.write(file_path, payload, 0, fh)
-        fs.flush(file_path, fh)
-        fs.release(file_path, fh)
-        fs.link(hardlink_path, file_path)
-        fs.symlink(symlink_path, file_path)
+    launcher = DBFSMount(str(ROOT))
+    launcher.init_schema()
 
-        snapshot = {
-            "dir": fs.getattr(dir_path)["st_ino"],
-            "file": fs.getattr(file_path)["st_ino"],
-            "hardlink": fs.getattr(hardlink_path)["st_ino"],
-            "symlink": fs.getattr(symlink_path)["st_ino"],
-        }
-        assert snapshot["file"] == snapshot["hardlink"], snapshot
-
-        fs.connection_pool.closeall()
-
-        fs2 = DBFS(dsn, db_config)
+    with tempfile.TemporaryDirectory(prefix=f"/tmp/dbfs-inode-{suffix}.") as tmpdir:
+        mountpoint = Path(tmpdir)
+        launcher.start(str(mountpoint))
         try:
-            assert fs2.getattr(dir_path)["st_ino"] == snapshot["dir"], snapshot
-            assert fs2.getattr(file_path)["st_ino"] == snapshot["file"], snapshot
-            assert fs2.getattr(hardlink_path)["st_ino"] == snapshot["hardlink"], snapshot
-            assert fs2.getattr(symlink_path)["st_ino"] == snapshot["symlink"], snapshot
-            print("OK inode/model")
+            dir_path = mountpoint / dir_name
+            file_path = dir_path / file_name
+            hardlink_path = dir_path / hardlink_name
+            symlink_path = dir_path / symlink_name
+
+            dir_path.mkdir()
+            file_path.write_bytes(payload)
+            os.link(file_path, hardlink_path)
+            os.symlink(file_path.name, symlink_path)
+
+            snapshot = {
+                "dir": dir_path.stat().st_ino,
+                "file": file_path.stat().st_ino,
+                "hardlink": hardlink_path.stat().st_ino,
+                "symlink": symlink_path.stat().st_ino,
+            }
+            assert snapshot["file"] == snapshot["hardlink"], snapshot
+
+            launcher.stop()
+            launcher.start(str(mountpoint))
+            try:
+                assert dir_path.stat().st_ino == snapshot["dir"], snapshot
+                assert file_path.stat().st_ino == snapshot["file"], snapshot
+                assert hardlink_path.stat().st_ino == snapshot["hardlink"], snapshot
+                assert symlink_path.stat().st_ino == snapshot["symlink"], snapshot
+                print("OK inode/model")
+            finally:
+                launcher.stop()
         finally:
             try:
-                fs2.unlink(hardlink_path)
+                hardlink_path.unlink()
             except Exception:
                 pass
             try:
-                fs2.unlink(symlink_path)
+                symlink_path.unlink()
             except Exception:
                 pass
             try:
-                fs2.unlink(file_path)
+                file_path.unlink()
             except Exception:
                 pass
             try:
-                fs2.rmdir(dir_path)
+                dir_path.rmdir()
             except Exception:
                 pass
-            try:
-                fs2.connection_pool.closeall()
-            except Exception:
-                pass
-    finally:
-        try:
-            fs.connection_pool.closeall()
-        except Exception:
-            pass
 
 
 if __name__ == "__main__":

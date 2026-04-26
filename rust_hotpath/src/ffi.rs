@@ -2610,6 +2610,26 @@ pub extern "C" fn dbfs_rust_pg_repo_touch_directory_times(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn dbfs_rust_pg_repo_touch_directory_entry(
+    repo_ptr: *mut DbfsPgRepo,
+    directory_id: u64,
+) -> i32 {
+    let result = panic::catch_unwind(|| unsafe {
+        if repo_ptr.is_null() {
+            return 1;
+        }
+        match (*repo_ptr).repo.touch_directory_entry(directory_id) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        }
+    });
+    match result {
+        Ok(status) => status,
+        Err(_) => 2,
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn dbfs_rust_pg_repo_update_file_access_date(
     repo_ptr: *mut DbfsPgRepo,
     file_id: u64,

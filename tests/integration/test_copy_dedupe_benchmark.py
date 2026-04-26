@@ -59,8 +59,11 @@ def _copy_and_profile(fs, src_path, dst_path, src_len, dedupe_enabled):
 
     dst_fh = fs.open(dst_path, os.O_WRONLY)
     try:
+        src_file_id = fs.repository.get_file_id(src_path)
+        dst_file_id = fs.file_id_for_handle(dst_fh)
+        assert src_file_id is not None and dst_file_id is not None
         start = time.perf_counter()
-        copied = fs.copy_file_range(src_path, None, 0, dst_path, dst_fh, 0, src_len, 0)
+        copied = fs.storage.copy_file_range_into_state(src_file_id, dst_file_id, 0, 0, src_len)
         if copied != src_len:
             raise AssertionError((copied, src_len))
         fs.flush(dst_path, dst_fh)

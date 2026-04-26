@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import select
 import sys
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -12,55 +13,55 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from dbfs_fuse import DBFS, load_dsn_from_config
+from tests.integration.dbfs_mount import DBFSMount
 
 
 def main() -> None:
-    dsn, db_config = load_dsn_from_config(ROOT)
-    fs = DBFS(dsn, db_config)
+    launcher = DBFSMount(str(ROOT))
+    launcher.init_schema()
 
     suffix = uuid.uuid4().hex[:8]
-    dir_path = f"/poll_{suffix}"
-    file_path = f"{dir_path}/payload.txt"
-    payload = b"poll payload"
+    with tempfile.TemporaryDirectory(prefix=f"/tmp/dbfs-poll-{suffix}.") as tmpdir:
+        mountpoint = Path(tmpdir)
+        replica_mountpoint = Path(tempfile.mkdtemp(prefix=f"/tmp/dbfs-poll-replica-{suffix}."))
+        launcher.start(str(mountpoint))
+        replica = DBFSMount(str(ROOT), role="replica")
+        replica.start(str(replica_mountpoint))
+        try:
+            dir_path = mountpoint / f"poll_{suffix}"
+            file_path = dir_path / "payload.txt"
+            payload = b"poll payload"
 
-    fh = None
-    try:
-        fs.mkdir(dir_path, 0o755)
-        fh = fs.create(file_path, 0o644)
-        fs.write(file_path, payload, 0, fh)
-        fs.flush(file_path, fh)
+            dir_path.mkdir()
+            file_path.write_bytes(payload)
 
-        mask = fs.poll(file_path, fh, select.POLLIN | select.POLLOUT)
-        assert mask & select.POLLIN, mask
-        assert mask & select.POLLOUT, mask
-
-        replica_fs = DBFS(dsn, db_config, role="replica")
-        replica_fh = replica_fs.open(file_path, os.O_RDONLY)
-        replica_mask = replica_fs.poll(file_path, replica_fh, select.POLLIN | select.POLLOUT)
-        assert replica_mask & select.POLLIN, replica_mask
-        assert not (replica_mask & select.POLLOUT), replica_mask
-        replica_fs.release(file_path, replica_fh)
-
-        print("OK poll/backend")
-    finally:
-        if fh is not None:
+            fd = os.open(file_path, os.O_RDWR)
             try:
-                fs.release(file_path, fh)
-            except Exception:
-                pass
-        try:
-            fs.unlink(file_path)
-        except Exception:
-            pass
-        try:
-            fs.rmdir(dir_path)
-        except Exception:
-            pass
-        try:
-            fs.cleanup_resources()
-        except Exception:
-            pass
+                poller = select.poll()
+                poller.register(fd, select.POLLIN | select.POLLOUT)
+                events = dict(poller.poll(0))
+                mask = events.get(fd, 0)
+                assert mask & select.POLLIN, mask
+                assert mask & select.POLLOUT, mask
+            finally:
+                os.close(fd)
+
+            replica_path = replica_mountpoint / f"poll_{suffix}" / "payload.txt"
+            replica_fd = os.open(replica_path, os.O_RDONLY)
+            try:
+                poller = select.poll()
+                poller.register(replica_fd, select.POLLIN | select.POLLOUT)
+                events = dict(poller.poll(0))
+                replica_mask = events.get(replica_fd, 0)
+                assert replica_mask & select.POLLIN, replica_mask
+                assert not (replica_mask & select.POLLOUT), replica_mask
+            finally:
+                os.close(replica_fd)
+
+            print("OK poll/mount")
+        finally:
+            replica.stop()
+            launcher.stop()
 
 
 if __name__ == "__main__":

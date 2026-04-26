@@ -146,14 +146,16 @@ if [[ "${DEBUG}" != "0" ]]; then
   export DBFS_DEBUG="1"
 fi
 
-if [[ -x "${PWD}/.venv/bin/dbfs-bootstrap" ]]; then
-  DBFS_BOOTSTRAP_CMD=("${PWD}/.venv/bin/dbfs-bootstrap")
-elif [[ -n "${VIRTUAL_ENV:-}" && -x "${VIRTUAL_ENV}/bin/dbfs-bootstrap" ]]; then
-  DBFS_BOOTSTRAP_CMD=("${VIRTUAL_ENV}/bin/dbfs-bootstrap")
-elif command -v dbfs-bootstrap >/dev/null 2>&1; then
-  DBFS_BOOTSTRAP_CMD=("dbfs-bootstrap")
+if [[ -n "${DBFS_BOOTSTRAP_BIN:-}" && -x "${DBFS_BOOTSTRAP_BIN}" ]]; then
+  DBFS_BOOTSTRAP_CMD=("${DBFS_BOOTSTRAP_BIN}")
+elif [[ -x "${ROOT}/rust_mkfs/target/debug/dbfs-bootstrap" ]]; then
+  DBFS_BOOTSTRAP_CMD=("${ROOT}/rust_mkfs/target/debug/dbfs-bootstrap")
+elif [[ -x "${ROOT}/rust_mkfs/target/release/dbfs-bootstrap" ]]; then
+  DBFS_BOOTSTRAP_CMD=("${ROOT}/rust_mkfs/target/release/dbfs-bootstrap")
+elif [[ -x "/usr/local/bin/dbfs-bootstrap" ]]; then
+  DBFS_BOOTSTRAP_CMD=("/usr/local/bin/dbfs-bootstrap")
 else
-  echo "mount.dbfs: dbfs-bootstrap not found. Run 'make venv && make pip-install' or activate the project's .venv." >&2
+  echo "mount.dbfs: dbfs-bootstrap not found. Build rust_mkfs/target/debug/dbfs-bootstrap first." >&2
   exit 2
 fi
 

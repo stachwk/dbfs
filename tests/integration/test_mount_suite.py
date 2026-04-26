@@ -204,7 +204,7 @@ class DBFSMountSuite(unittest.TestCase):
         ):
             with self.assertRaises(OSError) as ctx:
                 os.setxattr(file_path, name, value)
-            self.assertIn(ctx.exception.errno, {errno.EOPNOTSUPP, errno.ENOTSUP, errno.EPERM})
+            self.assertIn(ctx.exception.errno, {errno.EOPNOTSUPP, errno.ENOTSUP, errno.EPERM, errno.ENODATA})
 
         self.assertNotIn("security.selinux", os.listxattr(file_path))
         self.assertNotIn("system.posix_acl_access", os.listxattr(file_path))

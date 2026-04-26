@@ -22,7 +22,6 @@ class MountConfig:
     root: Path
     mountpoint: Path
     log_file: Path
-    venv_python: Path
     postgres_db: str
     postgres_user: str
     postgres_password: str
@@ -44,7 +43,6 @@ class MountConfig:
 class DBFSMount:
     def __init__(self, root: str, *, role: str | None = None):
         self.root = Path(root)
-        self.venv_python = Path(os.environ.get("VENV_PYTHON", str(self.root / ".venv/bin/python")))
         self.postgres_db = os.environ.get("POSTGRES_DB", "dbfsdbname")
         self.postgres_user = os.environ.get("POSTGRES_USER", "dbfsuser")
         self.postgres_password = os.environ.get("POSTGRES_PASSWORD", "cichosza")
@@ -65,12 +63,40 @@ class DBFSMount:
         self.process: subprocess.Popen[str] | None = None
         self.config: MountConfig | None = None
 
-    def _python_env(self) -> dict[str, str]:
+    def _runtime_env(self) -> dict[str, str]:
         env = os.environ.copy()
         env["POSTGRES_DB"] = self.postgres_db
         env["POSTGRES_USER"] = self.postgres_user
         env["POSTGRES_PASSWORD"] = self.postgres_password
         return env
+
+    def _mkfs_binary(self) -> Path:
+        if path := os.environ.get("DBFS_MKFS_BIN"):
+            candidate = Path(path)
+            if candidate.is_file():
+                return candidate
+        for candidate in [
+            self.root / "rust_mkfs/target/debug/dbfs-rust-mkfs",
+            self.root / "rust_mkfs/target/release/dbfs-rust-mkfs",
+            Path("/usr/local/bin/dbfs-rust-mkfs"),
+        ]:
+            if candidate.is_file():
+                return candidate
+        raise FileNotFoundError("dbfs-rust-mkfs binary not found; build rust_mkfs first")
+
+    def _bootstrap_binary(self) -> Path:
+        if path := os.environ.get("DBFS_BOOTSTRAP_BIN"):
+            candidate = Path(path)
+            if candidate.is_file():
+                return candidate
+        for candidate in [
+            self.root / "rust_mkfs/target/debug/dbfs-bootstrap",
+            self.root / "rust_mkfs/target/release/dbfs-bootstrap",
+            Path("/usr/local/bin/dbfs-bootstrap"),
+        ]:
+            if candidate.is_file():
+                return candidate
+        raise FileNotFoundError("dbfs-bootstrap binary not found; build rust_mkfs first")
 
     def build_mount_args(self) -> list[str]:
         args = ["--role", self.role, "--selinux", self.selinux, "--acl", self.acl, "--atime-policy", self.atime_policy]
@@ -85,9 +111,9 @@ class DBFSMount:
 
     def init_schema(self) -> None:
         status = subprocess.run(
-            [str(self.venv_python), str(self.root / "mkfs.dbfs.py"), "status"],
+            [str(self._mkfs_binary()), "status"],
             cwd=self.root,
-            env=self._python_env(),
+            env=self._runtime_env(),
             capture_output=True,
             text=True,
             check=False,
@@ -96,14 +122,13 @@ class DBFSMount:
             return
         subprocess.run(
             [
-                str(self.venv_python),
-                str(self.root / "mkfs.dbfs.py"),
+                str(self._mkfs_binary()),
                 "init",
                 "--schema-admin-password",
                 self.schema_admin_password,
             ],
             cwd=self.root,
-            env=self._python_env(),
+            env=self._runtime_env(),
             check=True,
         )
 
@@ -118,7 +143,6 @@ class DBFSMount:
             root=self.root,
             mountpoint=mount_dir,
             log_file=log_file,
-            venv_python=self.venv_python,
             postgres_db=self.postgres_db,
             postgres_user=self.postgres_user,
             postgres_password=self.postgres_password,
@@ -136,7 +160,7 @@ class DBFSMount:
             selinux_defcontext=self.selinux_defcontext,
             selinux_rootcontext=self.selinux_rootcontext,
         )
-        env = self._python_env()
+        env = self._runtime_env()
         if self.selinux_context:
             env["DBFS_SELINUX_CONTEXT"] = self.selinux_context
         if self.selinux_fscontext:
@@ -147,10 +171,11 @@ class DBFSMount:
             env["DBFS_SELINUX_ROOTCONTEXT"] = self.selinux_rootcontext
         env["DBFS_SYNCHRONOUS_COMMIT"] = self.synchronous_commit
         env["DBFS_USE_FUSE_CONTEXT"] = "1"
+        env["DBFS_USE_RUST_FUSE"] = "1"
 
         log_handle = open(log_file, "w", encoding="utf-8")
         self.process = subprocess.Popen(
-            [str(self.venv_python), str(self.root / "dbfs_fuse.py"), *self.build_mount_args(), "-f", str(mount_dir)],
+            [str(self._bootstrap_binary()), *self.build_mount_args(), "-f", str(mount_dir)],
             cwd=self.root,
             env=env,
             stdout=log_handle,

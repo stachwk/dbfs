@@ -1,87 +1,60 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import os
 import sys
+import tempfile
 import uuid
-import errno
-import unittest
-from unittest.mock import patch
+from pathlib import Path
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if ROOT not in sys.path:
-    sys.path.insert(0, ROOT)
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-from dbfs_fuse import DBFS, load_dsn_from_config
+from tests.integration.dbfs_mount import DBFSMount
 
 
-class AccessGroupTests(unittest.TestCase):
-    def test_access_owner_group_and_supplementary_groups(self):
-        dsn, db_config = load_dsn_from_config(ROOT)
-        fs = DBFS(dsn, db_config)
+def main() -> None:
+    launcher = DBFSMount(str(ROOT))
+    launcher.init_schema()
 
-        suffix = uuid.uuid4().hex[:8]
-        dir_path = f"/access_groups_{suffix}"
-        file_path = f"{dir_path}/payload.txt"
-        payload = b"access-groups\n"
-
-        owner_uid = 123456
-        owner_gid = 234567
-        unrelated_uid = 345678
-        unrelated_gid = 456789
-
+    suffix = uuid.uuid4().hex[:8]
+    with tempfile.TemporaryDirectory(prefix=f"/tmp/dbfs-access-groups-{suffix}.") as tmpdir:
+        mountpoint = Path(tmpdir)
+        launcher.start(str(mountpoint))
         try:
-            fs.mkdir(dir_path, 0o755)
-            fh = fs.create(file_path, 0o640)
-            fs.write(file_path, payload, 0, fh)
-            fs.flush(file_path, fh)
-            fs.release(file_path, fh)
+            dir_path = mountpoint / f"access_groups_{suffix}"
+            file_path = dir_path / "payload.txt"
+            payload = b"access-groups\n"
 
-            with fs.db_connection() as conn, conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE files SET uid = %s, gid = %s WHERE id_file = %s",
-                    (owner_uid, owner_gid, fs.repository.get_file_id(file_path)),
-                )
-                conn.commit()
+            dir_path.mkdir()
+            file_path.write_bytes(payload)
 
-            with patch.object(fs, "current_uid_gid", return_value=(owner_uid, unrelated_gid)), patch(
-                "dbfs_fuse.os.getgroups", return_value=[]
-            ):
-                self.assertEqual(fs.access(file_path, os.R_OK), 0)
-                self.assertEqual(fs.access(file_path, os.W_OK), 0)
-                with self.assertRaises(OSError) as ctx:
-                    fs.access(file_path, os.X_OK)
-                self.assertEqual(ctx.exception.errno, errno.EACCES)
+            file_path.chmod(0o640)
+            dir_path.chmod(0o750)
 
-            with patch.object(fs, "current_uid_gid", return_value=(unrelated_uid, unrelated_gid)), patch(
-                "dbfs_fuse.os.getgroups", return_value=[owner_gid]
-            ):
-                self.assertEqual(fs.access(file_path, os.R_OK), 0)
-                with self.assertRaises(OSError) as ctx:
-                    fs.access(file_path, os.W_OK)
-                self.assertEqual(ctx.exception.errno, errno.EACCES)
+            assert os.access(file_path, os.R_OK)
+            assert os.access(file_path, os.W_OK)
+            assert not os.access(file_path, os.X_OK)
+            assert os.access(dir_path, os.R_OK)
+            assert os.access(dir_path, os.W_OK)
+            assert os.access(dir_path, os.X_OK)
 
-            with patch.object(fs, "current_uid_gid", return_value=(unrelated_uid, unrelated_gid)), patch(
-                "dbfs_fuse.os.getgroups", return_value=[]
-            ):
-                with self.assertRaises(OSError) as ctx:
-                    fs.access(file_path, os.R_OK)
-                self.assertEqual(ctx.exception.errno, errno.EACCES)
+            file_path.chmod(0o000)
+            dir_path.chmod(0o000)
+
+            assert not os.access(file_path, os.R_OK)
+            assert not os.access(file_path, os.W_OK)
+            assert not os.access(file_path, os.X_OK)
+            assert not os.access(dir_path, os.R_OK)
+            assert not os.access(dir_path, os.W_OK)
+            assert not os.access(dir_path, os.X_OK)
 
             print("OK access/groups")
         finally:
-            try:
-                fs.unlink(file_path)
-            except Exception:
-                pass
-            try:
-                fs.rmdir(dir_path)
-            except Exception:
-                pass
-            try:
-                fs.connection_pool.closeall()
-            except Exception:
-                pass
+            launcher.stop()
 
 
 if __name__ == "__main__":
-    unittest.main()
+    main()

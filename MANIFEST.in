@@ -1,7 +1,0 @@
-include README.md
-include README.pl
-include dbfs_config.ini
-include dbfs_bootstrap.py
-include mkfs.dbfs.py
-include mount.dbfs
-recursive-include mod *.py

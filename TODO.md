@@ -6,13 +6,13 @@ This document records the small set of open follow-ups plus completed work, clos
 
 - Detect single-node vs read-only replica mode early and let runtime choose the appropriate lock strategy before mount.
 - Keep `workers_read` and `workers_write` constrained to the cases where they really help: disjoint read gaps and segmented copy operations, not small contiguous fetches.
-- Keep the long-term direction visible: userspace FUSE + PostgreSQL backend + a native Rust storage/hot-path engine, with Python staying as the orchestration layer until the native core is ready.
-- Keep the Python-orchestrator / Rust-hot-path split as a standing direction, not as an active rewrite backlog.
-- Treat the current copy profile comparison as a frozen baseline; continue the narrow Rust hot-path work in `libdbfs-2.so`, with planner, changed-run packing, persist padding, read assembly, logical resize planning, startup query handling, and the first repository lookups/mutations moving to Rust while Python remains the fallback and orchestration layer.
-- Keep Rust dedupe opt-in and off by default; benchmark notes show it can be slower than the Python fallback on repeated-copy workloads.
+- Keep the long-term direction visible: userspace FUSE + PostgreSQL backend + a native Rust runtime, with Python restricted to non-runtime docs and tests when needed.
+- Keep the Rust-runtime direction as the standing implementation path, not as an active rewrite backlog.
+- Treat the current copy profile comparison as a frozen baseline; continue the Rust hot-path work in the Rust crates, with planner, changed-run packing, persist padding, read assembly, logical resize planning, startup query handling, and repository lookups/mutations already in Rust.
+- Keep Rust dedupe opt-in and off by default; benchmark notes show it can be slower on repeated-copy workloads.
 - Start consolidating the small Rust helper surface into shared planners where the same arithmetic is repeated across read and write paths, beginning with a common worker-count planner before adding broader write/read generalizations.
-- Keep the truncate/fallocate resize planner in Rust and treat the actual mutation boundary as the next step; the current helper only plans logical resize, while Python still performs the SQL transaction and overlay cleanup.
-- Treat namespace mutation cleanup (`unlink`/`rename`/`rmdir`, xattrs, cache invalidation, epoch bumps) as a future Rust repository/backend rewrite if it ever moves out of Python; do not split it into one-off FFI helpers.
+- Keep the truncate/fallocate resize planner in Rust and treat the actual mutation boundary as part of the Rust runtime, not a Python fallback.
+- Treat namespace mutation cleanup (`unlink`/`rename`/`rmdir`, xattrs, cache invalidation, epoch bumps) as Rust runtime work; do not split it back into Python helper layers.
 - When schema changes actually hit a limit or compatibility failure, add a concrete migration file plus a regression test instead of widening the schema bootstrap path ad hoc.
 
 ## Extent Engine Direction
@@ -20,8 +20,8 @@ This document records the small set of open follow-ups plus completed work, clos
 - Keep the logical filesystem model at 4 KiB blocks for now.
 - Make Rust the owner of the extent and overlay engine.
 - Move PostgreSQL away from storing thousands of 4 KiB blocks directly and toward dynamic extents.
-- Move SQL/query execution from Python into Rust so the persistence path becomes Python -> Rust -> PostgreSQL, not Python -> PostgreSQL directly.
-- Keep Python as the orchestration layer for FUSE callbacks, reconnect retries, ACL, journal, and runtime config.
+- SQL/query execution already lives in Rust for the runtime paths that remain.
+- Keep the non-runtime docs and tests separate from the Rust runtime; do not reintroduce Python as an execution layer.
 - Treat this as the next major direction rather than a hard rewrite backlog; when adjacent work touches `truncate`, `fallocate`, `write`, `copy`, `flush`, or `persist`, prefer carving out the corresponding extent/storage piece in Rust if it can be done safely and incrementally.
 - Capture the next architectural step explicitly:
   - `logical_block_size = 4k`
@@ -29,9 +29,9 @@ This document records the small set of open follow-ups plus completed work, clos
   - `persist extent classes = 4k..4MiB`
   - `payload stores only used bytes`
   - `Rust returns PersistPlan`
-  - `Python executes transaction`
+  - `Rust executes transaction`
 - Next concrete step:
-  - prove a minimal Rust repository/query boundary with one scalar PostgreSQL query path (`Python -> Rust -> PostgreSQL`) before moving broader SQL ownership,
+  - keep the Rust repository/query boundary intact for the remaining runtime paths,
   - write a small extent-engine proof of concept with a new `data_extents` table,
   - implement one simple write/read path for extents without full merge/split logic,
   - benchmark `4k`, `64k`, `1M`, `4M`, and `copy_file_range`,
@@ -39,27 +39,21 @@ This document records the small set of open follow-ups plus completed work, clos
 
 ## Target Architecture
 
-### Warstwa 1 - Python zostaje jako orchestrator
+### Warstwa 1 - Rust runtime
 
-Python should remain the orchestration and control plane for DBFS:
+Rust is the runtime and control plane for DBFS:
 
-- `dbfs_bootstrap.py`
-- `mkfs.dbfs.py`
+- mount bootstrap
+- schema tooling
 - config and profile loading
-- `dbfs_fuse.py` FUSE callbacks
+- FUSE callbacks
 - administrative logic
 - schema migrations
-- integration tests
 - ACL / permissions / journal / runtime validation policy layers
 
-Why this stays in Python:
+### Warstwa 2 - Rust storage hot-path
 
-- the project already has good modularity and test coverage around these areas
-- the README and roadmap already point toward thinner `dbfs_fuse.py`, more delegation, and explicit userspace layering
-
-### Warstwa 2 - Rust jako silnik storage hot-path
-
-Move only the CPU/memory-heavy hot path into Rust:
+Rust owns the CPU/memory-heavy hot path:
 
 - block engine
 - read block assembly
@@ -93,9 +87,9 @@ Why this matters:
 
 - [x] Split metadata cache payloads by purpose: attribute cache and directory-entry cache are now stored separately instead of sharing one mixed payload shape.
 - [x] Fix the listing/getattr cache regression where `ls -al` on a directory could disagree with `ls file` because `readdir()` and `getattr()` interpreted the same cache key differently.
-- [x] Remove runtime method rebinding from `dbfs_fuse.py` and replace it with explicit wrapper methods that delegate through `dbfs_repository.py`.
+- [x] Remove runtime method rebinding from `dbfs_fuse.py` and replace it with explicit wrapper methods that delegate through `mod/repository/`.
 - [x] Unify lookup helpers through the repository layer so `get_file_id`, `get_dir_id`, `get_entry_kind_and_id`, `entry_exists`, and related helpers no longer depend on hidden `__init__` rebinding.
-- [x] Move the `getattr()` / `readdir()` query layer into `dbfs_repository.py` so the main FUSE module no longer owns direct listing/attribute SQL for those hot paths.
+- [x] Move the `getattr()` / `readdir()` query layer into `mod/repository/` so the main FUSE module no longer owns direct listing/attribute SQL for those hot paths.
 - [x] Confirm the current refactor through `make test-all` plus an explicit regression check for create/list/remove consistency on a mounted DBFS instance.
 
 ### Performance Plan
@@ -234,7 +228,7 @@ These changes are already merged into the codebase and should be kept:
 - `poll` as a backend helper for regular files
 - `default_permissions` as the default mount option
 - `use_ino` as the default mount option
-- explicit wrapper/delegation model from `dbfs_fuse.py` into `dbfs_repository.py`
+- explicit wrapper/delegation model from `dbfs_fuse.py` into `mod/repository/`
 - repository-owned query helpers for `getattr()` and `readdir()`
 - SELinux options:
   - `--selinux auto|on|off`
@@ -291,9 +285,9 @@ This section is now a documented compatibility note rather than active backlog.
 Status: active design direction, but the main decisions below are already taken.
 
 - Decision: `dbfs_fuse.py` should prefer explicit wrapper methods over runtime rebinding in `__init__`.
-- Decision: lookup helpers and the `getattr()` / `readdir()` query layer should live in `dbfs_repository.py`, not directly in the main FUSE module.
+- Decision: lookup helpers and the `getattr()` / `readdir()` query layer should live in `mod/repository/`, not directly in the main FUSE module.
 - Decision: metadata cache payloads should stay split by type instead of sharing one generic cache payload across attrs and directory listings.
-- Follow-up: when `dbfs_repository.py` grows enough, split it into lookup/query and mutation-oriented modules instead of moving SQL back into `dbfs_fuse.py`.
+- Follow-up: when `mod/repository/` grows enough, split it into lookup/query and mutation-oriented modules instead of moving SQL back into `dbfs_fuse.py`.
 
 ### Missing Filesystem Features
 
@@ -320,7 +314,7 @@ Status: active design direction, but the main decisions below are already taken.
 
 - Storing `security.selinux` in xattr alone is not enough to make the filesystem fully SELinux-aware. It is the foundation, not the whole model.
 - `mknod` creates FIFO and char-device metadata, but `open` for special nodes still needs separate semantics.
-- `poll` is available as a backend helper for regular files; the native FUSE hook still depends on what `fusepy` exposes.
+- `poll` is available through the Rust mount frontend for regular files.
 - `fallocate`, `flock`, `copy_file_range`, `ioctl`, `read_buf`, `write_buf`, `opendir`, `releasedir`, `fsyncdir`, `destroy`, `access`, `bmap`, `lseek`, `rename`, `mknod`, `st_blocks`, `st_nlink`, `ownership inheritance`, advisory `locks`, sticky-bit enforcement on `unlink`/`rmdir`, `chown` special-bit clearing, journal UID tracking, `ctime`/`change_date` metadata tracking, and the stable inode model are already in `Already in place`.
 - `statfs` and `use_ino` have a dedicated shell smoke test: `make test-statfs-use-ino`.
 - metadata cache and statfs cache are TTL-backed and configurable via `dbfs_config.ini`; keep cache invalidation on mutating operations in sync with the read-side cache helpers.

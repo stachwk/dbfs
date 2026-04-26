@@ -3,13 +3,13 @@
 dbfs_test_setup() {
   local root_dir="$1"
   ROOT="${root_dir}"
-  VENV_PYTHON="${VENV_PYTHON:-${ROOT}/.venv/bin/python}"
   POSTGRES_DB="${POSTGRES_DB:-dbfsdbname}"
   POSTGRES_USER="${POSTGRES_USER:-dbfsuser}"
   POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-cichosza}"
   if [[ -z "${DBFS_SCHEMA_ADMIN_PASSWORD:-}" ]]; then
-    DBFS_SCHEMA_ADMIN_PASSWORD="$("${VENV_PYTHON}" -c 'import secrets; print("dbfs-" + secrets.token_urlsafe(24))')"
+    DBFS_SCHEMA_ADMIN_PASSWORD="dbfs-$(tr -dc 'A-Za-z0-9_' </dev/urandom | head -c 24)"
   fi
+  DBFS_CONFIG="${DBFS_CONFIG:-${ROOT}/dbfs_config.ini}"
   DBFS_SELINUX="${DBFS_SELINUX:-off}"
   DBFS_ACL="${DBFS_ACL:-off}"
   DBFS_DEFAULT_PERMISSIONS="${DBFS_DEFAULT_PERMISSIONS:-1}"
@@ -23,6 +23,24 @@ dbfs_test_setup() {
   DBFS_SELINUX_FSCONTEXT="${DBFS_SELINUX_FSCONTEXT:-}"
   DBFS_SELINUX_DEFCONTEXT="${DBFS_SELINUX_DEFCONTEXT:-}"
   DBFS_SELINUX_ROOTCONTEXT="${DBFS_SELINUX_ROOTCONTEXT:-}"
+  if [[ -n "${DBFS_BOOTSTRAP_BIN:-}" ]]; then
+    :
+  elif [[ -x "${ROOT}/rust_mkfs/target/debug/dbfs-bootstrap" ]]; then
+    DBFS_BOOTSTRAP_BIN="${ROOT}/rust_mkfs/target/debug/dbfs-bootstrap"
+  elif [[ -x "${ROOT}/rust_mkfs/target/release/dbfs-bootstrap" ]]; then
+    DBFS_BOOTSTRAP_BIN="${ROOT}/rust_mkfs/target/release/dbfs-bootstrap"
+  else
+    DBFS_BOOTSTRAP_BIN="/usr/local/bin/dbfs-bootstrap"
+  fi
+  if [[ -n "${DBFS_MKFS_BIN:-}" ]]; then
+    :
+  elif [[ -x "${ROOT}/rust_mkfs/target/debug/dbfs-rust-mkfs" ]]; then
+    DBFS_MKFS_BIN="${ROOT}/rust_mkfs/target/debug/dbfs-rust-mkfs"
+  elif [[ -x "${ROOT}/rust_mkfs/target/release/dbfs-rust-mkfs" ]]; then
+    DBFS_MKFS_BIN="${ROOT}/rust_mkfs/target/release/dbfs-rust-mkfs"
+  else
+    DBFS_MKFS_BIN="/usr/local/bin/dbfs-rust-mkfs"
+  fi
 }
 
 dbfs_test_make_mountpoint() {
@@ -58,12 +76,12 @@ dbfs_test_init_schema() {
   local status_output
   status_output="$(
     POSTGRES_DB="${POSTGRES_DB}" POSTGRES_USER="${POSTGRES_USER}" POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
-      "${VENV_PYTHON}" "${ROOT}/mkfs.dbfs.py" status 2>/dev/null || true
+      DBFS_CONFIG="${DBFS_CONFIG}" "${DBFS_MKFS_BIN}" status 2>/dev/null || true
   )"
   if grep -Fq "DBFS ready: yes" <<<"${status_output}"; then
     return 0
   fi
-  POSTGRES_DB="${POSTGRES_DB}" POSTGRES_USER="${POSTGRES_USER}" POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" "${VENV_PYTHON}" "${ROOT}/mkfs.dbfs.py" init --schema-admin-password "${DBFS_SCHEMA_ADMIN_PASSWORD}"
+  POSTGRES_DB="${POSTGRES_DB}" POSTGRES_USER="${POSTGRES_USER}" POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" DBFS_CONFIG="${DBFS_CONFIG}" "${DBFS_MKFS_BIN}" init --schema-admin-password "${DBFS_SCHEMA_ADMIN_PASSWORD}"
 }
 
 dbfs_test_build_args() {
@@ -84,7 +102,7 @@ dbfs_test_start_mount() {
   local mountpoint="$1"
   dbfs_test_build_args
   mkdir -p "${mountpoint}"
-  POSTGRES_DB="${POSTGRES_DB}" POSTGRES_USER="${POSTGRES_USER}" POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" "${VENV_PYTHON}" "${ROOT}/dbfs_fuse.py" "${DBFS_ARGS[@]}" -f "${mountpoint}" >"${LOG_FILE}" 2>&1 &
+  POSTGRES_DB="${POSTGRES_DB}" POSTGRES_USER="${POSTGRES_USER}" POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" DBFS_CONFIG="${DBFS_CONFIG}" DBFS_BOOTSTRAP_BIN="${DBFS_BOOTSTRAP_BIN}" DBFS_USE_RUST_FUSE=1 DBFS_USE_FUSE_CONTEXT=1 DBFS_SELINUX_CONTEXT="${DBFS_SELINUX_CONTEXT}" DBFS_SELINUX_FSCONTEXT="${DBFS_SELINUX_FSCONTEXT}" DBFS_SELINUX_DEFCONTEXT="${DBFS_SELINUX_DEFCONTEXT}" DBFS_SELINUX_ROOTCONTEXT="${DBFS_SELINUX_ROOTCONTEXT}" "${DBFS_BOOTSTRAP_BIN}" "${DBFS_ARGS[@]}" -f "${mountpoint}" >"${LOG_FILE}" 2>&1 &
   DBFS_PID=$!
 
   for _ in $(seq 1 60); do

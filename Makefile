@@ -33,13 +33,13 @@ DBFS_SYNC ?= 0
 DBFS_DIRSYNC ?= 0
 MOUNT_HELPER_DEST ?= /usr/local/sbin/mount.dbfs
 
-.PHONY: help venv deps up down restart logs wait init reset smoke mount mount-user demo unmount db-shell install-config install-config-user install-mount-helper install-root-scripts install-rust-hotpath install-on-root install-on-root-venv pip-build pip-install pip-install-editable config-show test-integration test-xattr test-df test-locking test-pg-lock-manager test-permissions test-journal test-destroy test-dirhooks test-hardlink test-fallocate test-copy-file-range test-copy-dedupe-benchmark test-copy-block-crc-table test-worker-thresholds-block-size test-rust-hotpath-copy-plan test-rust-hotpath-crc32 test-rust-hotpath-read-ahead test-rust-hotpath-read-sequence test-rust-hotpath-read-fetch-bounds test-rust-hotpath-read-slice-plan test-rust-hotpath-read-missing-range-worker-count test-rust-hotpath-block-count test-rust-hotpath-dirty-block-size test-rust-hotpath-logical-resize-plan test-rust-hotpath-persist-layout-plan test-rust-hotpath-persist-block-plan test-rust-hotpath-persist-block-crc-plan test-rust-hotpath-write-copy-worker-count test-rust-hotpath-parallel-worker-count test-rust-hotpath-missing-ranges test-rust-hotpath-copy-dedupe test-rust-hotpath-copy-dedupe-benchmark test-rust-hotpath-copy-pack test-rust-hotpath-persist-pad test-rust-hotpath-read-assemble test-rust-pg-query test-rust-hotpath-runtime-size-limits test-ioctl test-mknod test-bufio test-lseek test-poll test-access-groups test-inode-model test-ownership-inheritance test-rename-root-conflict test-bmap test-statfs-use-ino test-mount-workflow test-mount-root-permissions test-mount-wrapper-options test-fuse-context-identity test-files test-directories test-metadata test-symlink test-pool-connections test-mount-suite test-atime-noatime test-atime-relatime test-atime-benchmark test-timestamp-touch-once test-read-ahead-sequence test-read-cache-benchmark test-workers-read-parallel test-workers-write-parallel-copy test-runtime-config test-runtime-validation test-metadata-cache test-mkfs-pg-tls test-runtime-profile test-schema-upgrade test-schema-status test-postgresql-requirements test-throughput test-throughput-sync test-large-copy-benchmark test-large-file-multiblock-benchmark test-remount-durability-benchmark test-tree-scale test-flush-release-profile test-truncate-release-profile test-persist-buffer-chunking test-write-flush-threshold test-utimens-noop test-write-noop test-unlink-after-write test-local-vs-dbfs-permissions test-ext4-vs-dbfs-permissions test-root-owned-permissions test-allow-other-visibility test-multi-open-unique-handles test-version test-block-read test-connection-recovery test-all test-all-full clean
+.PHONY: help venv deps up down restart logs wait init reset smoke mount mount-user demo unmount db-shell install-config install-config-user install-mount-helper install-root-scripts install-rust-hotpath install-on-root install-on-root-venv pip-build pip-install pip-install-editable config-show test-integration test-xattr test-df test-locking test-pg-lock-manager test-permissions test-journal test-destroy test-dirhooks test-hardlink test-fallocate test-copy-file-range test-copy-dedupe-benchmark test-copy-block-crc-table test-worker-thresholds-block-size test-rust-hotpath-copy-plan test-rust-hotpath-crc32 test-rust-hotpath-read-ahead test-rust-hotpath-read-sequence test-rust-hotpath-read-fetch-bounds test-rust-hotpath-read-slice-plan test-rust-hotpath-read-missing-range-worker-count test-rust-hotpath-block-count test-rust-hotpath-dirty-block-size test-rust-hotpath-logical-resize-plan test-rust-hotpath-persist-layout-plan test-rust-hotpath-persist-block-plan test-rust-hotpath-persist-block-crc-plan test-rust-hotpath-write-copy-worker-count test-rust-hotpath-parallel-worker-count test-rust-hotpath-missing-ranges test-rust-hotpath-copy-dedupe test-rust-hotpath-copy-dedupe-benchmark test-rust-hotpath-copy-pack test-rust-hotpath-persist-pad test-rust-hotpath-read-assemble test-rust-pg-query test-rust-hotpath-runtime-size-limits test-ioctl test-mknod test-bufio test-lseek test-poll test-access-groups test-inode-model test-ownership-inheritance test-rename-root-conflict test-bmap test-statfs-use-ino test-mount-workflow test-mount-root-permissions test-mount-wrapper-options test-fuse-context-identity test-files test-directories test-metadata test-symlink test-pool-connections test-mount-suite test-atime-noatime test-atime-relatime test-atime-benchmark test-timestamp-touch-once test-read-ahead-sequence test-read-cache-benchmark test-workers-read-parallel test-workers-write-parallel-copy test-runtime-config test-runtime-validation test-schema-upgrade test-schema-status test-throughput test-throughput-sync test-large-copy-benchmark test-large-file-multiblock-benchmark test-remount-durability-benchmark test-tree-scale test-flush-release-profile test-truncate-release-profile test-persist-buffer-chunking test-write-flush-threshold test-utimens-noop test-write-noop test-unlink-after-write test-local-vs-dbfs-permissions test-ext4-vs-dbfs-permissions test-root-owned-permissions test-allow-other-visibility test-multi-open-unique-handles test-version test-block-read test-connection-recovery test-all test-all-full clean
 
 help:
 	@printf '%s\n' \
 		'Targets:' \
-		'  make venv       - create .venv and install fusepy + psycopg2-binary' \
-		'  make deps       - refresh dependencies in the existing .venv' \
+		'  make venv       - create .venv for legacy Python integration tests' \
+		'  make deps       - refresh the legacy Python test dependencies in .venv' \
 		'  make up         - start local PostgreSQL in Docker' \
 		'  make down       - stop local PostgreSQL' \
 		'  make restart    - restart local PostgreSQL' \
@@ -50,13 +50,13 @@ help:
 		'  make install-config - install dbfs_config.ini to /etc/dbfs/dbfs_config.ini' \
 		'  make install-config-user - install dbfs_config.ini to $$HOME/.config/dbfs/dbfs_config.ini without sudo' \
 		'  make install-mount-helper - install mount.dbfs to $(MOUNT_HELPER_DEST)' \
-		'  make install-root-scripts - install dbfs-bootstrap and mkfs.dbfs to /usr/local/bin' \
-		'  make install-rust-hotpath - build and install libdbfs-2.so' \
-		'  make install-on-root - install system config, pip package, mount helper, and Rust hot-path artifacts' \
-		'  make install-on-root-venv - create .venv, then run the full root-style install' \
-		'  make pip-build - build a pip wheel into dist/' \
-		'  make pip-install - install the package into the active venv' \
-		'  make pip-install-editable - install the package in editable mode' \
+		'  make install-root-scripts - install dbfs-bootstrap and mkfs.dbfs Rust binaries to /usr/local/bin' \
+		'  make install-rust-hotpath - build and install the Rust hot-path shared library' \
+		'  make install-on-root - install system config, Rust binaries, mount helper, and Rust hot-path artifacts' \
+		'  make install-on-root-venv - create .venv for legacy tests, then run the full root-style install' \
+		'  make pip-build - removed; Rust binaries are built directly' \
+		'  make pip-install - removed; Rust binaries are built directly' \
+		'  make pip-install-editable - legacy Python test helper install' \
 		'  make config-show - show which file DBFS uses for configuration' \
 		'  make smoke      - quick database connectivity test' \
 		'  make mount      - mount DBFS at $(MOUNTPOINT)' \
@@ -68,7 +68,7 @@ help:
 		'  make test-xattr - run xattr/SELinux backend tests' \
 		'  make test-df   - verify df -Ph and df -Phi on a mounted DBFS' \
 		'  make test-locking - verify in-memory DBFS advisory locks' \
-		'  make test-pg-lock-manager - verify PostgreSQL-backed flock and range leases' \
+		'  make test-pg-lock-manager - verify PostgreSQL-backed flock and range leases in Rust' \
 		'  make test-permissions - verify sticky bit and chown permission semantics' \
 		'  make test-journal - verify journal entries for mutating operations' \
 		'  make test-destroy - verify the destroy cleanup hook' \
@@ -91,7 +91,7 @@ help:
 		'  make test-root-owned-permissions - compare root-owned file handling on ext4 and DBFS' \
 		'  make test-allow-other-visibility - verify allow_other visibility between users (host-dependent skip if not exposed)' \
 		'  make test-multi-open-unique-handles - verify independent fh values for concurrent opens' \
-		'  make test-version - verify the published DBFS version string' \
+		'  make test-version - verify the published DBFS version string from Rust' \
 		'  make test-access-groups - verify access() for owner, primary group, and supplementary groups' \
 		'  make test-inode-model - verify a stable inode model after FS restart' \
 		'  make test-ownership-inheritance - verify gid inheritance after parent chmod/chown' \
@@ -106,12 +106,8 @@ help:
 		'  make test-read-cache-benchmark - benchmark DBFS block cache size under sequential reads' \
 		'  make test-workers-read-parallel - verify workers_read only parallelize disjoint read gaps' \
 		'  make test-workers-write-parallel-copy - verify small copy stays sequential and large copy threads' \
-		'  make test-runtime-config - verify dbfs_config.ini runtime tuning values' \
-		'  make test-runtime-validation - verify runtime config rejects invalid values' \
-		'  make test-metadata-cache - verify short TTL metadata/statfs caching' \
-		'  make test-mkfs-pg-tls - verify PostgreSQL TLS generation on mkfs init/upgrade' \
-		'  make test-postgresql-requirements - verify minimum PostgreSQL version and connection capacity' \
-		'  make test-runtime-profile - verify named DBFS runtime profiles' \
+		'  make test-runtime-config - verify dbfs_config.ini runtime tuning values in Rust' \
+		'  make test-runtime-validation - verify runtime config rejects invalid values in Rust' \
 		'  make test-schema-upgrade - verify schema version reporting for upgrade flow' \
 		'  make test-replica-ro - verify that replica mounts the FS read-only' \
 		'  make test-files - files: create/write/truncate/rename/unlink' \
@@ -125,41 +121,42 @@ help:
 		'  make test-symlink - mount + ln -s + readlink + rename symlink + orphaned symlink ls on the symlink path' \
 		'  make test-throughput - benchmark DBFS writes with dd if=/dev/zero' \
 		'  make test-throughput-sync - benchmark DBFS writes with conv=fsync' \
-	  '  make test-rust-hotpath-copy-plan - compare the Rust copy planner against Python' \
-		'  make test-rust-hotpath-copy-dedupe - compare the Rust changed-copy dedupe helper against Python' \
-		'  make test-rust-hotpath-copy-dedupe-benchmark - benchmark the Rust changed-copy dedupe helper vs Python' \
-		'  make test-rust-hotpath-copy-pack - compare the Rust changed-run packer against Python' \
-		'  make test-rust-hotpath-persist-pad - compare the Rust persist padding helper against Python' \
-		'  make test-rust-hotpath-read-assemble - compare the Rust read assembly helper against Python' \
-		'  make test-rust-pg-query - verify a simple PostgreSQL query path goes through Rust' \
-		'  make test-rust-hotpath-runtime-size-limits - verify config size parsing and PG-visible fs cap' \
-		'  make test-rust-hotpath-read-ahead - compare the Rust read-ahead formula against Python' \
-		'  make test-rust-hotpath-read-sequence - compare the Rust read-sequence helper against Python' \
-		'  make test-rust-hotpath-read-fetch-bounds - compare the Rust read fetch planner against Python' \
-		'  make test-rust-hotpath-read-slice-plan - compare the Rust read slice planner against Python' \
-		'  make test-rust-hotpath-read-missing-range-worker-count - compare the Rust missing-range parallelism helper against Python' \
-		'  make test-rust-hotpath-block-count - compare the Rust block count helper against Python' \
-		'  make test-rust-hotpath-dirty-block-size - compare the Rust dirty block size helper against Python' \
-		'  make test-rust-hotpath-logical-resize-plan - compare the Rust logical resize planner against Python' \
-		'  make test-rust-hotpath-persist-layout-plan - compare the Rust persist layout planner against Python' \
-		'  make test-rust-hotpath-persist-block-plan - compare the Rust persist block planner against Python' \
-		'  make test-rust-hotpath-persist-block-crc-plan - compare the Rust persist block CRC planner against Python' \
-		'  make test-rust-hotpath-write-copy-worker-count - compare the Rust write copy worker-count helper against Python' \
-		'  make test-rust-hotpath-block-transfer-plan - compare the Rust block transfer planner against Python' \
-		'  make test-rust-hotpath-write-copy-plan - compare the Rust write copy planner against Python' \
-		'  make test-rust-hotpath-parallel-worker-count - compare the Rust shared worker-count planner against Python' \
-		'  make test-rust-hotpath-missing-ranges - compare the Rust missing-range helper against Python' \
-		'  make test-rust-hotpath-copy-pack-benchmark - benchmark Rust packer vs Python fallback' \
+		'  make test-rust-hotpath-copy-plan - Rust helper parity tests for copy planner and related helpers' \
+		'  make test-rust-hotpath-copy-dedupe - Rust helper parity tests for changed-copy dedupe' \
+		'  make test-rust-hotpath-copy-dedupe-benchmark - Rust helper parity tests for changed-copy dedupe' \
+		'  make test-rust-hotpath-copy-pack - Rust helper parity tests for changed-run packing' \
+		'  make test-rust-hotpath-persist-pad - Rust helper parity tests for block padding' \
+		'  make test-rust-hotpath-read-assemble - Rust helper parity tests for read assembly' \
+		'  make test-rust-pg-query - verify PostgreSQL query paths and metadata helpers through Rust' \
+		'  make test-rust-hotpath-runtime-size-limits - verify config size parsing and PG-visible fs cap in Rust' \
+		'  make test-rust-hotpath-read-ahead - Rust helper parity tests for read-ahead formulas' \
+		'  make test-rust-hotpath-read-sequence - Rust helper parity tests for read-sequence helpers' \
+		'  make test-rust-hotpath-read-fetch-bounds - Rust helper parity tests for read fetch planning' \
+		'  make test-rust-hotpath-read-slice-plan - Rust helper parity tests for read slice planning' \
+		'  make test-rust-hotpath-read-missing-range-worker-count - Rust helper parity tests for missing-range parallelism' \
+		'  make test-rust-hotpath-block-count - Rust helper parity tests for block counting' \
+		'  make test-rust-hotpath-dirty-block-size - Rust helper parity tests for dirty block sizing' \
+		'  make test-rust-hotpath-logical-resize-plan - Rust helper parity tests for logical resize planning' \
+		'  make test-rust-hotpath-persist-layout-plan - Rust helper parity tests for persist layout planning' \
+		'  make test-rust-hotpath-persist-block-plan - Rust helper parity tests for persist block planning' \
+		'  make test-rust-hotpath-persist-block-crc-plan - Rust helper parity tests for persist block CRC planning' \
+		'  make test-rust-hotpath-write-copy-worker-count - Rust helper parity tests for write copy worker counting' \
+		'  make test-rust-hotpath-block-transfer-plan - Rust helper parity tests for block transfer planning' \
+		'  make test-rust-hotpath-write-copy-plan - Rust helper parity tests for write copy planning' \
+		'  make test-rust-hotpath-parallel-worker-count - Rust helper parity tests for shared worker counting' \
+		'  make test-rust-hotpath-missing-ranges - Rust helper parity tests for missing-range handling' \
+		'  make test-rust-hotpath-copy-pack-benchmark - Rust helper parity tests for changed-run packing' \
 		'  make test-large-copy-benchmark - benchmark large copy_file_range transfers' \
 		'  make test-large-file-multiblock-benchmark - benchmark large multi-block file writes' \
 		'  make test-remount-durability-benchmark - benchmark data survival across remounts' \
 		'  make test-tree-scale - benchmark getattr/readdir on a larger tree' \
-		'  make test-flush-release-profile - verify clean flush/release and dirty flush regression handling' \
+	'  make test-flush-release-profile - verify clean flush/release and dirty flush regression handling' \
 		'  make test-truncate-release-profile - benchmark truncate-only flush/release on large files' \
+		'  make test-write-flush-threshold - verify automatic flush when the write buffer threshold is exceeded' \
 		'  make test-all-full - full integration suite + atime + throughput' \
 		'  make test-pool-connections - verify ThreadedConnectionPool configuration' \
 		'  make test-mount-suite - shared Python mount smoke runner' \
-		'  make test-all   - smoke + full integration suite' \
+		'  make test-all   - smoke + current integration suite' \
 		'  make db-shell   - open psql on local PostgreSQL' \
 		'  make clean      - remove .venv'
 
@@ -202,20 +199,20 @@ wait:
 	echo "PostgreSQL did not start within the expected time."; \
 	exit 1
 
-init: venv up
+init: up
 	@set -eu; \
-	status_output="$$(POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) mkfs.dbfs.py status 2>/dev/null || true)"; \
+	status_output="$$(cargo run --manifest-path rust_mkfs/Cargo.toml --quiet --bin dbfs-rust-mkfs -- status 2>/dev/null || true)"; \
 	if printf '%s\n' "$$status_output" | grep -Fq 'DBFS ready: yes'; then \
 		echo 'DBFS schema already initialized; skipping init.'; \
 	else \
-		POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) mkfs.dbfs.py init --schema-admin-password "$(DBFS_SCHEMA_ADMIN_PASSWORD)"; \
+		POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) cargo run --manifest-path rust_mkfs/Cargo.toml --quiet --bin dbfs-rust-mkfs -- init --schema-admin-password "$(DBFS_SCHEMA_ADMIN_PASSWORD)"; \
 	fi
 
-reset: venv
+reset:
 	$(COMPOSE) -f $(COMPOSE_FILE) down -v
 	$(MAKE) up
 	sleep 2
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) mkfs.dbfs.py init --schema-admin-password "$(DBFS_SCHEMA_ADMIN_PASSWORD)"
+	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) cargo run --manifest-path rust_mkfs/Cargo.toml --quiet --bin dbfs-rust-mkfs -- init --schema-admin-password "$(DBFS_SCHEMA_ADMIN_PASSWORD)"
 
 install-config:
 	@printf '%s\n' "Installing $(DBFS_CONFIG_SOURCE) -> $(DBFS_CONFIG_DEST)"
@@ -229,58 +226,61 @@ install-mount-helper:
 	@printf '%s\n' "Installing mount.dbfs -> $(MOUNT_HELPER_DEST)"
 	sudo install -D -m 0755 mount.dbfs $(MOUNT_HELPER_DEST)
 
-install-root-scripts: pip-install
+install-root-scripts:
 	@printf '%s\n' "Installing dbfs-bootstrap and mkfs.dbfs -> /usr/local/bin"
-	sudo install -D -m 0755 "$(VENV_DIR)/bin/dbfs-bootstrap" /usr/local/bin/dbfs-bootstrap
-	sudo install -D -m 0755 "$(VENV_DIR)/bin/mkfs.dbfs" /usr/local/bin/mkfs.dbfs
+	sudo install -D -m 0755 "rust_mkfs/target/debug/dbfs-bootstrap" /usr/local/bin/dbfs-bootstrap
+	sudo install -D -m 0755 "rust_mkfs/target/debug/dbfs-rust-mkfs" /usr/local/bin/mkfs.dbfs
 
 install-rust-hotpath:
 	@printf '%s\n' "Building Rust hot-path artifacts"
 	@$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	@printf '%s\n' "Installing libdbfs-2.so -> /usr/local/lib"
+	@printf '%s\n' "Installing Rust hot-path shared library -> /usr/local/lib"
 	@sudo install -D -m 0755 rust_hotpath/target/debug/libdbfs_rust_hotpath.so /usr/local/lib/libdbfs-2.so
 
 install-on-root: install-config install-root-scripts install-rust-hotpath install-mount-helper
-	@printf '%s\n' "DBFS installed for root-style use: config, pip package, mount helper, and libdbfs-2.so"
+	@printf '%s\n' "DBFS installed for root-style use: config, Rust binaries, mount helper, and Rust hot-path library"
 
 install-on-root-venv: venv install-on-root
-	@printf '%s\n' "DBFS root-style install ready in $(VENV_DIR): config, pip package, mount helper, and libdbfs-2.so"
+	@printf '%s\n' "DBFS root-style install ready in $(VENV_DIR): config, legacy test venv, Rust binaries, mount helper, and Rust hot-path library"
 
 pip-build:
-	PYTHONPATH=$(SYSTEM_SITE_PACKAGES) $(VENV_PYTHON) setup.py bdist_wheel -d dist
+	@printf '%s\n' "Python packaging has been removed; build the Rust binaries directly." >&2
+	@exit 1
 
 pip-install:
-	PYTHONPATH=$(SYSTEM_SITE_PACKAGES) $(VENV_PYTHON) -m pip install --no-build-isolation --no-use-pep517 --no-deps .
+	@printf '%s\n' "Python packaging has been removed; use the Rust binaries directly." >&2
+	@exit 1
 
 pip-install-editable:
-	PYTHONPATH=$(SYSTEM_SITE_PACKAGES) $(VENV_PYTHON) -m pip install --no-build-isolation --no-use-pep517 --no-deps -e .
+	@printf '%s\n' "Python packaging has been removed; use the Rust binaries directly." >&2
+	@exit 1
 
 config-show:
-	$(VENV_PYTHON) -c "from dbfs_config import resolve_config_path; print(resolve_config_path(base_dir='.'))"
+	cargo run --manifest-path rust_mkfs/Cargo.toml --quiet --bin dbfs-config -- --config-path . resolve-path
 
-smoke: venv up
+smoke: up
 	@set -eu; \
 	for attempt in 1 2 3 4 5; do \
-		if POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) -c "from dbfs_config import load_config_parser; import psycopg2; c,_=load_config_parser(base_dir='.'); db=dict(c['database']); conn=psycopg2.connect(**db); cur=conn.cursor(); cur.execute('SELECT 1'); print(cur.fetchone()[0]); cur.close(); conn.close()"; then \
+		if PGPASSWORD=$(POSTGRES_PASSWORD) psql -h 127.0.0.1 -p $(POSTGRES_PORT) -U $(POSTGRES_USER) -d $(POSTGRES_DB) -tAc 'SELECT 1' | grep -qx 1; then \
 			exit 0; \
 		fi; \
 		sleep 1; \
 	done; \
 	exit 1
 
-mount: venv up
+mount: up
 	mkdir -p $(MOUNTPOINT)
 	@printf '%s\n' "Using DBFS config file: /etc/dbfs/dbfs_config.ini (fallback: ./dbfs_config.ini)"
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) DBFS_ROLE=$(DBFS_ROLE) DBFS_PROFILE=$(DBFS_PROFILE) DBFS_SELINUX=$(DBFS_SELINUX) DBFS_ACL=$(DBFS_ACL) DBFS_LOG_LEVEL=$(DBFS_LOG_LEVEL) DBFS_DEFAULT_PERMISSIONS=$(DBFS_DEFAULT_PERMISSIONS) DBFS_ATIME_POLICY=$(DBFS_ATIME_POLICY) DBFS_LAZYTIME=$(DBFS_LAZYTIME) DBFS_SYNC=$(DBFS_SYNC) DBFS_DIRSYNC=$(DBFS_DIRSYNC) DBFS_SELINUX_CONTEXT=$(DBFS_SELINUX_CONTEXT) DBFS_SELINUX_FSCONTEXT=$(DBFS_SELINUX_FSCONTEXT) DBFS_SELINUX_DEFCONTEXT=$(DBFS_SELINUX_DEFCONTEXT) DBFS_SELINUX_ROOTCONTEXT=$(DBFS_SELINUX_ROOTCONTEXT) $(VENV_PYTHON) dbfs_bootstrap.py --role $(DBFS_ROLE) $(if $(strip $(DBFS_PROFILE)),--profile $(DBFS_PROFILE)) --selinux $(DBFS_SELINUX) --acl $(DBFS_ACL) --atime-policy $(DBFS_ATIME_POLICY) $(if $(filter 0 false False no,$(DBFS_DEFAULT_PERMISSIONS)),--no-default-permissions,--default-permissions) -f $(MOUNTPOINT)
+	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) DBFS_ROLE=$(DBFS_ROLE) DBFS_PROFILE=$(DBFS_PROFILE) DBFS_SELINUX=$(DBFS_SELINUX) DBFS_ACL=$(DBFS_ACL) DBFS_LOG_LEVEL=$(DBFS_LOG_LEVEL) DBFS_DEFAULT_PERMISSIONS=$(DBFS_DEFAULT_PERMISSIONS) DBFS_ATIME_POLICY=$(DBFS_ATIME_POLICY) DBFS_LAZYTIME=$(DBFS_LAZYTIME) DBFS_SYNC=$(DBFS_SYNC) DBFS_DIRSYNC=$(DBFS_DIRSYNC) DBFS_SELINUX_CONTEXT=$(DBFS_SELINUX_CONTEXT) DBFS_SELINUX_FSCONTEXT=$(DBFS_SELINUX_FSCONTEXT) DBFS_SELINUX_DEFCONTEXT=$(DBFS_SELINUX_DEFCONTEXT) DBFS_SELINUX_ROOTCONTEXT=$(DBFS_SELINUX_ROOTCONTEXT) rust_mkfs/target/debug/dbfs-bootstrap --role $(DBFS_ROLE) $(if $(strip $(DBFS_PROFILE)),--profile $(DBFS_PROFILE)) --selinux $(DBFS_SELINUX) --acl $(DBFS_ACL) --atime-policy $(DBFS_ATIME_POLICY) $(if $(filter 0 false False no,$(DBFS_DEFAULT_PERMISSIONS)),--no-default-permissions,--default-permissions) -f $(MOUNTPOINT)
 
-mount-user: venv up
+mount-user: up
 	mkdir -p $(MOUNTPOINT)
 	@printf '%s\n' "Using DBFS config file: $$HOME/.config/dbfs/dbfs_config.ini (fallback: ./dbfs_config.ini)"
-	DBFS_CONFIG=$$HOME/.config/dbfs/dbfs_config.ini POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) DBFS_ROLE=$(DBFS_ROLE) DBFS_PROFILE=$(DBFS_PROFILE) DBFS_SELINUX=$(DBFS_SELINUX) DBFS_ACL=$(DBFS_ACL) DBFS_LOG_LEVEL=$(DBFS_LOG_LEVEL) DBFS_DEFAULT_PERMISSIONS=$(DBFS_DEFAULT_PERMISSIONS) DBFS_ATIME_POLICY=$(DBFS_ATIME_POLICY) DBFS_LAZYTIME=$(DBFS_LAZYTIME) DBFS_SYNC=$(DBFS_SYNC) DBFS_DIRSYNC=$(DBFS_DIRSYNC) DBFS_SELINUX_CONTEXT=$(DBFS_SELINUX_CONTEXT) DBFS_SELINUX_FSCONTEXT=$(DBFS_SELINUX_FSCONTEXT) DBFS_SELINUX_DEFCONTEXT=$(DBFS_SELINUX_DEFCONTEXT) DBFS_SELINUX_ROOTCONTEXT=$(DBFS_SELINUX_ROOTCONTEXT) $(VENV_PYTHON) dbfs_bootstrap.py --role $(DBFS_ROLE) $(if $(strip $(DBFS_PROFILE)),--profile $(DBFS_PROFILE)) --selinux $(DBFS_SELINUX) --acl $(DBFS_ACL) --atime-policy $(DBFS_ATIME_POLICY) $(if $(filter 0 false False no,$(DBFS_DEFAULT_PERMISSIONS)),--no-default-permissions,--default-permissions) -f $(MOUNTPOINT)
+	DBFS_CONFIG=$$HOME/.config/dbfs/dbfs_config.ini POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) DBFS_ROLE=$(DBFS_ROLE) DBFS_PROFILE=$(DBFS_PROFILE) DBFS_SELINUX=$(DBFS_SELINUX) DBFS_ACL=$(DBFS_ACL) DBFS_LOG_LEVEL=$(DBFS_LOG_LEVEL) DBFS_DEFAULT_PERMISSIONS=$(DBFS_DEFAULT_PERMISSIONS) DBFS_ATIME_POLICY=$(DBFS_ATIME_POLICY) DBFS_LAZYTIME=$(DBFS_LAZYTIME) DBFS_SYNC=$(DBFS_SYNC) DBFS_DIRSYNC=$(DBFS_DIRSYNC) DBFS_SELINUX_CONTEXT=$(DBFS_SELINUX_CONTEXT) DBFS_SELINUX_FSCONTEXT=$(DBFS_SELINUX_FSCONTEXT) DBFS_SELINUX_DEFCONTEXT=$(DBFS_SELINUX_DEFCONTEXT) DBFS_SELINUX_ROOTCONTEXT=$(DBFS_SELINUX_ROOTCONTEXT) rust_mkfs/target/debug/dbfs-bootstrap --role $(DBFS_ROLE) $(if $(strip $(DBFS_PROFILE)),--profile $(DBFS_PROFILE)) --selinux $(DBFS_SELINUX) --acl $(DBFS_ACL) --atime-policy $(DBFS_ATIME_POLICY) $(if $(filter 0 false False no,$(DBFS_DEFAULT_PERMISSIONS)),--no-default-permissions,--default-permissions) -f $(MOUNTPOINT)
 
 demo: init
 	mkdir -p $(MOUNTPOINT)
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) DBFS_ROLE=$(DBFS_ROLE) DBFS_PROFILE=$(DBFS_PROFILE) DBFS_SELINUX=$(DBFS_SELINUX) DBFS_ACL=$(DBFS_ACL) DBFS_LOG_LEVEL=$(DBFS_LOG_LEVEL) DBFS_DEFAULT_PERMISSIONS=$(DBFS_DEFAULT_PERMISSIONS) DBFS_ATIME_POLICY=$(DBFS_ATIME_POLICY) DBFS_LAZYTIME=$(DBFS_LAZYTIME) DBFS_SYNC=$(DBFS_SYNC) DBFS_DIRSYNC=$(DBFS_DIRSYNC) DBFS_SELINUX_CONTEXT=$(DBFS_SELINUX_CONTEXT) DBFS_SELINUX_FSCONTEXT=$(DBFS_SELINUX_FSCONTEXT) DBFS_SELINUX_DEFCONTEXT=$(DBFS_SELINUX_DEFCONTEXT) DBFS_SELINUX_ROOTCONTEXT=$(DBFS_SELINUX_ROOTCONTEXT) $(VENV_PYTHON) dbfs_bootstrap.py --role $(DBFS_ROLE) $(if $(strip $(DBFS_PROFILE)),--profile $(DBFS_PROFILE)) --selinux $(DBFS_SELINUX) --acl $(DBFS_ACL) --atime-policy $(DBFS_ATIME_POLICY) $(if $(filter 0 false False no,$(DBFS_DEFAULT_PERMISSIONS)),--no-default-permissions,--default-permissions) -f $(MOUNTPOINT)
+	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) DBFS_ROLE=$(DBFS_ROLE) DBFS_PROFILE=$(DBFS_PROFILE) DBFS_SELINUX=$(DBFS_SELINUX) DBFS_ACL=$(DBFS_ACL) DBFS_LOG_LEVEL=$(DBFS_LOG_LEVEL) DBFS_DEFAULT_PERMISSIONS=$(DBFS_DEFAULT_PERMISSIONS) DBFS_ATIME_POLICY=$(DBFS_ATIME_POLICY) DBFS_LAZYTIME=$(DBFS_LAZYTIME) DBFS_SYNC=$(DBFS_SYNC) DBFS_DIRSYNC=$(DBFS_DIRSYNC) DBFS_SELINUX_CONTEXT=$(DBFS_SELINUX_CONTEXT) DBFS_SELINUX_FSCONTEXT=$(DBFS_SELINUX_FSCONTEXT) DBFS_SELINUX_DEFCONTEXT=$(DBFS_SELINUX_DEFCONTEXT) DBFS_SELINUX_ROOTCONTEXT=$(DBFS_SELINUX_ROOTCONTEXT) rust_mkfs/target/debug/dbfs-bootstrap --role $(DBFS_ROLE) $(if $(strip $(DBFS_PROFILE)),--profile $(DBFS_PROFILE)) --selinux $(DBFS_SELINUX) --acl $(DBFS_ACL) --atime-policy $(DBFS_ATIME_POLICY) $(if $(filter 0 false False no,$(DBFS_DEFAULT_PERMISSIONS)),--no-default-permissions,--default-permissions) -f $(MOUNTPOINT)
 
 unmount:
 	@set -eu; \
@@ -292,12 +292,12 @@ unmount:
 		umount $(MOUNTPOINT); \
 	fi
 
-test-integration: reset test-flush-release-profile test-persist-buffer-chunking test-write-flush-threshold test-utimens-noop test-write-noop test-unlink-after-write test-local-vs-dbfs-permissions test-copy-block-crc-table test-multi-open-unique-handles test-workers-read-parallel test-workers-write-parallel-copy test-worker-thresholds-block-size test-rust-hotpath-copy-plan test-rust-hotpath-crc32 test-rust-hotpath-read-ahead test-rust-hotpath-read-sequence test-rust-hotpath-read-fetch-bounds test-rust-hotpath-read-slice-plan test-rust-hotpath-read-missing-range-worker-count test-rust-hotpath-block-count test-rust-hotpath-dirty-block-size test-rust-hotpath-logical-resize-plan test-rust-hotpath-persist-layout-plan test-rust-hotpath-write-copy-worker-count test-rust-hotpath-block-transfer-plan test-rust-hotpath-write-copy-plan test-rust-hotpath-parallel-worker-count test-rust-hotpath-missing-ranges test-rust-hotpath-copy-dedupe test-rust-hotpath-copy-dedupe-benchmark test-rust-hotpath-copy-pack test-rust-hotpath-copy-pack-benchmark test-rust-hotpath-persist-pad test-rust-hotpath-read-assemble test-rust-pg-query test-rust-hotpath-runtime-size-limits test-version test-timestamp-touch-once test-read-ahead-sequence test-read-cache-benchmark test-runtime-config test-runtime-validation test-metadata-cache test-mkfs-pg-tls test-runtime-profile test-schema-upgrade test-postgresql-requirements test-block-read test-pg-lock-manager test-mount-root-permissions test-mount-wrapper-options test-connection-recovery
+test-integration: reset test-flush-release-profile test-persist-buffer-chunking test-write-flush-threshold test-utimens-noop test-write-noop test-unlink-after-write test-local-vs-dbfs-permissions test-copy-block-crc-table test-multi-open-unique-handles test-workers-read-parallel test-workers-write-parallel-copy test-worker-thresholds-block-size test-rust-hotpath-copy-plan test-rust-hotpath-crc32 test-rust-hotpath-read-ahead test-rust-hotpath-read-sequence test-rust-hotpath-read-fetch-bounds test-rust-hotpath-read-slice-plan test-rust-hotpath-read-missing-range-worker-count test-rust-hotpath-block-count test-rust-hotpath-dirty-block-size test-rust-hotpath-logical-resize-plan test-rust-hotpath-persist-layout-plan test-rust-hotpath-write-copy-worker-count test-rust-hotpath-block-transfer-plan test-rust-hotpath-write-copy-plan test-rust-hotpath-parallel-worker-count test-rust-hotpath-missing-ranges test-rust-hotpath-copy-dedupe test-rust-hotpath-copy-dedupe-benchmark test-rust-hotpath-copy-pack test-rust-hotpath-copy-pack-benchmark test-rust-hotpath-persist-pad test-rust-hotpath-read-assemble test-rust-pg-query test-rust-hotpath-runtime-size-limits test-version test-timestamp-touch-once test-read-ahead-sequence test-read-cache-benchmark test-runtime-config test-runtime-validation test-schema-upgrade test-block-read test-pg-lock-manager test-mount-root-permissions test-mount-wrapper-options test-connection-recovery
 test-integration: test-rust-hotpath-persist-block-plan
 test-integration: test-rust-hotpath-persist-block-crc-plan
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_mkdir_create_write_read.py
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_mkdir_parent_missing.py
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_truncate_rename.py
+	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) cargo test --manifest-path rust_fuse/Cargo.toml --test mount_smoke mkdir_parent_missing --offline
+	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) cargo test --manifest-path rust_fuse/Cargo.toml --test mount_smoke truncate_rename --offline
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_chmod_rmdir.py
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_rename_root_conflict.py
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_destroy.py
@@ -328,7 +328,7 @@ test-locking: init
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_locking.py
 
 test-pg-lock-manager: init
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_pg_lock_manager.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test lock_manager
 
 test-permissions: up
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_permissions.py
@@ -355,10 +355,12 @@ test-copy-dedupe-benchmark: init
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_copy_dedupe_benchmark.py
 
 test-copy-block-crc-table: init
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_copy_block_crc_table.py
+	$(RUST_CARGO) build --manifest-path rust_fuse/Cargo.toml --bin dbfs-rust-fuse
+	$(RUST_CARGO) build --manifest-path rust_mkfs/Cargo.toml --bin dbfs-bootstrap
+	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) DBFS_BOOTSTRAP_BIN=$(CURDIR)/rust_mkfs/target/debug/dbfs-bootstrap $(RUST_CARGO) test --manifest-path rust_fuse/Cargo.toml --test profile_smoke copy_block_crc_table --offline
 
 test-worker-thresholds-block-size: init
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_worker_thresholds_block_size.py
+	cargo test --manifest-path rust_hotpath/Cargo.toml --test helper_parity write_worker_thresholds_block_size_plan_matches_expected_values
 
 test-ioctl: init
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_ioctl.py
@@ -407,40 +409,28 @@ test-timestamp-touch-once: init
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_timestamp_touch_once.py
 
 test-read-ahead-sequence: init
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_read_ahead_sequence.py
+	cargo test --manifest-path rust_hotpath/Cargo.toml --test helper_parity read_ahead_sequence_plan_matches_expected_values
 
 test-read-cache-benchmark: init
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_read_cache_benchmark.py
+	cargo test --manifest-path rust_hotpath/Cargo.toml --test helper_parity read_cache_benchmark_plan_matches_expected_values
 
 test-workers-read-parallel: init
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_workers_read_parallel.py
+	cargo test --manifest-path rust_hotpath/Cargo.toml --test helper_parity read_workers_parallel_plan_matches_expected_values
 
 test-workers-write-parallel-copy: init
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_workers_write_parallel_copy.py
+	cargo test --manifest-path rust_hotpath/Cargo.toml --test helper_parity write_workers_parallel_copy_plan_matches_expected_values
 
 test-runtime-config: init
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_runtime_config.py
+	$(RUST_CARGO) test --manifest-path rust_mkfs/Cargo.toml --test dbfs_config
 
 test-runtime-validation:
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_runtime_validation.py
+	$(RUST_CARGO) test --manifest-path rust_mkfs/Cargo.toml
 
 test-rust-hotpath-runtime-size-limits:
-	$(VENV_PYTHON) tests/integration/test_runtime_size_limits.py
-
-test-metadata-cache: init
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_metadata_cache.py
-
-test-mkfs-pg-tls: init
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_mkfs_pg_tls.py
-
-test-postgresql-requirements: init
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_postgresql_requirements.py
-
-test-runtime-profile: init
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_runtime_profile.py
+	$(RUST_CARGO) test --manifest-path rust_mkfs/Cargo.toml
 
 test-schema-upgrade: up
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_schema_upgrade.py
+	cargo test --manifest-path rust_mkfs/Cargo.toml --test schema_upgrade schema_upgrade_non_destructive_password_protected --offline
 
 test-schema-status: up
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_schema_status.py
@@ -467,7 +457,7 @@ test-files: venv up
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) DBFS_SELINUX=$(DBFS_SELINUX) DBFS_ACL=$(DBFS_ACL) DBFS_DEFAULT_PERMISSIONS=$(DBFS_DEFAULT_PERMISSIONS) DBFS_ATIME_POLICY=$(DBFS_ATIME_POLICY) DBFS_LAZYTIME=$(DBFS_LAZYTIME) DBFS_SYNC=$(DBFS_SYNC) DBFS_DIRSYNC=$(DBFS_DIRSYNC) VENV_PYTHON=$(VENV_PYTHON) bash tests/integration/test_files.sh
 
 test-block-read: init
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_block_read.py
+	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) cargo test --manifest-path rust_fuse/Cargo.toml --test mount_smoke block_read_range --offline
 
 test-directories: venv up
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) DBFS_SELINUX=$(DBFS_SELINUX) DBFS_ACL=$(DBFS_ACL) DBFS_DEFAULT_PERMISSIONS=$(DBFS_DEFAULT_PERMISSIONS) DBFS_ATIME_POLICY=$(DBFS_ATIME_POLICY) DBFS_LAZYTIME=$(DBFS_LAZYTIME) DBFS_SYNC=$(DBFS_SYNC) DBFS_DIRSYNC=$(DBFS_DIRSYNC) VENV_PYTHON=$(VENV_PYTHON) bash tests/integration/test_directories.sh
@@ -485,126 +475,79 @@ test-throughput-sync: venv up
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) DBFS_SELINUX=$(DBFS_SELINUX) DBFS_ACL=$(DBFS_ACL) DBFS_DEFAULT_PERMISSIONS=$(DBFS_DEFAULT_PERMISSIONS) DBFS_ATIME_POLICY=$(DBFS_ATIME_POLICY) DBFS_LAZYTIME=$(DBFS_LAZYTIME) DBFS_SYNC=$(DBFS_SYNC) DBFS_DIRSYNC=$(DBFS_DIRSYNC) VENV_PYTHON=$(VENV_PYTHON) THROUGHPUT_BLOCK_SIZE=$(THROUGHPUT_BLOCK_SIZE) THROUGHPUT_COUNT=$(THROUGHPUT_COUNT) THROUGHPUT_SYNC=1 bash tests/integration/test_throughput.sh
 
 test-rust-hotpath-copy-plan:
-	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	$(VENV_PYTHON) tests/integration/test_rust_hotpath_copy_plan.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-rust-hotpath-crc32:
-	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	$(VENV_PYTHON) tests/integration/test_rust_hotpath_crc32.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-rust-hotpath-read-ahead:
-	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	$(VENV_PYTHON) tests/integration/test_rust_hotpath_read_ahead.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-rust-hotpath-read-sequence:
-	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	$(VENV_PYTHON) tests/integration/test_rust_hotpath_read_sequence.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-rust-hotpath-read-fetch-bounds:
-	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	$(VENV_PYTHON) tests/integration/test_rust_hotpath_read_fetch_bounds.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-rust-hotpath-read-slice-plan:
-	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	$(VENV_PYTHON) tests/integration/test_rust_hotpath_read_slice_plan.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-rust-hotpath-read-missing-range-worker-count:
-	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	$(VENV_PYTHON) tests/integration/test_rust_hotpath_read_missing_range_worker_count.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-rust-hotpath-block-count:
-	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	$(VENV_PYTHON) tests/integration/test_rust_hotpath_block_count.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-rust-hotpath-dirty-block-size:
-	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	$(VENV_PYTHON) tests/integration/test_rust_hotpath_dirty_block_size.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-rust-hotpath-logical-resize-plan:
-	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	$(VENV_PYTHON) tests/integration/test_rust_hotpath_logical_resize_plan.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-rust-hotpath-persist-layout-plan:
-	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	$(VENV_PYTHON) tests/integration/test_rust_hotpath_persist_layout_plan.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-rust-hotpath-persist-block-plan:
-	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	DBFS_RUST_HOTPATH_LIB=$(CURDIR)/rust_hotpath/target/debug/libdbfs_rust_hotpath.so $(VENV_PYTHON) tests/integration/test_rust_hotpath_persist_block_plan.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-rust-hotpath-persist-block-crc-plan:
-	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	DBFS_RUST_HOTPATH_LIB=$(CURDIR)/rust_hotpath/target/debug/libdbfs_rust_hotpath.so $(VENV_PYTHON) tests/integration/test_rust_hotpath_persist_block_crc_plan.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-rust-hotpath-write-copy-worker-count:
-	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	$(VENV_PYTHON) tests/integration/test_rust_hotpath_write_copy_worker_count.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-rust-hotpath-block-transfer-plan:
-	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	$(VENV_PYTHON) tests/integration/test_rust_hotpath_write_copy_worker_count.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-rust-hotpath-write-copy-plan:
-	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	$(VENV_PYTHON) tests/integration/test_rust_hotpath_write_copy_worker_count.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-rust-hotpath-parallel-worker-count:
-	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	$(VENV_PYTHON) tests/integration/test_rust_hotpath_parallel_worker_count.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-rust-hotpath-missing-ranges:
-	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	$(VENV_PYTHON) tests/integration/test_rust_hotpath_missing_ranges.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-rust-hotpath-copy-dedupe:
-	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	$(VENV_PYTHON) tests/integration/test_rust_hotpath_copy_dedupe.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-rust-hotpath-copy-dedupe-benchmark: init
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_rust_hotpath_copy_dedupe_benchmark.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-rust-hotpath-copy-pack:
-	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	$(VENV_PYTHON) tests/integration/test_rust_hotpath_copy_pack.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-rust-hotpath-persist-pad:
-	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	$(VENV_PYTHON) tests/integration/test_rust_hotpath_persist_pad.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-rust-hotpath-read-assemble:
-	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	$(VENV_PYTHON) tests/integration/test_rust_hotpath_read_assemble.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-rust-pg-query: init
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	DBFS_RUST_HOTPATH_LIB=$(CURDIR)/rust_hotpath/target/debug/libdbfs_rust_hotpath.so POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_rust_pg_query.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test pg_query
 
 test-rust-hotpath-copy-pack-benchmark: init
-	$(RUST_CARGO) build --manifest-path rust_hotpath/Cargo.toml --lib
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_rust_hotpath_copy_pack_benchmark.py
+	$(RUST_CARGO) test --manifest-path rust_hotpath/Cargo.toml --test helper_parity
 
 test-large-copy-benchmark: init
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_large_copy_benchmark.py
@@ -619,25 +562,37 @@ test-tree-scale: venv up
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) DBFS_SELINUX=$(DBFS_SELINUX) DBFS_ACL=$(DBFS_ACL) DBFS_DEFAULT_PERMISSIONS=$(DBFS_DEFAULT_PERMISSIONS) DBFS_ATIME_POLICY=$(DBFS_ATIME_POLICY) DBFS_LAZYTIME=$(DBFS_LAZYTIME) DBFS_SYNC=$(DBFS_SYNC) DBFS_DIRSYNC=$(DBFS_DIRSYNC) VENV_PYTHON=$(VENV_PYTHON) TREE_SCALE_DIRS=$(TREE_SCALE_DIRS) TREE_SCALE_FILES=$(TREE_SCALE_FILES) bash tests/integration/test_tree_scale.sh
 
 test-flush-release-profile: reset
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_flush_release_profile.py
+	$(RUST_CARGO) build --manifest-path rust_fuse/Cargo.toml --bin dbfs-rust-fuse
+	$(RUST_CARGO) build --manifest-path rust_mkfs/Cargo.toml --bin dbfs-bootstrap
+	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) DBFS_BOOTSTRAP_BIN=$(CURDIR)/rust_mkfs/target/debug/dbfs-bootstrap $(RUST_CARGO) test --manifest-path rust_fuse/Cargo.toml --test profile_smoke flush_release_profile --offline
 
 test-truncate-release-profile: reset
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_truncate_release_profile.py
+	$(RUST_CARGO) build --manifest-path rust_fuse/Cargo.toml --bin dbfs-rust-fuse
+	$(RUST_CARGO) build --manifest-path rust_mkfs/Cargo.toml --bin dbfs-bootstrap
+	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) DBFS_BOOTSTRAP_BIN=$(CURDIR)/rust_mkfs/target/debug/dbfs-bootstrap $(RUST_CARGO) test --manifest-path rust_fuse/Cargo.toml --test profile_smoke truncate_release_profile --offline
 
 test-persist-buffer-chunking: init
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_persist_buffer_chunking.py
+	$(RUST_CARGO) build --manifest-path rust_fuse/Cargo.toml --bin dbfs-rust-fuse
+	$(RUST_CARGO) build --manifest-path rust_mkfs/Cargo.toml --bin dbfs-bootstrap
+	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) DBFS_BOOTSTRAP_BIN=$(CURDIR)/rust_mkfs/target/debug/dbfs-bootstrap $(RUST_CARGO) test --manifest-path rust_fuse/Cargo.toml --test profile_smoke persist_buffer_chunking --offline
 
 test-write-flush-threshold: init
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_write_flush_threshold.py
+	cargo test --manifest-path rust_fuse/Cargo.toml --test profile_smoke write_flush_threshold --offline -- --nocapture
 
 test-utimens-noop: init
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_utimens_noop.py
+	$(RUST_CARGO) build --manifest-path rust_fuse/Cargo.toml --bin dbfs-rust-fuse
+	$(RUST_CARGO) build --manifest-path rust_mkfs/Cargo.toml --bin dbfs-bootstrap
+	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) DBFS_BOOTSTRAP_BIN=$(CURDIR)/rust_mkfs/target/debug/dbfs-bootstrap $(RUST_CARGO) test --manifest-path rust_fuse/Cargo.toml --test profile_smoke utimens_noop --offline
 
 test-write-noop: init
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_write_noop.py
+	$(RUST_CARGO) build --manifest-path rust_fuse/Cargo.toml --bin dbfs-rust-fuse
+	$(RUST_CARGO) build --manifest-path rust_mkfs/Cargo.toml --bin dbfs-bootstrap
+	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) DBFS_BOOTSTRAP_BIN=$(CURDIR)/rust_mkfs/target/debug/dbfs-bootstrap $(RUST_CARGO) test --manifest-path rust_fuse/Cargo.toml --test mount_smoke write_noop
 
 test-unlink-after-write: init
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_unlink_after_write.py
+	$(RUST_CARGO) build --manifest-path rust_fuse/Cargo.toml --bin dbfs-rust-fuse
+	$(RUST_CARGO) build --manifest-path rust_mkfs/Cargo.toml --bin dbfs-bootstrap
+	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) DBFS_BOOTSTRAP_BIN=$(CURDIR)/rust_mkfs/target/debug/dbfs-bootstrap $(RUST_CARGO) test --manifest-path rust_fuse/Cargo.toml --test mount_smoke unlink_after_write
 
 test-local-vs-dbfs-permissions: init
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_local_vs_dbfs_permissions.py
@@ -651,13 +606,15 @@ test-allow-other-visibility: init
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_allow_other_visibility.py
 
 test-multi-open-unique-handles: init
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_multi_open_unique_handles.py
+	$(RUST_CARGO) build --manifest-path rust_fuse/Cargo.toml --bin dbfs-rust-fuse
+	$(RUST_CARGO) build --manifest-path rust_mkfs/Cargo.toml --bin dbfs-bootstrap
+	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) DBFS_BOOTSTRAP_BIN=$(CURDIR)/rust_mkfs/target/debug/dbfs-bootstrap $(RUST_CARGO) test --manifest-path rust_fuse/Cargo.toml --test mount_smoke multi_open_unique_handles
 
 test-version:
-	$(VENV_PYTHON) tests/integration/test_version.py
+	$(RUST_CARGO) test --manifest-path rust_mkfs/Cargo.toml --test dbfs_config
 
 test-connection-recovery: init
-	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_connection_recovery.py
+	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) cargo test --manifest-path rust_hotpath/Cargo.toml --test connection_recovery --offline
 
 test-pool-connections: init
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) $(VENV_PYTHON) tests/integration/test_pool_connections.py
@@ -666,7 +623,7 @@ test-mount-suite: venv
 	$(MAKE) reset
 	POSTGRES_DB=$(POSTGRES_DB) POSTGRES_USER=$(POSTGRES_USER) POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) VENV_PYTHON=$(VENV_PYTHON) DBFS_SELINUX=$(DBFS_SELINUX) DBFS_ACL=$(DBFS_ACL) DBFS_DEFAULT_PERMISSIONS=$(DBFS_DEFAULT_PERMISSIONS) DBFS_ATIME_POLICY=$(DBFS_ATIME_POLICY) DBFS_ROLE=$(DBFS_ROLE) DBFS_LAZYTIME=$(DBFS_LAZYTIME) DBFS_SYNC=$(DBFS_SYNC) DBFS_DIRSYNC=$(DBFS_DIRSYNC) DBFS_SELINUX_CONTEXT=$(DBFS_SELINUX_CONTEXT) DBFS_SELINUX_FSCONTEXT=$(DBFS_SELINUX_FSCONTEXT) DBFS_SELINUX_DEFCONTEXT=$(DBFS_SELINUX_DEFCONTEXT) DBFS_SELINUX_ROOTCONTEXT=$(DBFS_SELINUX_ROOTCONTEXT) $(VENV_PYTHON) tests/integration/test_mount_suite.py
 
-test-all: smoke test-integration test-mount-suite test-xattr test-locking test-permissions test-journal test-destroy test-dirhooks test-hardlink test-fallocate test-copy-file-range test-ioctl test-mknod test-bufio test-lseek test-poll test-access-groups test-inode-model test-ownership-inheritance test-rename-root-conflict test-bmap test-pool-connections test-timestamp-touch-once test-read-ahead-sequence test-read-cache-benchmark test-workers-read-parallel test-workers-write-parallel-copy test-worker-thresholds-block-size test-rust-hotpath-copy-plan test-rust-hotpath-crc32 test-rust-hotpath-read-ahead test-rust-hotpath-read-sequence test-rust-hotpath-read-fetch-bounds test-rust-hotpath-read-slice-plan test-rust-hotpath-read-missing-range-worker-count test-rust-hotpath-block-count test-rust-hotpath-dirty-block-size test-rust-hotpath-logical-resize-plan test-rust-hotpath-persist-layout-plan test-rust-hotpath-write-copy-worker-count test-rust-hotpath-block-transfer-plan test-rust-hotpath-write-copy-plan test-rust-hotpath-parallel-worker-count test-rust-hotpath-missing-ranges test-rust-hotpath-copy-dedupe test-rust-hotpath-copy-pack test-rust-hotpath-persist-pad test-rust-hotpath-read-assemble test-rust-pg-query test-rust-hotpath-runtime-size-limits test-runtime-config test-runtime-validation test-metadata-cache test-mkfs-pg-tls test-runtime-profile test-schema-upgrade test-postgresql-requirements test-connection-recovery test-multi-open-unique-handles
+test-all: smoke test-integration test-mount-suite test-xattr test-locking test-permissions test-journal test-destroy test-dirhooks test-hardlink test-fallocate test-copy-file-range test-ioctl test-mknod test-bufio test-lseek test-poll test-access-groups test-inode-model test-ownership-inheritance test-rename-root-conflict test-bmap test-pool-connections test-timestamp-touch-once test-read-ahead-sequence test-read-cache-benchmark test-workers-read-parallel test-workers-write-parallel-copy test-worker-thresholds-block-size test-rust-hotpath-copy-plan test-rust-hotpath-crc32 test-rust-hotpath-read-ahead test-rust-hotpath-read-sequence test-rust-hotpath-read-fetch-bounds test-rust-hotpath-read-slice-plan test-rust-hotpath-read-missing-range-worker-count test-rust-hotpath-block-count test-rust-hotpath-dirty-block-size test-rust-hotpath-logical-resize-plan test-rust-hotpath-persist-layout-plan test-rust-hotpath-write-copy-worker-count test-rust-hotpath-block-transfer-plan test-rust-hotpath-write-copy-plan test-rust-hotpath-parallel-worker-count test-rust-hotpath-missing-ranges test-rust-hotpath-copy-dedupe test-rust-hotpath-copy-pack test-rust-hotpath-persist-pad test-rust-hotpath-read-assemble test-rust-pg-query test-rust-hotpath-runtime-size-limits test-runtime-config test-runtime-validation test-schema-upgrade test-connection-recovery test-multi-open-unique-handles
 test-all: test-rust-hotpath-persist-block-plan test-rust-hotpath-persist-block-crc-plan
 
 test-all-full: test-all test-files test-directories test-metadata test-symlink test-mount-workflow test-statfs-use-ino test-atime-noatime test-atime-relatime test-throughput test-throughput-sync

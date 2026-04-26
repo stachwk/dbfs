@@ -7,8 +7,12 @@ tests/integration/__pycache__/
 .codex
 *.patch
 *.orgin
-rust_hotpath/target/
 
 # MemPalace per-project files (issue #185)
 mempalace.yaml
 entities.json
+dbfs_version.py
+
+rust_fuse/target/debug/
+rust_hotpath/target/debug
+rust_mkfs/target/debug/

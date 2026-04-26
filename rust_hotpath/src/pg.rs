@@ -37,6 +37,7 @@ unsafe extern "C" {
         resultFormat: c_int,
     ) -> *mut PGresult;
     fn PQresultStatus(res: *const PGresult) -> c_int;
+    fn PQresultErrorMessage(res: *const PGresult) -> *const c_char;
     fn PQntuples(res: *const PGresult) -> c_int;
     fn PQnfields(res: *const PGresult) -> c_int;
     fn PQgetvalue(res: *const PGresult, row_number: c_int, field_number: c_int) -> *const c_char;
@@ -52,6 +53,19 @@ fn conn_error(conn: *const PGconn) -> String {
         let error = PQerrorMessage(conn);
         if error.is_null() {
             return "postgres connection error".to_string();
+        }
+        CStr::from_ptr(error).to_string_lossy().trim().to_string()
+    }
+}
+
+fn result_error(res: *const PGresult) -> String {
+    if res.is_null() {
+        return "postgres result error".to_string();
+    }
+    unsafe {
+        let error = PQresultErrorMessage(res);
+        if error.is_null() {
+            return "postgres result error".to_string();
         }
         CStr::from_ptr(error).to_string_lossy().trim().to_string()
     }
@@ -168,11 +182,13 @@ unsafe fn exec_command(conn: *mut PGconn, sql: &CString) -> Result<(), String> {
         return Err(conn_error(conn));
     }
     let status = PQresultStatus(res);
-    PQclear(res);
     if status == PGRES_COMMAND_OK {
+        PQclear(res);
         Ok(())
     } else {
-        Err(conn_error(conn))
+        let error = result_error(res);
+        PQclear(res);
+        Err(error)
     }
 }
 
@@ -203,11 +219,13 @@ unsafe fn exec_params(conn: *mut PGconn, sql: &CString, params: &[&CString]) -> 
 unsafe fn exec_command_params(conn: *mut PGconn, sql: &CString, params: &[&CString]) -> Result<(), String> {
     let res = exec_params(conn, sql, params)?;
     let status = PQresultStatus(res);
-    PQclear(res);
     if status == PGRES_COMMAND_OK {
+        PQclear(res);
         Ok(())
     } else {
-        Err(conn_error(conn))
+        let error = result_error(res);
+        PQclear(res);
+        Err(error)
     }
 }
 
@@ -392,6 +410,7 @@ impl DbRepo {
             if text.is_empty() {
                 return Ok(None);
             }
+            let text = text.lines().collect::<String>();
             let mut bytes = BASE64_STANDARD
                 .decode(text.trim())
                 .map_err(|_| "invalid base64 block data".to_string())?;
@@ -531,6 +550,25 @@ impl DbRepo {
                 }
             };
             result
+        })
+    }
+
+    pub fn exec(&self, sql: &str) -> Result<(), String> {
+        let sql = CString::new(sql).map_err(|_| "SQL contains NUL byte".to_string())?;
+        self.with_cached_connection(|conn| unsafe {
+            let res = PQexec(conn, sql.as_ptr());
+            if res.is_null() {
+                return Err(conn_error(conn));
+            }
+            let status = PQresultStatus(res);
+            if status == PGRES_COMMAND_OK {
+                PQclear(res);
+                Ok(())
+            } else {
+                let error = result_error(res);
+                PQclear(res);
+                Err(error)
+            }
         })
     }
 
@@ -2031,16 +2069,16 @@ impl DbRepo {
         .map_err(|_| "SQL contains NUL byte".to_string())?;
         let sql_null_parent = CString::new(
             "
-            INSERT INTO hardlinks (id_file, id_directory, name, uid, gid, creation_date, modification_date, access_date)
-            VALUES ($1, NULL, $2, $3, $4, NOW(), NOW(), NOW())
+            INSERT INTO hardlinks (id_file, id_directory, name, uid, gid, change_date, creation_date, modification_date, access_date)
+            VALUES ($1, NULL, $2, $3, $4, NOW(), NOW(), NOW(), NOW())
             RETURNING id_hardlink
             ",
         )
         .map_err(|_| "SQL contains NUL byte".to_string())?;
         let sql_parent = CString::new(
             "
-            INSERT INTO hardlinks (id_file, id_directory, name, uid, gid, creation_date, modification_date, access_date)
-            VALUES ($1, $5, $2, $3, $4, NOW(), NOW(), NOW())
+            INSERT INTO hardlinks (id_file, id_directory, name, uid, gid, change_date, creation_date, modification_date, access_date)
+            VALUES ($1, $5, $2, $3, $4, NOW(), NOW(), NOW(), NOW())
             RETURNING id_hardlink
             ",
         )
@@ -2280,18 +2318,23 @@ impl DbRepo {
             "UPDATE directories SET modification_date = NOW(), change_date = NOW() WHERE id_directory = $1",
         )
         .map_err(|_| "SQL contains NUL byte".to_string())?;
+        let sql_data_object = CString::new(
+            "INSERT INTO data_objects (file_size, content_hash, reference_count, creation_date, modification_date) \
+             VALUES (0, NULL, 1, NOW(), NOW()) RETURNING id_data_object",
+        )
+        .map_err(|_| "SQL contains NUL byte".to_string())?;
         let sql_null_parent = CString::new(
             "
-            INSERT INTO files (id_directory, name, size, mode, uid, gid, inode_seed, change_date, modification_date, access_date, creation_date)
-            VALUES (NULL, $1, 0, $2, $3, $4, $5, NOW(), NOW(), NOW(), NOW())
+            INSERT INTO files (id_directory, name, size, mode, uid, gid, inode_seed, data_object_id, change_date, modification_date, access_date, creation_date)
+            VALUES (NULL, $1, 0, $2, $3, $4, $5, $6, NOW(), NOW(), NOW(), NOW())
             RETURNING id_file
             ",
         )
         .map_err(|_| "SQL contains NUL byte".to_string())?;
         let sql_parent = CString::new(
             "
-            INSERT INTO files (id_directory, name, size, mode, uid, gid, inode_seed, change_date, modification_date, access_date, creation_date)
-            VALUES ($6, $1, 0, $2, $3, $4, $5, NOW(), NOW(), NOW(), NOW())
+            INSERT INTO files (id_directory, name, size, mode, uid, gid, inode_seed, data_object_id, change_date, modification_date, access_date, creation_date)
+            VALUES ($7, $1, 0, $2, $3, $4, $5, $6, NOW(), NOW(), NOW(), NOW())
             RETURNING id_file
             ",
         )
@@ -2299,13 +2342,20 @@ impl DbRepo {
 
         self.with_cached_connection(|conn| unsafe {
             let result = transactional(conn, |conn| {
+                let data_object_res = exec_params(conn, &sql_data_object, &[])?;
+                let data_object_id = fetch_single_text(data_object_res)?
+                    .trim()
+                    .parse::<u64>()
+                    .map_err(|_| "failed to create data object".to_string())?;
+                let data_object_id = CString::new(data_object_id.to_string())
+                    .map_err(|_| "data object id contains NUL byte".to_string())?;
                 let res = if let Some(parent_id) = target_parent_id {
                     let parent_id = CString::new(parent_id.to_string())
                         .map_err(|_| "parent id contains NUL byte".to_string())?;
-                    let params = [&target_name, &mode, &uid, &gid, &inode_seed, &parent_id];
+                    let params = [&target_name, &mode, &uid, &gid, &inode_seed, &data_object_id, &parent_id];
                     exec_params(conn, &sql_parent, &params)?
                 } else {
-                    let params = [&target_name, &mode, &uid, &gid, &inode_seed];
+                    let params = [&target_name, &mode, &uid, &gid, &inode_seed, &data_object_id];
                     exec_params(conn, &sql_null_parent, &params)?
                 };
                 let value = match PQresultStatus(res) {
@@ -2367,18 +2417,23 @@ impl DbRepo {
             "UPDATE directories SET modification_date = NOW(), change_date = NOW() WHERE id_directory = $1",
         )
         .map_err(|_| "SQL contains NUL byte".to_string())?;
+        let sql_data_object = CString::new(
+            "INSERT INTO data_objects (file_size, content_hash, reference_count, creation_date, modification_date) \
+             VALUES (0, NULL, 1, NOW(), NOW()) RETURNING id_data_object",
+        )
+        .map_err(|_| "SQL contains NUL byte".to_string())?;
         let sql_null_parent = CString::new(
             "
-            INSERT INTO files (id_directory, name, size, mode, uid, gid, inode_seed, change_date, modification_date, access_date, creation_date)
-            VALUES (NULL, $1, 0, $2, $3, $4, $5, NOW(), NOW(), NOW(), NOW())
+            INSERT INTO files (id_directory, name, size, mode, uid, gid, inode_seed, data_object_id, change_date, modification_date, access_date, creation_date)
+            VALUES (NULL, $1, 0, $2, $3, $4, $5, $6, NOW(), NOW(), NOW(), NOW())
             RETURNING id_file
             ",
         )
         .map_err(|_| "SQL contains NUL byte".to_string())?;
         let sql_parent = CString::new(
             "
-            INSERT INTO files (id_directory, name, size, mode, uid, gid, inode_seed, change_date, modification_date, access_date, creation_date)
-            VALUES ($6, $1, 0, $2, $3, $4, $5, NOW(), NOW(), NOW(), NOW())
+            INSERT INTO files (id_directory, name, size, mode, uid, gid, inode_seed, data_object_id, change_date, modification_date, access_date, creation_date)
+            VALUES ($7, $1, 0, $2, $3, $4, $5, $6, NOW(), NOW(), NOW(), NOW())
             RETURNING id_file
             ",
         )
@@ -2393,13 +2448,20 @@ impl DbRepo {
 
         self.with_cached_connection(|conn| unsafe {
             let result = transactional(conn, |conn| {
+                let data_object_res = exec_params(conn, &sql_data_object, &[])?;
+                let data_object_id = fetch_single_text(data_object_res)?
+                    .trim()
+                    .parse::<u64>()
+                    .map_err(|_| "failed to create data object".to_string())?;
+                let data_object_id = CString::new(data_object_id.to_string())
+                    .map_err(|_| "data object id contains NUL byte".to_string())?;
                 let res = if let Some(parent_id) = target_parent_id {
                     let parent_id = CString::new(parent_id.to_string())
                         .map_err(|_| "parent id contains NUL byte".to_string())?;
-                    let params = [&target_name, &mode, &uid, &gid, &inode_seed, &parent_id];
+                    let params = [&target_name, &mode, &uid, &gid, &inode_seed, &data_object_id, &parent_id];
                     exec_params(conn, &sql_parent, &params)?
                 } else {
-                    let params = [&target_name, &mode, &uid, &gid, &inode_seed];
+                    let params = [&target_name, &mode, &uid, &gid, &inode_seed, &data_object_id];
                     exec_params(conn, &sql_null_parent, &params)?
                 };
                 let id_file = match PQresultStatus(res) {

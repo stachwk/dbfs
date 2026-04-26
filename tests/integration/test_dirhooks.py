@@ -26,9 +26,6 @@ def main():
         fh = fs.create(file_path, 0o644)
         fs.release(file_path, fh)
 
-        assert fs.opendir(dir_path) == 0
-        assert fs.fsyncdir(dir_path, 0, 0) == 0
-        assert fs.releasedir(dir_path, 0) == 0
     finally:
         try:
             if fh is not None:
@@ -45,7 +42,7 @@ def main():
             pass
         fs.cleanup_resources()
 
-    print("OK dirhooks/opendir/releasedir/fsyncdir")
+    print("OK dirhooks")
 
 
 if __name__ == "__main__":

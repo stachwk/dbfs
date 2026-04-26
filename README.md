@@ -18,18 +18,17 @@ The project focuses on:
 - Reads use block-range loading with a small read cache and read-ahead instead of loading whole files on every access.
 - The permissions comparison test is intentionally local-filesystem-vs-DBFS, not ext4-only; it compares the host's writable local filesystem against DBFS and asserts matching semantics for mode, ownership, access checks, sticky-bit unlink/rmdir, and root-owned files.
 - `allow_other` visibility is host-dependent: the dedicated test skips when the host does not expose the mount to `nobody`, so it is a diagnostic coverage check rather than a universal pass/fail guarantee.
-- Lookup and namespace resolution have been split into `dbfs_namespace.py`, while the repository logic now lives under `mod/repository/` as a wrapper plus `lookup.py`, `attrs_listing.py`, `create.py`, `delete.py`, and `mutations.py`.
-- The main FUSE module no longer owns direct path/ID resolution, namespace CRUD, or the query layer for `getattr()` / `readdir()`; those flows delegate through explicit repository wrappers.
-- Metadata/query helpers and short-TTL caches have been split into `dbfs_metadata.py`, journal append logic lives directly in `dbfs_fuse.py` and Rust, permission/ownership policy lives in `dbfs_permissions.py`, and mount/runtime validation lives in `dbfs_runtime_validation.py`.
+- The runtime is Rust-backed end to end: the mount frontend lives in `rust_fuse`, schema/bootstrap live in `rust_mkfs`, and the old Python runtime modules have been removed.
+- Lookup, namespace CRUD, metadata, permissions, xattrs, locking, storage, and journal handling now live in Rust instead of in Python helper modules.
 - Metadata caching is now explicitly split between attribute cache and directory-entry cache instead of using one shared payload shape for both.
 - SELinux is xattr-backed with runtime gating; full mount-label policy is intentionally out of scope.
 - PostgreSQL TLS is optional and config-driven; DBFS can also generate a local client cert/key pair when requested.
 - Transient PostgreSQL disconnects in the read/write hot path are retried once with state preserved in the client process, so in-flight dirty write state and read caches can survive a reconnect attempt.
 - PostgreSQL-backed leases are the production lock path for both `flock` and `fcntl` range locks, with TTL and heartbeat. `make test-locking` remains the lock-semantics suite, while `make test-pg-lock-manager` covers the production PostgreSQL-backed backend, including a multi-client same-file write regression that proves two DBFS clients do not trample each other's lock-protected writes.
-- Schema changes live under `migrations/` with sequential versions, an explicit `mkfs.dbfs.py status` export, and an upgrade path from older schema states.
-- The current DBFS version is defined in `dbfs_version.py`, and both `dbfs_bootstrap.py --version` and `mkfs.dbfs.py --version` should print the same value.
+- Schema changes live under `migrations/` with sequential versions, an explicit `mkfs.dbfs status` export, and an upgrade path from older schema states.
+- The current DBFS version is defined in the Rust `dbfs-config` helper, and both `dbfs-bootstrap --version` and `mkfs.dbfs --version` print the same value.
 - Performance work is merged, and the current benchmark baselines are recorded in `BENCHMARKS.md`.
-- The Rust hot-path now lives in `libdbfs-2.so` and covers the planner, changed-run packing, persist padding, read assembly, logical resize planning for `truncate()`/`fallocate()`, and the first repository lookups/mutations. Changed-copy dedupe stays opt-in because it can slow copy-heavy workloads down substantially. The repository no longer ships separate helper binaries in the normal install path; the shared library is the primary hot path.
+- The Rust hot-path now lives in the Rust backend and shared hot-path library, covering the planner, changed-run packing, persist padding, read assembly, logical resize planning for `truncate()`/`fallocate()`, and the first repository lookups/mutations. Changed-copy dedupe stays opt-in because it can slow copy-heavy workloads down substantially.
 - The local Docker Compose stack preloads `pg_stat_statements`, so query analysis and runtime profiling can use persistent PostgreSQL statistics.
 - `TODO.md` serves as a decisions-and-notes log rather than an active implementation backlog.
 
@@ -67,30 +66,21 @@ License: MIT
 
 ## Requirements
 
-- Python 3
-- `fusepy` (`pip install fusepy`)
-- `psycopg2` or `psycopg2-binary`
+- Rust toolchain (`cargo`)
 - PostgreSQL
 - FUSE support on the host
 - `openssl` if you want DBFS to auto-generate a PostgreSQL TLS client cert/key pair
 
-## Pip Packaging
+## Rust Binaries
 
-DBFS can be installed into a virtual environment with pip:
-
-```bash
-make venv
-make pip-install-editable
-```
-
-That installs the project scripts into the active venv:
+DBFS is built and installed from the Rust crates. The main runtime commands are:
 
 - `dbfs-bootstrap`
+- `dbfs-config`
 - `mkfs.dbfs`
 - `mount.dbfs`
 
-The source tree still keeps the direct-run scripts `dbfs_bootstrap.py` and `mkfs.dbfs.py`; the pip package installs the shorter command names above. If you want a non-editable install, use `make pip-install`. Editable installs are available via `make pip-install-editable` if your venv can see `setuptools`. The package metadata lives in `setup.py`.
-The installed `mount.dbfs` wrapper prefers `.venv/bin/dbfs-bootstrap` from the current project directory, then `dbfs-bootstrap` from `PATH`. If `DBFS_CONFIG` is not set and a local `./dbfs_config.ini` exists in the current directory, the wrapper exports that file automatically. If neither bootstrapper nor a usable config file is available, it exits with a clear setup hint instead of guessing a Python interpreter.
+The installed `mount.dbfs` wrapper prefers `rust_mkfs/target/debug/dbfs-bootstrap` from the current project directory, then `dbfs-bootstrap` from `PATH`. If `DBFS_CONFIG` is not set and a local `./dbfs_config.ini` exists in the current directory, the wrapper exports that file automatically. If neither bootstrapper nor a usable config file is available, it exits with a clear setup hint instead of guessing a Python interpreter.
 
 Example:
 
@@ -189,13 +179,13 @@ If this is your first time using DBFS, follow these steps:
 1. Create the schema:
 
    ```bash
-   python3 mkfs.dbfs.py init --schema-admin-password YOUR_SECRET
+   mkfs.dbfs init --schema-admin-password YOUR_SECRET
    ```
 
 1. Mount the filesystem:
 
    ```bash
-   python3 dbfs_bootstrap.py -f /path/to/mountpoint
+   dbfs-bootstrap -f /path/to/mountpoint
    ```
 
 1. Put a file into the mount, read it back, and confirm the data survives a remount.
@@ -222,7 +212,7 @@ make install-config-user
 make mount-user
 ```
 
-`make install-on-root` combines `install-config`, `pip-install`, `install-root-scripts`, `install-rust-hotpath`, and `install-mount-helper` for a root-style setup in one step. That installs the config, the package, the `dbfs-bootstrap`/`mkfs.dbfs` commands, `libdbfs-2.so`, and the mount helper.
+`make install-on-root` combines `install-config`, `install-root-scripts`, `install-rust-hotpath`, and `install-mount-helper` for a root-style setup in one step. That installs the config, the Rust binaries, the shared hot-path library, and the mount helper.
 
 `make install-on-root-venv` is the root-style equivalent of `make venv` followed by `make install-on-root`.
 
@@ -230,31 +220,31 @@ make mount-user
 
 1. Configure `/etc/dbfs/dbfs_config.ini` or local `dbfs_config.ini`.
 1. Optionally run `make install-config` to copy `dbfs_config.ini` to `/etc/dbfs/dbfs_config.ini`.
-1. For a root-style setup, run `make install-on-root` to install the config, pip package, `libdbfs-2.so`, and mount helper together.
+1. For a root-style setup, run `make install-on-root` to install the config, Rust binaries, shared hot-path library, and mount helper together.
 1. For local development you can run `make install-config-user` to install `dbfs_config.ini` to `~/.config/dbfs/dbfs_config.ini` without `sudo`.
 1. Use `make config-show` to see which config file is resolved and `make mount-user` to force the user-level `~/.config/dbfs/dbfs_config.ini`.
 1. Initialize the schema:
 
    ```bash
-   python3 mkfs.dbfs.py init --schema-admin-password YOUR_SECRET
+   mkfs.dbfs init --schema-admin-password YOUR_SECRET
    ```
 
    If you want DBFS to generate a local PostgreSQL TLS client pair during schema setup, use:
 
    ```bash
-   python3 mkfs.dbfs.py init --schema-admin-password YOUR_SECRET --generate-client-tls-pair 1
+   mkfs.dbfs init --schema-admin-password YOUR_SECRET --generate-client-tls-pair 1
    ```
 
    The same switch also works with `upgrade`:
 
    ```bash
-   python3 mkfs.dbfs.py upgrade --schema-admin-password YOUR_SECRET --generate-client-tls-pair 1
+   mkfs.dbfs upgrade --schema-admin-password YOUR_SECRET --generate-client-tls-pair 1
    ```
 
 1. Mount the filesystem:
 
    ```bash
-   python3 dbfs_bootstrap.py -f /path/to/mountpoint
+   dbfs-bootstrap -f /path/to/mountpoint
    ```
 
 ## Supported Parameters
@@ -329,9 +319,9 @@ It may also include a `[dbfs]` section with:
 
 ### Schema Tool
 
-`mkfs.dbfs.py` supports:
+`mkfs.dbfs` supports:
 
-`init` is idempotent and does not drop `public`; `upgrade` recreates missing DBFS objects and restores `schema_version`; `clean` is the only destructive schema-tool action, and it becomes a no-op once the DBFS `public` schema is already gone. The schema tool uses a single explicit source for the schema-admin password: `--schema-admin-password`. If the password is missing, `init`, `upgrade`, and `clean` fail fast instead of prompting or generating a secret implicitly. `mkfs.dbfs.py status` reports whether the schema-admin secret is present and whether DBFS is ready without revealing the secret itself.
+`init` is idempotent and does not drop `public`; `upgrade` recreates missing DBFS objects and restores `schema_version`; `clean` is the only destructive schema-tool action, and it becomes a no-op once the DBFS `public` schema is already gone. The schema tool uses a single explicit source for the schema-admin password: `--schema-admin-password`. If the password is missing, `init`, `upgrade`, and `clean` fail fast instead of prompting or generating a secret implicitly. `mkfs.dbfs status` reports whether the schema-admin secret is present and whether DBFS is ready without revealing the secret itself.
 
 | Parameter | Type | Default | Effect |
 | --- | --- | --- | --- |
@@ -504,7 +494,7 @@ If you need `allow_other`, run the mount with `DBFS_ALLOW_OTHER=1`, but only if 
 `/etc/dbfs/dbfs_config.ini` can also include a `[dbfs]` section with `pool_max_connections = N` to control how many PostgreSQL connections the filesystem pool may open. The same section can also set storage and read-tuning defaults such as `write_flush_threshold_bytes`, `max_fs_size_bytes`, `read_cache_blocks`, `read_ahead_blocks`, `sequential_read_ahead_blocks`, `small_file_read_threshold_blocks`, `metadata_cache_ttl_seconds`, and `statfs_cache_ttl_seconds`. `max_fs_size_bytes` accepts plain bytes as well as binary size strings like `50GiB` or `1TiB`, and `pg_visible_path` can point DBFS at the path that PostgreSQL can actually see on disk for `statfs()` capping. If that file does not exist, DBFS falls back to `dbfs_config.ini` in the project root.
 The same section may also set threaded read/write knobs such as `workers_read`, `workers_read_min_blocks`, `workers_write`, and `workers_write_min_blocks`, plus `persist_buffer_chunk_blocks` for larger or smaller `execute_values()` batches during flush. `workers_read` is only used when a read misses split into multiple disjoint block ranges, and `workers_write` is only used for copy operations that can be split into multiple source segments. `block_size` still matters here because the worker heuristics operate in blocks, not in raw bytes, so a smaller or larger block size can change when parallelism becomes worthwhile without directly turning "4 KiB" into "one thread". For rsync-like or repeated copy workloads, `copy_dedupe_enabled` can compare destination blocks and skip unchanged ranges during `copy_file_range()`; `copy_dedupe_min_blocks` is the lower gate, `copy_dedupe_max_blocks` is an optional upper cap for very large files, and `copy_dedupe_crc_table` can keep a PostgreSQL-side CRC cache for those comparisons and populate it lazily on demand. Keep the copy dedupe knobs off by default unless you know the workload benefits from them, and leave `rust_hotpath_copy_dedupe` disabled unless you explicitly want the Rust dedupe path. It can also set `synchronous_commit` to control PostgreSQL session durability per connection; valid values are `on`, `off`, `local`, `remote_write`, and `remote_apply`.
 If you want a production-style preset, set `DBFS_PROFILE=bulk_write`, `DBFS_PROFILE=metadata_heavy`, or `DBFS_PROFILE=pg_locking` before mount. The selected profile overrides the base `[dbfs]` values from `dbfs_config.ini`.
-You can also pass the profile explicitly as `--profile bulk_write` to `dbfs_bootstrap.py` / `dbfs-bootstrap`, or as `-o profile=bulk_write` to `mount.dbfs`.
+You can also pass the profile explicitly as `--profile bulk_write` to `dbfs-bootstrap`, or as `-o profile=bulk_write` to `mount.dbfs`.
 The same `DBFS_PROFILE` variable works with `make mount`, `make mount-user`, and `make demo`.
 SELinux xattr support is controlled with `--selinux auto|on|off` or `DBFS_SELINUX=auto|on|off`.
 The default is `off`. Use `on` to force it or `auto` if you want host-driven detection.
@@ -516,7 +506,7 @@ At mount start DBFS logs the effective runtime profile, schema version, PostgreS
 `statfs_cache_ttl_seconds` controls the short TTL cache for `statfs()`. The default is `2` seconds.
 `DBFS_METADATA_CACHE_TTL_SECONDS` and `DBFS_STATFS_CACHE_TTL_SECONDS` override the matching `dbfs_config.ini` values if you want to tune those caches per environment.
 `DBFS_PROFILE` selects a named runtime profile from `dbfs_config.ini`, such as `bulk_write` or `metadata_heavy`.
-`DBFS_ATIME_POLICY` is an internal DBFS behavior selector, not a raw FUSE mount option. It controls when DBFS updates `atime` in its own read path; `noatime`, `nodiratime`, `relatime`, and `strictatime` are handled inside DBFS instead of being forwarded to `fusepy`.
+`DBFS_ATIME_POLICY` is an internal DBFS behavior selector, not a raw FUSE mount option. It controls when DBFS updates `atime` in its own read path; `noatime`, `nodiratime`, `relatime`, and `strictatime` are handled inside DBFS instead of being forwarded to the mount frontend.
 To avoid continuously rewriting the same timestamp row during a single open/read or open/readdir sequence, DBFS touches `access_date` only once per handle and then suppresses duplicate touches until the handle is released.
 The same principle applies to write-side timestamp persistence: repeated writes on the same open file update `mtime`/`ctime` only when the dirty buffer is persisted, not on every intermediate write call.
 Read path caching now defaults to a larger block LRU, and sequential reads increase read-ahead automatically so adjacent reads can reuse prefetched blocks instead of repeatedly hitting PostgreSQL.
@@ -545,14 +535,14 @@ Mount-time visibility options:
 - That SELinux model is intentional: the repo treats full mount-label policy as out of scope and relies on host policy plus xattr storage for behavior checks.
 - `mknod` creation and `stat` metadata for FIFO and char devices are supported; `st_rdev` and `st_dev` are reported, and special-node `open` is still unsupported.
 - `system.posix_acl_*` is supported for access ACLs and default ACL inheritance; the backend stores, propagates, and enforces ACLs.
-- `poll` is available as a backend helper for regular files; native FUSE hook support still depends on `fusepy`.
+- `poll` is available through the Rust mount frontend for regular files.
 
 ## Troubleshooting
 
-- Start with `mkfs.dbfs.py status` to see whether the schema-admin secret is present and whether DBFS is ready.
-- If `mkfs.dbfs.py init` fails, verify that PostgreSQL is running and the credentials in `dbfs_config.ini` match the server.
+- Start with `mkfs.dbfs status` to see whether the schema-admin secret is present and whether DBFS is ready.
+- If `mkfs.dbfs init` fails, verify that PostgreSQL is running and the credentials in `dbfs_config.ini` match the server.
 - If mounting fails with `DBFS schema is not initialized`, run `make init` first; for schema-tool operations, always pass `--schema-admin-password`.
-- If mounting fails with `DBFS schema version mismatch`, run `mkfs.dbfs.py upgrade` with the schema-admin secret so the database schema matches the code version.
+- If mounting fails with `DBFS schema version mismatch`, run `mkfs.dbfs upgrade` with the schema-admin secret so the database schema matches the code version.
 - On successful mount startup, DBFS logs `DBFS schema version=<db> expected=<code>` so you can confirm compatibility before using the mount.
 - If mounting fails with `ENOTCONN` or a connection error, run `make smoke` first to confirm DB connectivity.
 - If `fusermount3` is missing, try `fusermount` or install the FUSE userspace tools for your distribution.
@@ -591,4 +581,4 @@ DBFS is intentionally staying as a Python-orchestrated FUSE frontend for now:
 
 - Python owns bootstrap, mkfs, config/profile loading, FUSE callbacks, admin logic, schema migrations, integration tests, and policy layers such as ACL/permissions/journal/runtime validation.
 - Rust is the likely long-term hot-path engine for block assembly, overlay writes, copy segmentation, and persist-preparation work if and when the project moves that code out of Python.
-- The goal is a thinner `dbfs_fuse.py`, more delegation into dedicated modules, and a future native storage core only where benchmarks justify it.
+- The goal is a thinner Rust FUSE and Rust storage core, with only non-runtime docs and tests remaining in Python where needed.
