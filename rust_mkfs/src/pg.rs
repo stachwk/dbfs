@@ -139,6 +139,7 @@ impl DbConn {
         format!("\"{}\"", ident.replace('\"', "\"\""))
     }
 
+    #[allow(dead_code)]
     pub fn quote_literal(value: &str) -> String {
         format!("'{}'", value.replace('\'', "''"))
     }

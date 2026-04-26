@@ -3,22 +3,29 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[allow(dead_code)]
 const SYSTEM_CONFIG_PATH: &str = "/etc/dbfs/dbfs_config.ini";
+#[allow(dead_code)]
 const USER_CONFIG_PATH: &str = ".config/dbfs/dbfs_config.ini";
+#[allow(dead_code)]
 const LOCAL_CONFIG_NAME: &str = "dbfs_config.ini";
+#[allow(dead_code)]
 const ENV_CONFIG_VAR: &str = "DBFS_CONFIG";
 
 #[derive(Debug, Clone)]
 pub struct IniConfig {
+    #[allow(dead_code)]
     pub sections: HashMap<String, HashMap<String, String>>,
 }
 
 impl IniConfig {
+    #[allow(dead_code)]
     pub fn section(&self, name: &str) -> Option<&HashMap<String, String>> {
         self.sections.get(&name.to_lowercase())
     }
 }
 
+/*
 fn strip_inline_comment(value: &str) -> &str {
     let mut end = value.len();
     for marker in ['#', ';'] {
@@ -28,6 +35,12 @@ fn strip_inline_comment(value: &str) -> &str {
     }
     &value[..end]
 }
+*/
+#[allow(dead_code)]
+fn strip_inline_comment(value: &str) -> &str {
+    value.split(['#', ';']).next().unwrap_or("").trim()
+}
+
 
 pub fn resolve_config_path(file_path: Option<&Path>) -> Result<PathBuf, String> {
     let mut candidates: Vec<PathBuf> = Vec::new();
@@ -104,6 +117,7 @@ impl ExpandUser for &Path {
     }
 }
 
+#[allow(dead_code)]
 pub fn load_config_parser(file_path: Option<&Path>) -> Result<(IniConfig, PathBuf), String> {
     let config_path = resolve_config_path(file_path)?;
     let contents = fs::read_to_string(&config_path)

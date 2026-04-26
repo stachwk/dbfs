@@ -23,6 +23,7 @@ fn resolve_path(value: &str, config_dir: &Path) -> String {
     }
 }
 
+#[allow(dead_code)]
 pub fn resolve_pg_connection_params(db_config: &HashMap<String, String>, config_dir: &Path) -> HashMap<String, String> {
     let mut params = HashMap::new();
     params.insert("host".to_string(), get_value(db_config, "host", "127.0.0.1"));

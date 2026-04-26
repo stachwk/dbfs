@@ -12,6 +12,7 @@ pub fn parse_bool(value: &str) -> Result<bool, String> {
     }
 }
 
+#[allow(dead_code)]
 pub fn parse_size_bytes(value: &str) -> Result<u64, String> {
     let text = value.trim();
     if text.is_empty() {
@@ -46,7 +47,8 @@ pub fn parse_size_bytes(value: &str) -> Result<u64, String> {
         .ok_or_else(|| format!("size value overflows u64: {value}"))
 }
 
-#[cfg(unix)]
+#[allow(dead_code)]
+#[cfg(unix)] 
 pub fn statvfs_total_bytes(path: &Path) -> Result<u64, String> {
     use std::ffi::CString;
     use std::mem::MaybeUninit;
@@ -68,6 +70,7 @@ pub fn statvfs_total_bytes(_path: &Path) -> Result<u64, String> {
     Err("statvfs is unavailable on this platform".to_string())
 }
 
+#[allow(dead_code)]
 pub fn resolve_max_fs_size_bytes(
     max_fs_size_bytes: Option<&str>,
     pg_visible_path: Option<&Path>,
@@ -85,6 +88,7 @@ pub fn resolve_max_fs_size_bytes(
     }
 }
 
+#[allow(dead_code)]
 pub fn validate_runtime_tuning(runtime: &HashMap<String, String>) -> Result<(), String> {
     fn validate_positive_u64(runtime: &HashMap<String, String>, key: &str) -> Result<(), String> {
         if let Some(value) = runtime.get(key) {
