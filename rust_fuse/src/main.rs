@@ -73,6 +73,21 @@ fn mount_options(readonly: bool) -> Vec<MountOption> {
     options
 }
 
+fn print_mount_status(args: &Args, fs: &DbfsFuse, options: &[MountOption]) {
+    println!("DBFS mount status:");
+    println!("  initializing FUSE mount");
+    println!("  mountpoint: {}", args.mountpoint.display());
+    println!("  readonly: {}", fs.read_only);
+    println!("  block_size: {}", fs.block_size);
+    println!(
+        "  write_flush_threshold_bytes: {}",
+        fs.write_flush_threshold_bytes
+    );
+    println!("  selinux_enabled: {}", fs.selinux_enabled);
+    println!("  acl_enabled: {}", fs.acl_enabled);
+    println!("  mount_options: {:?}", options);
+}
+
 fn main() {
     let args = Args::parse();
     let conninfo = std::env::var("DBFS_DSN_CONNINFO")
@@ -99,8 +114,23 @@ fn main() {
         acl_enabled,
     );
     let options = mount_options(read_only);
-    if let Err(err) = mount2(fs, &args.mountpoint, &options) {
-        eprintln!("dbfs-rust-fuse: mount failed: {err}");
+    print_mount_status(&args, &fs, &options);
+    //if let Err(err) = mount2(fs, &args.mountpoint, &options) {
+    //    eprintln!("dbfs-rust-fuse: mount failed: {err}");
+    //    std::process::exit(1);
+    //}
+
+    // Proba montowania systemu plikow; jesli wystapi blad, wypisz go i zakoncz.
+    if let Err(err) = mount2(fs, args.mountpoint.clone(), &options) {
+        // blad montowania wyswietlamy na stderr
+        eprintln!("dbfs-rust-fuse: mount failed: {:?}", err);
         std::process::exit(1);
     }
+
+    // Jesli montowanie sie powiodlo, wypisujemy stan montowania na stdout.
+    // Ta informacja byla wyswietlana w starszej implementacji w Pythonie.
+    println!(
+        "dbfs-rust-fuse: mounted filesystem at {}",
+        args.mountpoint.display()
+    );
 }
